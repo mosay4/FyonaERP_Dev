@@ -6,6 +6,7 @@ name: FYONA CI
 on:
   push:
     branches: [main, develop, 'claude/**']
+    paths-ignore: ['**.md', 'docs/**', 'continue*.txt']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -31,8 +32,38 @@ env:
     --dart-define=FYONA_DIRECTORY_BRANCH=da2e39ff-3990-4c16-863d-293fb902b93d
 
 jobs:
+  # What changed: app (Flutter) and/or server. Only the affected checks run;
+  # the slow platform builds run only when the app itself changed.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.f.outputs.app }}
+      backend: ${{ steps.f.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: f
+        with:
+          filters: |
+            app:
+              - 'lib/**'
+              - 'test/**'
+              - 'assets/**'
+              - 'pubspec.*'
+              - 'android/**'
+              - 'ios/**'
+              - 'windows/**'
+              - 'tools/ci/**'
+              - '.github/workflows/ci.yml'
+            backend:
+              - 'backend/**'
+              - 'tools/ci/**'
+              - '.github/workflows/ci.yml'
+
   business-tests:
     name: Business sync, conflicts, reports (Linux)
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -57,6 +88,8 @@ jobs:
 
   regression:
     name: Full regression suite (Linux)
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -79,6 +112,8 @@ jobs:
 
   backend-tests:
     name: Backend relay, local mode, guard (PostgreSQL)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -103,6 +138,7 @@ jobs:
           backend/tests/unit/test_business_media_transit.py
           backend/tests/unit/test_qa_business_ledger.py
           backend/tests/unit/test_qa_business_party_sharing.py
+          backend/tests/unit/test_sara_tool_contract.py
 
   android:
     name: Android build

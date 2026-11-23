@@ -412,6 +412,23 @@ def main():
         "FYONA_QA_BRANCH": PILOT["branch"],
         "FYONA_QA_REMOTE": "1" if os.environ.get("FYONA_QA_REMOTE") == "1" else "0",
     }
+    # Sara and the Falcon: DeepSeek key from a private file in the state
+    # folder (never in the release or git). Only DeepSeek is reachable; every
+    # other outbound call stays blocked by the dead proxy above.
+    ai_key = root / "deepseek-key"
+    if managed and ai_key.is_file():
+        value = ai_key.read_text().strip()
+        if not re.fullmatch(r"sk-[A-Za-z0-9]{20,100}", value):
+            raise ValueError("Malformed AI provider key")
+        env["DEEPSEEK_API_KEY"] = value
+        env["SARA_API_KEY"] = value
+        env["NO_PROXY"] += ",api.deepseek.com"
+    # Voice messages are turned into text on this server (Whisper, offline
+    # model folder; no download at run time).
+    stt_model = Path("/opt/fyona-directory-qa/sara-stt/model-small")
+    if managed and (stt_model / "model.bin").is_file():
+        env["SARA_STT_MODEL"] = str(stt_model)
+        env["HF_HUB_OFFLINE"] = "1"
     if invites:
         env["FYONA_QA_DIRECTORY_INVITES"] = json.dumps(invites)
     env.update(business_flags)

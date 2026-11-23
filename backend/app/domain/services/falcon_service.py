@@ -1148,7 +1148,8 @@ async def chat(
         "role": "user",
         "content": f"البيانات الحالية:\n{compact}\n\nالسؤال: {question}",
     })
-    key = settings.OPENAI_API_KEY
+    # Same provider as Sara (DeepSeek when its key is set, else OpenAI).
+    key = settings.DEEPSEEK_API_KEY or settings.OPENAI_API_KEY
     if not key:
         return {"answer": _branch_fallback(data, lang)}
     try:

@@ -308,8 +308,9 @@ async def speak(
     from fastapi import Response
     from openai import AsyncOpenAI
 
-    if not settings.OPENAI_API_KEY:
-        return Response(content=b"", media_type="audio/mpeg")
+    # Sara answers in text only (owner's decision): she understands voice
+    # messages but never speaks. Kept as an empty answer for old app builds.
+    return Response(content=b"", media_type="audio/mpeg")
 
     speed = min(max(speed, 0.25), 4.0)
     voices = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
@@ -330,28 +331,20 @@ async def speak(
         return Response(content=b"", media_type="audio/mpeg")
 
 
-@router.get("/ai/test-key", summary="Test OpenAI API key validity")
+@router.get("/ai/test-key", summary="Test the AI provider key (DeepSeek, else OpenAI)")
 async def test_openai_key(
     _org=Depends(get_current_org_id),
     _uid=Depends(get_current_user_id),
     _=Depends(require_permission("ai", "read")),
 ):
-    from app.core.config import settings
-    from openai import AsyncOpenAI, AuthenticationError
+    from app.domain.services.ai_router import build_client, route
 
-    key = settings.OPENAI_API_KEY
-    if not key:
-        return ok({"valid": False, "error": "OPENAI_API_KEY is not set in .env"})
-
+    r = route("ping")
+    if not r.api_key:
+        return ok({"valid": False, "error": "No AI provider key is configured"})
     try:
-        client = AsyncOpenAI(api_key=key)
-        models = await client.models.list()
-        return ok({
-            "valid": True,
-            "key_prefix": key[:12] + "...",
-            "model": settings.OPENAI_MODEL,
-        })
-    except AuthenticationError as e:
-        return ok({"valid": False, "error": f"AuthenticationError: {str(e)}"})
+        await build_client(r).models.list()
+        # Never echo any part of the key.
+        return ok({"valid": True, "provider": r.provider, "model": r.model})
     except Exception as e:
-        return ok({"valid": False, "error": str(e)})
+        return ok({"valid": False, "provider": r.provider, "error": type(e).__name__})
