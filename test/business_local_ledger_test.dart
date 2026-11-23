@@ -13,6 +13,7 @@ import 'package:uuid/uuid.dart';
 import 'support/business_cash_test_checkpoint.dart';
 import 'support/business_commerce_test_schema.dart';
 import 'support/directory_test_keys.dart';
+import 'support/business_sync_test_schema.dart';
 
 const _customer = DirectoryPartyKind.customer;
 const _supplier = DirectoryPartyKind.supplier;
@@ -155,6 +156,7 @@ void main() {
       );
       try {
         await old.transaction((txn) async {
+          await removeBusinessSyncSchema(txn);
           await removeOpeningProjection(txn);
           await txn.execute('PRAGMA user_version = 5');
         });
@@ -456,6 +458,7 @@ void main() {
       );
       try {
         await old.transaction((txn) async {
+          await removeBusinessSyncSchema(txn);
           await removeOpeningProjection(txn);
           await txn.execute('DROP TABLE business_bank_projection_receipts');
           await txn.execute('DROP TABLE business_bank_account_edits');
@@ -687,6 +690,7 @@ void main() {
       );
       try {
         await v3.transaction((txn) async {
+          await removeBusinessSyncSchema(txn);
           await removeOpeningProjection(txn);
           for (final table in [
             'business_bank_projection_receipts',
@@ -1246,6 +1250,7 @@ void main() {
     );
     try {
       await old.transaction((tx) async {
+        await removeBusinessSyncSchema(tx);
         await tx.execute('DROP TABLE business_cash_replica');
          await tx.execute('DROP TABLE business_backup_recoveries');
           await tx.execute('DROP TABLE business_reconciliations');

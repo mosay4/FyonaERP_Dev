@@ -8,6 +8,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:uuid/uuid.dart';
 
 import 'support/directory_test_keys.dart';
+import 'support/business_sync_test_schema.dart';
 
 String id() => const Uuid().v4();
 const customer = DirectoryPartyKind.customer;
@@ -612,6 +613,7 @@ void main() {
       );
       try {
         await sql.transaction((tx) async {
+          await removeBusinessSyncSchema(tx);
           await tx.execute('DROP TABLE business_local_party_shares');
           await tx.execute('DROP TABLE business_cash_replica');
           await tx.execute('DROP TABLE business_backup_recoveries');

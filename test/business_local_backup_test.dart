@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 import 'support/business_cash_test_checkpoint.dart';
 import 'support/business_commerce_test_schema.dart';
 import 'support/directory_test_keys.dart';
+import 'support/business_sync_test_schema.dart';
 
 /// v14-only tables, dropped to emulate an older archive or schema.
 const v14LedgerTables = [
@@ -527,6 +528,7 @@ void main() {
       );
       try {
         await old.transaction((txn) async {
+          await removeBusinessSyncSchema(txn);
           await txn.execute('DROP TABLE business_cash_link_preparations');
           for (final table in inventoryCatalogueTables) {
             await txn.execute('DROP TABLE $table');
@@ -570,6 +572,7 @@ void main() {
       );
       try {
         await v11.transaction((txn) async {
+          await removeBusinessSyncSchema(txn);
           await txn.execute('DROP TABLE business_cash_link_preparations');
           await txn.execute('DROP TABLE business_cash_v3_replicas');
           await txn.execute('DROP TABLE business_cash_equalizations');
@@ -597,6 +600,7 @@ void main() {
       );
       try {
         await v12.transaction((txn) async {
+          await removeBusinessSyncSchema(txn);
           await txn.execute('DROP TABLE business_cash_link_preparations');
           await txn.execute('DROP TABLE business_cash_v3_replicas');
           await txn.execute('DROP TABLE business_cash_equalizations');
@@ -622,6 +626,7 @@ void main() {
       );
       try {
         await v14.transaction((txn) async {
+          await removeBusinessSyncSchema(txn);
           await txn.execute('DROP TABLE business_cash_link_preparations');
           await txn.execute('PRAGMA user_version = 14');
         });

@@ -234,8 +234,6 @@ final class DirectoryDatabase {
           onOpen: (db) async {
             await _createBusinessSync(db);
             await _installBusinessSyncTriggers(db);
-            // A context left by an interrupted process must not capture.
-            await db.delete(_syncContext);
           },
         ),
       ),

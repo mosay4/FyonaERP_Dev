@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 
 import 'support/business_commerce_test_schema.dart';
 import 'support/directory_test_keys.dart';
+import 'support/business_sync_test_schema.dart';
 
 void main() {
   final folder = Platform.environment['FYONA_DIRECTORY_CRASH_FIXTURE'];
@@ -185,6 +186,7 @@ void main() {
       );
       const id = 'bde02dff-9c1d-4c56-bf33-cbad9abc5aad';
       await v1.transaction((txn) async {
+        await removeBusinessSyncSchema(txn);
         // Reconstruct the pre-group schema from the current empty fixture.
         await removeCommerceFixtureSchema(txn);
         await txn.execute('DROP VIEW business_debt_payment_history');
@@ -472,6 +474,7 @@ void _crashProbe(Directory root, String step) {
       // Hold the transaction open after writing and prove committed data
       // survives while uncommitted work never appears after process death.
       await raw.transaction((txn) async {
+        await removeBusinessSyncSchema(txn);
         await txn.insert('directory_parties', {
           'kind': 'customer',
           'id': const Uuid().v4(),

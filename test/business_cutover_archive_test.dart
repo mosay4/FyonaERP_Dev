@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 
 import 'support/business_commerce_test_schema.dart';
 import 'support/directory_test_keys.dart';
+import 'support/business_sync_test_schema.dart';
 
 const _server = 'https://cutover.example.test/api/v1';
 const _tables = [
@@ -1529,6 +1530,7 @@ void main() {
       );
       try {
         await sql.transaction((txn) async {
+          await removeBusinessSyncSchema(txn);
           await removeCommerceFixtureSchema(txn);
           await txn.execute('PRAGMA user_version = 6');
         });

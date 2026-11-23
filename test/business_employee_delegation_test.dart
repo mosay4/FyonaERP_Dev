@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 
 import 'support/directory_test_keys.dart';
 import 'support/business_cash_test_checkpoint.dart';
+import 'support/business_sync_test_schema.dart';
 
 String _id() => const Uuid().v4();
 
@@ -739,6 +740,7 @@ void main() {
       ),
     );
     await raw.transaction((txn) async {
+      await removeBusinessSyncSchema(txn);
       for (final table in employeeLedgerTables) {
         await txn.execute('DROP TABLE $table');
       }

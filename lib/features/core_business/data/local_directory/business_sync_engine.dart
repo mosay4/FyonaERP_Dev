@@ -140,12 +140,6 @@ Future<void> _createBusinessSync(DatabaseExecutor db) async {
     )
   ''');
   await db.execute('''
-    CREATE TABLE IF NOT EXISTS $_syncContext (
-      op_id TEXT NOT NULL,
-      mode TEXT NOT NULL
-    )
-  ''');
-  await db.execute('''
     CREATE TABLE IF NOT EXISTS $_syncChanges (
       ord INTEGER PRIMARY KEY AUTOINCREMENT,
       op_id TEXT NOT NULL,
@@ -208,9 +202,16 @@ Future<void> _createBusinessSync(DatabaseExecutor db) async {
   ''');
 }
 
-/// (Re)creates the capture triggers from the live schema. Run at every open so
-/// columns added by later migrations are always captured.
+/// Creates the capture triggers for this connection. They are TEMP triggers:
+/// they live in memory with the connection (rebuilt from the live schema at
+/// every open, so later columns are always captured), never touch the stored
+/// schema, and the capture context they read is an in-memory table too — a
+/// read-only transaction stays read-only and costs no disk sync.
 Future<void> _installBusinessSyncTriggers(DatabaseExecutor db) async {
+  await db.execute(
+    'CREATE TEMP TABLE IF NOT EXISTS $_syncContext (op_id TEXT NOT NULL, mode TEXT NOT NULL)',
+  );
+  final batch = db.batch();
   for (final entry in _syncTables.entries) {
     final table = entry.key;
     final columns = await _syncColumns(db, table);
@@ -221,19 +222,19 @@ Future<void> _installBusinessSyncTriggers(DatabaseExecutor db) async {
     String key(String side) =>
         'json_array(${entry.value.map((c) => '$side."$c"').join(', ')})';
     const when =
-        "WHEN (SELECT mode FROM $_syncContext LIMIT 1) = 'local'";
-    const op = '(SELECT op_id FROM $_syncContext LIMIT 1)';
+        "WHEN (SELECT mode FROM temp.$_syncContext LIMIT 1) = 'local'";
+    const op = '(SELECT op_id FROM temp.$_syncContext LIMIT 1)';
     for (final (name, event, kind, old, now) in [
       ('ai', 'INSERT', 'insert', null, 'NEW'),
       ('au', 'UPDATE', 'update', 'OLD', 'NEW'),
       ('ad', 'DELETE', 'delete', 'OLD', null),
     ]) {
       final trigger = 'business_sync_${name}_$table';
-      await db.execute('DROP TRIGGER IF EXISTS "$trigger"');
-      await db.execute('''
-        CREATE TRIGGER "$trigger" AFTER $event ON "$table" $when
+      batch.execute('DROP TRIGGER IF EXISTS temp."$trigger"');
+      batch.execute('''
+        CREATE TEMP TRIGGER "$trigger" AFTER $event ON main."$table" $when
         BEGIN
-          INSERT INTO $_syncChanges (op_id, tbl, pk, kind, old_row, new_row)
+          INSERT INTO main.$_syncChanges (op_id, tbl, pk, kind, old_row, new_row)
           VALUES ($op, '$table', ${key(now ?? old!)}, '$kind',
             ${old == null ? 'NULL' : image(old)},
             ${now == null ? 'NULL' : image(now)});
@@ -241,6 +242,7 @@ Future<void> _installBusinessSyncTriggers(DatabaseExecutor db) async {
       ''');
     }
   }
+  await batch.commit(noResult: true);
 }
 
 Future<List<String>> _syncColumns(DatabaseExecutor db, String table) async {
@@ -284,14 +286,17 @@ extension BusinessSyncEngine on DirectoryDatabase {
   // ── capture (called by DirectoryDatabase._transaction) ────────────────────
 
   Future<void> _syncBegin(Transaction txn, String opId) async {
-    await txn.delete(_syncContext);
-    await txn.insert(_syncContext, {'op_id': opId, 'mode': 'local'});
+    await txn.execute('DELETE FROM temp.$_syncContext');
+    await txn.execute(
+      "INSERT INTO temp.$_syncContext (op_id, mode) VALUES (?, 'local')",
+      [opId],
+    );
   }
 
   /// Turns the captured changes of this transaction into one operation in the
   /// outbox, atomically with the write itself.
   Future<void> _syncSeal(Transaction txn, String opId) async {
-    await txn.delete(_syncContext);
+    await txn.execute('DELETE FROM temp.$_syncContext');
     final changes = await txn.query(
       _syncChanges,
       where: 'op_id = ?',

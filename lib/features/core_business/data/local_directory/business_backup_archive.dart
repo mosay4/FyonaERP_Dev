@@ -408,6 +408,13 @@ Future<void> _requireMainSchema(DatabaseExecutor db) async {
     _backupRecovery,
     _syncApprovals,
     _cashLinkPrepares,
+    // Device-to-device sync bookkeeping: local to this install, never archived.
+    _syncOutbox,
+    _syncLog,
+    _syncChanges,
+    _syncRows,
+    _syncState,
+    _syncNotices,
   };
   if (actual.length != expected.length || !actual.containsAll(expected))
     throw _badBackup;
