@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 
@@ -12,7 +13,8 @@ import 'package:dio/dio.dart';
 /// uses it unchanged, and the last good copy stays on the device offline.
 class PublicExchangeRates {
   PublicExchangeRates({Dio? dio})
-    : _dio =
+    : _injected = dio != null,
+      _dio =
           dio ??
           Dio(
             BaseOptions(
@@ -25,6 +27,10 @@ class PublicExchangeRates {
           );
 
   final Dio _dio;
+  final bool _injected;
+
+  /// Tests never reach the internet unless they supply their own source.
+  static bool get _underTest => Platform.environment.containsKey('FLUTTER_TEST');
 
   /// Global rates per 1 USD, most complete and fresh sources first.
   static final List<(String, String, Map<String, double>? Function(Object?))>
@@ -48,6 +54,7 @@ class PublicExchangeRates {
   static const _yemenSource = 'https://www.2dec.net/rate.html';
 
   Future<Map<String, dynamic>?> fetch() async {
+    if (_underTest && !_injected) return null;
     final results = await Future.wait([_global(), _yemen()]);
     final global = results[0] as (String, Map<String, double>)?;
     final yemen = results[1] as Map<String, Map<String, Map<String, double>>>?;

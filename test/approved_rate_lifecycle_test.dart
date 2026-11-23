@@ -168,6 +168,8 @@ void main() {
         overrides: [
           dioProvider.overrideWithValue(dio),
           connectivityServiceProvider.overrideWithValue(connectivity),
+          // Count refreshes through one source (no real network in tests).
+          publicExchangeRatesProvider.overrideWithValue(null),
         ],
       );
       final engine = container.read(currencyEngineProvider);

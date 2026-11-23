@@ -377,13 +377,19 @@ class CurrencyEngine {
 
 final rateSnapshotRevisionProvider = StateProvider<int>((ref) => 0);
 
+/// The device's own world-rate fetcher (free public sources). Overridable in
+/// tests; null means "server snapshot only".
+final publicExchangeRatesProvider = Provider<PublicExchangeRates?>(
+  (_) => PublicExchangeRates(),
+);
+
 final currencyEngineProvider = Provider<CurrencyEngine>((ref) {
   ref.watch(dioProvider);
   final connectivity = ref.watch(connectivityServiceProvider);
   var alive = true;
   final engine = CurrencyEngine(
     apiClient: ref.read(apiClientProvider),
-    public: PublicExchangeRates(),
+    public: ref.read(publicExchangeRatesProvider),
     onChanged: () {
       if (alive) ref.read(rateSnapshotRevisionProvider.notifier).state++;
     },
