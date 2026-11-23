@@ -67,15 +67,30 @@ TESTS / TOOLS
 - Telegram: tools/send_telegram.py. Sent this round: 1260 plan, 1262, 1265-66,
   1269 (QA credentials), 1271-72, 1274-77, 1278 final APK, 1279 report.
 
+8) One-time legacy move — backend/app/domain/services/business_local_migration.py
+   (/api/v1/local-migration status|export|ack) + owner device step in
+   business_sync_provider.dart (migrateLegacy, live cutover import). Tested on
+   QA data (main branch: 3 customers, 2 invoices, 2 banks, stock, a return).
+9) GitHub: private repo mosay4/FyonaERP_Dev (main). CI: .github/workflows/
+   ci.yml (business tests, full regression gate with
+   tools/ci/known_failures.txt, backend tests, Android/iOS/Windows builds).
+   ci-cd.yml (production deploy of the original project) is manual-only.
+
 OPEN ITEMS (need owner decision or next round)
-1) Migrating existing PRODUCTION Business data from Postgres to devices,
-   then deleting it — not done (production off-limits). OpenCode's cutover
-   import exists but only for fixtures.
-2) Chat attachments still use the old 7-day file cleanup; invoice chat
-   messages for device-ledger parties may fail (server checks its invoices).
+1) Deleting the legacy rows from the server after the device receipt is a
+   separate explicit step (not implemented: irreversible). Production
+   rollout of the migration needs the owner's go-ahead.
+2) Chat attachments still use the old 7-day file cleanup. Invoice chat
+   messages for device-ledger parties: the chat's invoice picker lists server
+   invoices (empty in local mode) and the server checks its Invoice table —
+   needs a device-side picker + carrying the invoice summary.
 3) Backups (owner will extend the manual backup last). Without the server,
    losing the only device loses the data.
 4) The «جيب» reconciliation discrepancy (60,500 shown vs -10,500 recorded)
-   was not reproduced; likely stale bank screen or old cash relay v3.
+   was not reproduced. A two-device regression test proves the logic gives
+   before 60,500 / after 50,000 / decrease 10,500 on both devices.
+6) 31 known failing tests outside Business (Sara/Personal), pre-existing in
+   the original project; listed in tools/ci/known_failures.txt. Some may be
+   real issues (financial tree validation, recurring balance guard).
 5) Owner will test everything with the checklist (Telegram 1279) and send
    all problems in one list; fix them together.
