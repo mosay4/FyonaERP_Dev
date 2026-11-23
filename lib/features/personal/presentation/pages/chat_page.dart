@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:dio/dio.dart';
+import '../../../../core/services/media/chat_media_store.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:gal/gal.dart';
 import 'package:flutter/material.dart';
@@ -1014,12 +1015,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
 
     try {
-      final dio = ref.read(dioProvider);
-      final res = await dio.get<List<int>>(
-        _mediaUrl(url),
-        options: Options(responseType: ResponseType.bytes),
-      );
-      final bytes = Uint8List.fromList(res.data ?? const []);
+      final bytes =
+          await ChatMediaStore.bytes(ref.read(dioProvider), _mediaUrl(url)) ??
+          Uint8List(0);
       if (imgs.contains(ext) || vids.contains(ext)) {
         var granted = await Gal.hasAccess(toAlbum: true);
         if (!granted) granted = await Gal.requestAccess(toAlbum: true);
@@ -1054,14 +1052,11 @@ class _ChatPageState extends ConsumerState<ChatPage>
       return false;
     } catch (_) {
       try {
-        final dio = ref.read(dioProvider);
-        final res = await dio.get<List<int>>(
-          _mediaUrl(url),
-          options: Options(responseType: ResponseType.bytes),
-        );
         final saved = await FilePicker.saveFile(
           fileName: name.isEmpty ? 'file' : name,
-          bytes: Uint8List.fromList(res.data ?? const []),
+          bytes:
+              await ChatMediaStore.bytes(ref.read(dioProvider), _mediaUrl(url)) ??
+              Uint8List(0),
         );
         if (saved != null) {
           okSnack('chatSavedFile');
@@ -1114,16 +1109,14 @@ class _ChatPageState extends ConsumerState<ChatPage>
       var local = _voiceCache[id];
       if (local == null || !File(local).existsSync()) {
         final dio = ref.read(dioProvider);
-        final res = await dio.get<List<int>>(
-          _mediaUrl(url),
-          options: Options(responseType: ResponseType.bytes),
-        );
-        final dir = await getTemporaryDirectory();
-        final f = File(
-          '${dir.path}/play_${DateTime.now().millisecondsSinceEpoch}.m4a',
-        );
-        await f.writeAsBytes(res.data ?? const []);
-        local = f.path;
+        final full = _mediaUrl(url);
+        var kept = await ChatMediaStore.file(full);
+        if (kept == null) {
+          await ChatMediaStore.bytes(dio, full);
+          kept = await ChatMediaStore.file(full);
+        }
+        if (kept == null) throw StateError('voice unavailable');
+        local = kept.path;
         _voiceCache[id] = local;
       }
       await _player.stop();
@@ -1170,12 +1163,22 @@ class _ChatPageState extends ConsumerState<ChatPage>
         ? ref.read(secureStorageProvider).getToken()
         : null;
 
+    // Already on this device: play the kept copy (works offline).
+    final kept = await ChatMediaStore.file(full);
+    if (!mounted) return;
+    if (kept == null) {
+      // Keep a copy for later while it streams now.
+      ChatMediaStore.keep(ref.read(dioProvider), [
+        {'url': url},
+      ]);
+    }
     // Open immediately. The native player streams the authenticated source;
     // no full-file download, thumbnail or unrelated cache blocks navigation.
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => _MediaViewerPage(
-          videoUrl: full,
+          videoFile: kept?.path,
+          videoUrl: kept == null ? full : null,
           headers: headers,
           accessToken: accessToken,
           onSave: () => _saveRemote(url, 'video.mp4'),
@@ -1399,15 +1402,11 @@ class _ChatPageState extends ConsumerState<ChatPage>
 
   Future<void> _openFile(String url, String name) async {
     try {
-      final res = await ref
-          .read(dioProvider)
-          .get<List<int>>(
-            _mediaUrl(url),
-            options: Options(responseType: ResponseType.bytes),
-          );
+      final data = await ChatMediaStore.bytes(ref.read(dioProvider), _mediaUrl(url));
+      if (data == null) throw StateError('empty');
       final dir = await getTemporaryDirectory();
       final f = File('${dir.path}/${name.isEmpty ? 'file' : name}');
-      await f.writeAsBytes(res.data ?? const []);
+      await f.writeAsBytes(data);
       await OpenFilex.open(f.path);
     } catch (_) {
       if (mounted) {

@@ -52,6 +52,7 @@ jobs:
           flutter test --no-pub $QA_DEFINES
           test/business_*_test.dart test/report_*_test.dart
           test/public_exchange_rates_test.dart test/peer_*_test.dart
+          test/chat_media_store_test.dart
           test/sara_currency_mismatch_test.dart
 
   regression:

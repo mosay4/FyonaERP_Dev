@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http_parser/http_parser.dart';
@@ -5,6 +6,7 @@ import '../../../../core/di/providers.dart' show apiClientProvider;
 import '../../../../core/network/api_client.dart';
 import '../../../../shared/providers/current_user_provider.dart';
 import 'peer_store.dart';
+import '../../../../core/services/media/chat_media_store.dart';
 import '../../../../core/services/currency/currency_engine.dart';
 
 final merchantApiProvider = Provider<MerchantApi>((ref) {
@@ -487,6 +489,7 @@ class MerchantApi {
         // The server forgets read messages; the device keeps the whole
         // conversation, so pages come from the merged device copy.
         final merged = await store.mergeChat(linkId, fresh);
+        ChatMediaStore.keep(_client.dio, fresh);
         final pending = [
           for (final m in await store.chatOutbox())
             if (m['link_id'] == linkId) {...m, 'status': 'sending'},
@@ -516,6 +519,7 @@ class MerchantApi {
       limit: limit, waitForChanges: true, cancelToken: cancelToken,
     );
     if (updates.isNotEmpty) await _store?.mergeChat(linkId, updates);
+        ChatMediaStore.keep(_client.dio, updates);
     return updates;
   }
 
@@ -746,6 +750,18 @@ class MerchantApi {
       ),
     );
     final data = _data(r) as Map? ?? const {};
+    // The sender keeps its own copy under the server address (never
+    // downloads its own file again; it stays after the server deletes it).
+    try {
+      final url = '${data['url'] ?? ''}';
+      if (url.isNotEmpty) {
+        if (path != null && path.isNotEmpty) {
+          await File(path).copy(await ChatMediaStore.pathFor(url));
+        } else {
+          await ChatMediaStore.save(url, bytes);
+        }
+      }
+    } catch (_) {}
     return {
       'url': '${data['url'] ?? ''}',
       'thumbnail': '${data['thumbnail'] ?? ''}',

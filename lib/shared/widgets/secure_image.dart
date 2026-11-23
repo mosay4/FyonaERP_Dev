@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../core/services/media/chat_media_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
@@ -67,6 +68,16 @@ class _SecureImageState extends ConsumerState<SecureImage> {
   }
 
   static Future<File?> _diskFile(String url) async {
+    // Chat attachments live in the permanent device store (the server
+    // deletes them once delivered), never in the 30-day temp mirror.
+    if (ChatMediaStore.isChatMedia(url)) {
+      try {
+        await ChatMediaStore.file(url); // creates the folder
+        return File(await ChatMediaStore.pathFor(url));
+      } catch (_) {
+        return null;
+      }
+    }
     try {
       final dir = await getTemporaryDirectory();
       return File('${dir.path}/secure_img/${_diskKey(url)}.bin');
