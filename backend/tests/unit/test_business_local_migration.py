@@ -38,6 +38,15 @@ async def test_export_once_same_bytes_then_device_receipt(engine):
         with pytest.raises(migration.MigrationRejected):
             await migration.acknowledge(conn, org=scope.organization_id, branch=scope.branch_id,
                                         snapshot_id=UUID(first["snapshot_id"]), digest="0" * 64)
+        # Only after that receipt: the legacy rows leave the server.
+        with pytest.raises(migration.MigrationRejected):
+            await migration.purge(conn, org=scope.organization_id, branch=scope.branch_id,
+                                  snapshot_id=UUID(first["snapshot_id"]), digest="0" * 64)
+        removed = await migration.purge(conn, org=scope.organization_id, branch=scope.branch_id,
+                                        snapshot_id=UUID(first["snapshot_id"]),
+                                        digest=first["digest"])
+        assert removed > 0
+        assert await migration.legacy_rows(conn, scope.branch_id) == 0
 
 
 @pytest.mark.asyncio

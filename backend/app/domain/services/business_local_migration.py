@@ -62,8 +62,12 @@ async def status(conn: AsyncConnection, *, org: UUID, branch: UUID) -> dict:
         WHERE branch_id = :branch AND organization_id = :org
     """), {"branch": branch, "org": org})).mappings().one_or_none()
     if row is not None:
-        return {"needed": row["imported_at"] is None, "snapshot_id": str(row["snapshot_id"]),
-                "digest": row["digest"], "imported": row["imported_at"] is not None}
+        imported = row["imported_at"] is not None
+        return {"needed": not imported, "snapshot_id": str(row["snapshot_id"]),
+                "digest": row["digest"], "imported": imported,
+                # Imported but the server still holds the legacy rows: the
+                # device asks again to delete them.
+                "purge_pending": imported and await legacy_rows(conn, branch) > 0}
     return {"needed": await legacy_rows(conn, branch) > 0, "imported": False}
 
 
@@ -112,3 +116,31 @@ async def acknowledge(conn: AsyncConnection, *, org: UUID, branch: UUID,
     if done is None:
         raise MigrationRejected("No matching export")
     return True
+
+
+async def purge(conn: AsyncConnection, *, org: UUID, branch: UUID,
+                snapshot_id: UUID, digest: str) -> int:
+    """Delete the branch's legacy Business rows from the server — only after
+    the device stored exactly this export. Children first; one transaction:
+    any failure leaves everything as it was. Returns the number of rows."""
+    imported = await conn.scalar(text(f"""
+        SELECT imported_at FROM {_TABLE}
+        WHERE branch_id = :branch AND organization_id = :org
+          AND snapshot_id = :id AND digest = :digest
+    """), {"branch": branch, "org": org, "id": snapshot_id, "digest": digest})
+    if imported is None:
+        raise MigrationRejected("The device has not confirmed this export")
+    tables = [name for name, rule in cutover._rules.items()
+              if rule.archive and name != "branches"]
+    removed = 0
+    async with conn.begin_nested():
+        for name in reversed(tables):
+            result = await conn.execute(text(f"""
+                DELETE FROM public.{name} src
+                WHERE :branch = ANY({cutover._branch_function}('{name}', to_jsonb(src)))
+            """), {"branch": branch})
+            removed += result.rowcount or 0
+    await conn.execute(text(f"""
+        UPDATE {_TABLE} SET body = ''::bytea WHERE branch_id = :branch
+    """), {"branch": branch})
+    return removed

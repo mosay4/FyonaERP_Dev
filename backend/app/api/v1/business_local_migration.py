@@ -87,3 +87,20 @@ async def ack(body: AckBody, org_id: str = Depends(get_current_org_id),
         raise HTTPException(409, str(exc)) from exc
     await db.commit()
     return ok({})
+
+
+@router.post("/purge", summary="حذف بيانات الفرع القديمة من السيرفر بعد استلام الجهاز")
+async def purge(body: AckBody, org_id: str = Depends(get_current_org_id),
+                user_id: UUID = Depends(get_current_user_uuid),
+                db: AsyncSession = Depends(get_db)):
+    conn = await _owner_branch(db, org_id, user_id, body.branch_id)
+    try:
+        removed = await migration.purge(conn, org=UUID(org_id), branch=body.branch_id,
+                                        snapshot_id=body.snapshot_id, digest=body.digest)
+    except migration.MigrationRejected as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:  # a database guard or reference refused it
+        await db.rollback()
+        raise HTTPException(409, "تعذّر حذف البيانات القديمة الآن") from exc
+    await db.commit()
+    return ok({"removed": removed})

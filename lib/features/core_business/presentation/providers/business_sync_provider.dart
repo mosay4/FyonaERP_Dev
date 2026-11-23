@@ -139,6 +139,16 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
       cancelToken: cancel,
       options: Options(headers: headers),
     )).data?['data'];
+    Future<void> purge(String snapshotId, String digest) => http.post<Map<String, dynamic>>(
+      '$base/purge',
+      data: {'branch_id': scope.branchId, 'snapshot_id': snapshotId, 'digest': digest},
+      cancelToken: cancel,
+      options: Options(headers: headers, receiveTimeout: const Duration(minutes: 3)),
+    );
+    if (status is Map && status['purge_pending'] == true) {
+      // Stored here earlier; the server still holds the old rows.
+      await purge('${status['snapshot_id']}', '${status['digest']}');
+    }
     if (status is! Map || status['needed'] != true) {
       migrated = true;
       return;
@@ -172,6 +182,8 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
       cancelToken: cancel,
       options: Options(headers: headers),
     );
+    // The device holds it now: the server forgets the legacy rows.
+    await purge(done.snapshotId, done.digest);
     migrated = true;
     ref.read(businessSyncRevisionProvider.notifier).state++;
     ref.read(businessBankRevisionProvider.notifier).state++;
