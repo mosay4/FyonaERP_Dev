@@ -95,6 +95,9 @@ async def _directory_registered(engine, org, owner, branch):
 
 @pytest.mark.asyncio
 async def test_employee_device_copy_is_private_versioned_and_has_no_writer(engine, monkeypatch):
+    # The earlier read-only employee copy; whole-org local mode replaces it.
+    from app.core import business_local_mode
+    monkeypatch.setattr(business_local_mode, "ENABLED", False)
     from datetime import datetime, timedelta, timezone
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient

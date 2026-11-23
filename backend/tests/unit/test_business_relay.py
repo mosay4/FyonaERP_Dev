@@ -26,6 +26,13 @@ async def _org_ops(conn, org):
     ), {"o": org})).scalar()
 
 
+async def _org_inbox(conn, org):
+    return (await conn.execute(text(
+        "SELECT COUNT(*) FROM business_relay_inbox i JOIN business_relay_replicas r "
+        "ON r.id = i.replica_id WHERE r.organization_id = :o"
+    ), {"o": org})).scalar()
+
+
 async def _count(conn, table):
     return (await conn.execute(text(f"SELECT COUNT(*) FROM {table}"))).scalar()
 
@@ -60,12 +67,12 @@ async def test_operations_are_sequenced_carried_and_then_deleted(engine):
 
         await relay.ack(conn, org=org, user=owner, replica_id=c,
                         op_ids=[UUID(x["id"]), UUID(y["id"])])
-        assert await _count(conn, "business_relay_ops") == 2
+        assert await _org_ops(conn, org) == 2
         await relay.ack(conn, org=org, user=owner, replica_id=b, op_ids=[UUID(x["id"])])
         await relay.ack(conn, org=org, user=owner, replica_id=a, op_ids=[UUID(y["id"])])
         # Every destination stored them: nothing Business is left.
-        assert await _count(conn, "business_relay_ops") == 0
-        assert await _count(conn, "business_relay_inbox") == 0
+        assert await _org_ops(conn, org) == 0
+        assert await _org_inbox(conn, org) == 0
         # A very late retry of a delivered push is still not re-sequenced.
         late = await relay.push(conn, org=org, user=owner, replica_id=a, items=[x])
         assert late == [pushed[0]]
@@ -84,7 +91,7 @@ async def test_expired_operations_are_dropped_and_the_absent_device_resyncs(engi
         await relay.push(conn, org=org, user=owner, replica_id=a,
                          items=[_op(branch)], now=old)
         assert await relay.purge_expired(conn) == 1
-        assert await _count(conn, "business_relay_ops") == 0
+        assert await _org_ops(conn, org) == 0
         away = await relay.pull(conn, org=org, user=owner, replica_id=b)
         assert away["items"] == [] and away["resync_required"] is True
 
