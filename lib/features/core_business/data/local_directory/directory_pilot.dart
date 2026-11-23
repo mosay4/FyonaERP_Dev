@@ -274,6 +274,13 @@ final class DirectoryPilotStore {
     return db.find(scope, kind, id);
   });
 
+  /// Device-to-device sync of this workspace. Keep each call short: the
+  /// network round trips happen outside, between calls.
+  Future<T> withSync<T>(
+    DirectoryAccess scope,
+    Future<T> Function(DirectoryDatabase db) action,
+  ) => _lock.synchronized(() async => action(await _open(scope)));
+
   Future<T> withLedger<T>(
     BusinessLedgerAccess access,
     DirectoryAccess? Function() current,
