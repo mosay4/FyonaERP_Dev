@@ -280,6 +280,14 @@ if settings.RATE_LIMIT_ENABLED:
     logger.info("rate_limit_enabled", per_minute=settings.RATE_LIMIT_PER_MINUTE)
 
 
+from .core.business_local_guard import guard as _business_local_guard
+
+
+@app.middleware("http")
+async def business_data_stays_on_devices(request, call_next):
+    return await _business_local_guard(request, call_next)
+
+
 @app.middleware("http")
 async def strip_metrics_cors(request, call_next):
     """Strip CORS headers from /metrics responses (Prometheus doesn't need them)."""
