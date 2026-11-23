@@ -1,3 +1,5 @@
+import '../../features/ai/domain/agent/business_device_router.dart';
+import '../../features/core_business/data/local_commerce/local_commerce_api.dart' show localCommerceBridgeProvider;
 import 'dart:math';
 import 'dart:io';
 import 'dart:async';
@@ -1127,12 +1129,38 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     _scrollDown();
     try {
       if (!mounted || BranchScope.token != scope) return;
-      final response = audio != null || image != null
+      // Device-ledger branch: Sara's reads and operations are answered by
+      // this phone (same APIs as the buttons), never by the server.
+      final deviceRoutes = ref.read(localCommerceBridgeProvider).active
+          ? BusinessDeviceRouter.supportedRoutes
+          : null;
+      var response = audio != null || image != null
           ? await api.askQuestionWithAudio(query, audioFile: audio,
               imagePath: image,
-              accountType: 'business', language: language, history: _buildHistoryForLLM(query), screenCatalog: catalog)
+              accountType: 'business', language: language, history: _buildHistoryForLLM(query), screenCatalog: catalog,
+              deviceRoutes: deviceRoutes)
           : await api.askQuestion(query, accountType: 'business', language: language,
-              history: _buildHistoryForLLM(query), screenCatalog: catalog);
+              history: _buildHistoryForLLM(query), screenCatalog: catalog, deviceRoutes: deviceRoutes);
+      final spokenFirst = response.userQuery;
+      for (var round = 0; deviceRoutes != null && response.deviceCalls.isNotEmpty &&
+          response.state != null && round < 12; round++) {
+        if (!mounted || BranchScope.token != scope) return;
+        final results = <Map<String, dynamic>>[];
+        for (final call in response.deviceCalls) {
+          results.add({
+            'id': call['id'],
+            'result': await BusinessDeviceRouter.handle(ref.read,
+                method: '${call['method'] ?? 'GET'}', path: '${call['path'] ?? ''}',
+                params: call['params'] is Map ? Map<String, dynamic>.from(call['params'] as Map) : null),
+          });
+        }
+        response = await api.continueBusiness(state: response.state!, results: results,
+            deviceRoutes: deviceRoutes, language: language, screenCatalog: catalog);
+      }
+      if (response.userQuery == null && spokenFirst != null) {
+        response = AiAgentResponse(text: response.text, actions: response.actions,
+            pendingTools: response.pendingTools, userQuery: spokenFirst);
+      }
       _ambient.responseReady(visualGeneration);
       if (!mounted) {
         await ChatPersistence.instance.appendMessage(saveKey, ChatPersistMessage(
@@ -1191,9 +1219,19 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
         setState(() => _assistantStatus = AssistantStatus.executing);
         final effectOperation = _ambient.beginOperation();
         effectGeneration = _ambient.generation;
-        final result = await network.post('/business-sara/execute', data: {'token': params['token']});
-        final envelope = result.data as Map;
-        final outcome = Map<String, dynamic>.from((envelope['data'] ?? envelope) as Map);
+        final Map<String, dynamic> outcome;
+        final deviceCall = params['device_call'];
+        if (deviceCall is Map) {
+          // Confirmed by the user: executed on this phone, like the button.
+          outcome = await BusinessDeviceRouter.handle(ref.read,
+              method: '${deviceCall['method']}', path: '${deviceCall['path']}',
+              params: deviceCall['params'] is Map ? Map<String, dynamic>.from(deviceCall['params'] as Map) : null,
+              body: deviceCall['body'] is Map ? Map<String, dynamic>.from(deviceCall['body'] as Map) : null);
+        } else {
+          final result = await network.post('/business-sara/execute', data: {'token': params['token']});
+          final envelope = result.data as Map;
+          outcome = Map<String, dynamic>.from((envelope['data'] ?? envelope) as Map);
+        }
         final success = outcome['success'] == true;
         if (effectOperation != null) _ambient.finishOperation(confirmed: success, failed: !success, token: effectOperation);
         _flashOutcome(success);

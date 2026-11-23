@@ -103,6 +103,10 @@ class AiAgentResponse {
   final double confidence;
   final List<Map<String, dynamic>> pendingTools;
   final String? userQuery; // final query after transcript/image/file merge (for memory)
+  /// Business Sara on a device-ledger branch: requests this phone answers
+  /// from its own ledger before the conversation continues ([state]).
+  final List<Map<String, dynamic>> deviceCalls;
+  final Map<String, dynamic>? state;
 
   const AiAgentResponse({
     required this.text,
@@ -111,6 +115,8 @@ class AiAgentResponse {
     this.confidence = 0.0,
     this.pendingTools = const [],
     this.userQuery,
+    this.deviceCalls = const [],
+    this.state,
   });
 
   factory AiAgentResponse.fromJson(Map<String, dynamic> json) {
@@ -137,6 +143,11 @@ class AiAgentResponse {
       confidence: (json['confidence'] as num?)?.toDouble() ?? 0.9,
       pendingTools: pendingToolsList,
       userQuery: json['user_query'] as String?,
+      deviceCalls: [
+        for (final c in (json['device_calls'] as List?) ?? const [])
+          if (c is Map) Map<String, dynamic>.from(c),
+      ],
+      state: json['state'] is Map ? Map<String, dynamic>.from(json['state'] as Map) : null,
     );
   }
 }
@@ -174,12 +185,17 @@ class AiService {
     List<Map<String, String>>? history,
     SaraAppState? appState,
     Ref? ref,
+    List<String>? deviceRoutes,
   }) async {
     try {
       final resp = await apiClient.postSafe<Map<String, dynamic>>(
         accountType == 'business' ? '/business-sara/query' : ApiEndpoints.aiQuery,
-        options: Options(receiveTimeout: const Duration(minutes: 3)),
+        options: Options(
+          receiveTimeout: const Duration(minutes: 3),
+          headers: {if (deviceRoutes != null) 'x-fyona-device-sara': '1'},
+        ),
         data: {
+          if (deviceRoutes != null) 'device_routes': deviceRoutes,
           'query': query,
           'user_name': userName ?? '',
           'account_type': accountType,
@@ -239,6 +255,31 @@ class AiService {
     }
   }
 
+  /// Resume a device-ledger Business conversation with the phone's answers.
+  Future<AiAgentResponse> continueBusiness({
+    required Map<String, dynamic> state,
+    required List<Map<String, dynamic>> results,
+    required List<String> deviceRoutes,
+    String? language,
+    List<Map<String, String>>? screenCatalog,
+  }) async {
+    final resp = await apiClient.postSafe<Map<String, dynamic>>(
+      '/business-sara/continue',
+      options: Options(
+        receiveTimeout: const Duration(minutes: 3),
+        headers: {'x-fyona-device-sara': '1'},
+      ),
+      data: {
+        'state': state,
+        'results': results,
+        'device_routes': deviceRoutes,
+        'language': language ?? 'ar',
+        if (screenCatalog != null) 'screen_catalog': screenCatalog,
+      },
+    );
+    return AiAgentResponse.fromJson(resp.data ?? {});
+  }
+
   Future<AiAgentResponse> askQuestionWithAudio(
     String query, {
     String? audioFile,
@@ -251,9 +292,11 @@ class AiService {
     List<Map<String, String>>? history,
     SaraAppState? appState,
     Ref? ref,
+    List<String>? deviceRoutes,
   }) async {
     final formData = FormData.fromMap({
       'query': query,
+      if (deviceRoutes != null) 'device_routes': jsonEncode(deviceRoutes),
       'user_name': userName ?? '',
       'account_type': accountType,
       if (screenCatalog != null && screenCatalog.isNotEmpty)
@@ -281,7 +324,11 @@ class AiService {
     try {
       final resp = await apiClient.postSafe<Map<String, dynamic>>(
         accountType == 'business' ? '/business-sara/query-attachment' : ApiEndpoints.aiQueryAttachment,
-        options: Options(receiveTimeout: const Duration(minutes: 15), sendTimeout: const Duration(minutes: 3)),
+        options: Options(
+          receiveTimeout: const Duration(minutes: 15),
+          sendTimeout: const Duration(minutes: 3),
+          headers: {if (deviceRoutes != null) 'x-fyona-device-sara': '1'},
+        ),
         data: formData,
       );
       return AiAgentResponse.fromJson(resp.data ?? {});

@@ -320,6 +320,8 @@ class AIQuery(BaseModel):
     current_screen: Optional[str] = ""
     language: Optional[str] = None  # ISO code from the app: "ar" | "en"
     history: Optional[list] = None
+    # Business Sara on a device-ledger branch: the routes the phone answers.
+    device_routes: Optional[list] = None
 
     # ── App Awareness (live application state) ──
     subscription_plan: Optional[str] = None

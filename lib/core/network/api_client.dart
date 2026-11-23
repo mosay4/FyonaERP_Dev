@@ -197,6 +197,7 @@ final dioProvider = Provider<Dio>((ref) {
         }
         final allowedBranchWrite = path.startsWith('/branches/select') ||
           path == '/business-sara/query' || path == '/business-sara/query-attachment' ||
+          path == '/business-sara/continue' ||
           isFalconReadOnlyPath(path);
         if (BranchScope.readOnly &&
             businessPath &&
