@@ -106,6 +106,7 @@ void main() {
       branchId: branch,
       readable: {_customer, DirectoryPartyKind.supplier},
       writable: {_customer, DirectoryPartyKind.supplier},
+      financialCutover: true,
     );
     final d = _Device(
       db,
@@ -455,5 +456,47 @@ void main() {
     }
     expect((await staff.db.syncNotices()).map((n) => n.kind), ['revoked']);
     expect(await owner.db.syncNotices(), isEmpty);
+  });
+
+  test('reconciliation: before 60,500, actual 50,000 -> one -10,500 '
+      'adjustment, same on both devices', () async {
+    final a = await device('أحمد');
+    final b = await device('سالم');
+    final pocket = await openAccount(a, opening: 6050000);
+    await relay.sync([a, b]);
+    final recon = _id();
+    final checked = await a.ledger.checkBankReconciliation(
+      a.access,
+      id: recon,
+      entries: [(accountId: pocket, actualMinor: 5000000, expectedMinor: null)],
+      allowed: () => true,
+    );
+    final line = (checked['lines'] as List).single as Map;
+    expect(line['system'], 60500);
+    expect(line['actual'], 50000);
+    expect(line['diff'], -10500);
+    final approved = await a.ledger.approveBankReconciliation(
+      a.access,
+      id: recon,
+      entries: [(accountId: pocket, actualMinor: 5000000, expectedMinor: 6050000)],
+      allowed: () => true,
+    );
+    final settled = (approved['settlements'] as List).single as Map;
+    expect(settled['before'], 60500);
+    expect(settled['after'], 50000);
+    expect(settled['diff'], -10500);
+    await relay.sync([a, b]);
+    for (final d in [a, b]) {
+      expect(await d.balance(pocket), 5000000, reason: 'on ${d.replica}');
+      final legs = await d.ledger.bankHistory(d.access, [pocket], includeBalances: true);
+      final adjustment = legs.singleWhere(
+        (l) => '${l['tx_type']}'.startsWith('reconciliation'),
+      );
+      // The statement shows the difference (a decrease of 10,500), never
+      // the full balance, and the balance after it.
+      expect(adjustment['tx_type'], 'reconciliation_decrease');
+      expect(adjustment['amount'], '10500.00');
+      expect(adjustment['running_balance'], '50000.00');
+    }
   });
 }
