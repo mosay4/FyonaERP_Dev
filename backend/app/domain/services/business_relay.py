@@ -155,12 +155,14 @@ async def register(conn: AsyncConnection, *, org: UUID, user: UUID,
         replicas.c.id == replica_id,
     ).with_for_update())).mappings().one_or_none()
     if existing is not None:
-        if (existing["organization_id"] != org or existing["user_id"] != user
-                or existing["retired"]):
+        if existing["organization_id"] != org or existing["user_id"] != user:
             raise RelayAccessDenied
+        # A device that was retired (logged out, removed) and comes back has
+        # missed what was carried meanwhile: it rejoins with a full copy.
+        resync = existing["resync_required"] or existing["retired"]
         await conn.execute(update(replicas).where(replicas.c.id == replica_id)
-                           .values(session_id=session, last_seen_us=stamp))
-        resync = existing["resync_required"]
+                           .values(session_id=session, last_seen_us=stamp,
+                                   retired=False, resync_required=resync))
     else:
         others = await conn.scalar(select(func.count()).select_from(replicas)
                                    .where(replicas.c.organization_id == org,

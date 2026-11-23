@@ -101,6 +101,14 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
     return data;
   }
 
+  /// A device the relay no longer knows (e.g. retired) registers again and
+  /// rejoins with a full copy.
+  void forgetOn403(Object error) {
+    if (error is DioException && error.response?.statusCode == 403) {
+      replica = null;
+    }
+  }
+
   Future<T> local<T>(Future<T> Function(DirectoryDatabase db) action) =>
       store.withSync(scope, action);
 
@@ -173,8 +181,9 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
           pushAgain = false;
           await push();
         } while (pushAgain && awake());
-      } catch (_) {
+      } catch (error) {
         // Offline, expired login, server busy: it waits in the outbox.
+        forgetOn403(error);
       } finally {
         pushing = false;
       }
@@ -265,7 +274,8 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
         while (awake()) {
           try {
             quiet = await receive(wait: quiet ? 20 : 0);
-          } catch (_) {
+          } catch (error) {
+            forgetOn403(error);
             quiet = false;
             if (!awake()) break;
             await Future<void>.delayed(const Duration(seconds: 5));

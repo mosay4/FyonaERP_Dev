@@ -145,3 +145,18 @@ async def test_a_retired_device_no_longer_holds_anything_back(engine):
             await relay.pull(conn, org=org, user=owner, replica_id=gone)
         mine = await relay.my_replicas(conn, org=org, user=owner)
         assert [r["replica_id"] for r in mine] == [str(a)]
+
+
+@pytest.mark.asyncio
+async def test_a_retired_device_that_returns_rejoins_with_a_full_copy(engine):
+    org, owner, branch, _ = await _seed(engine, f"relay-{uuid4().hex[:20]}@example.test")
+    await _ready(engine)
+    a, back = uuid4(), uuid4()
+    async with engine.begin() as conn:
+        await relay.register(conn, org=org, user=owner, session=None, replica_id=a)
+        await relay.register(conn, org=org, user=owner, session=None, replica_id=back)
+        await relay.snapshot_applied(conn, org=org, user=owner, replica_id=back)
+        await relay.retire(conn, org=org, user=owner, replica_id=back)
+        again = await relay.register(conn, org=org, user=owner, session=None, replica_id=back)
+        assert again["resync_required"] is True
+        assert (await relay.pull(conn, org=org, user=owner, replica_id=back))["resync_required"]
