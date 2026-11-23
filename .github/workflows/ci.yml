@@ -66,8 +66,13 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - name: All app tests
-        run: flutter test --no-pub $QA_DEFINES test/
+      # Every test in the app. Only failures listed in tools/ci/known_failures.txt
+      # (pre-existing in the original project, outside the Business work) are
+      # tolerated; any new failure anywhere fails the build.
+      - name: All app tests (regression gate)
+        run: |
+          set -o pipefail
+          flutter test --no-pub --machine $QA_DEFINES test/ | python3 tools/ci/check_regressions.py
 
   backend-tests:
     name: Backend relay, local mode, guard (PostgreSQL)

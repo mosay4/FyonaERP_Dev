@@ -1,0 +1,31 @@
+test/acceptance/sara_agent_acceptance_test.dart: Deep navigation route resolution customer with id -> customer detail
+test/acceptance/sara_agent_acceptance_test.dart: Deep navigation route resolution invoice with id -> sales view, without -> sales list
+test/acceptance/sara_agent_acceptance_test.dart: Deep navigation route resolution product -> inventory, expense -> expenses, recurring -> recurring tab
+test/core/network/error_handler_test.dart: handleDioException connection errors loopback host surfaces as server unavailable
+test/core/network/error_handler_test.dart: handleDioException connection errors public host surfaces as offline
+test/e2e/personal_sync_e2e_test.dart: (setUpAll)
+test/features/personal/financial_tree_test.dart: FinancialEngine — validateTree يكشف over-payment
+test/features/personal/financial_tree_test.dart: FinancialEngine — validateTree يكشف أبناء يتجاوزون مبلغ الأب
+test/features/personal/financial_tree_test.dart: FinancialEngine — validateTree يكشف العقد اليتيمة (بلا أب)
+test/features/personal/financial_tree_test.dart: FinancialEngine — validateTree يمنع الجذور المتعددة
+test/features/personal/financial_tree_test.dart: FinancialEngine — سيناريو المرحلة 0 (DoD) over-allocation: freeCash سالب و available مصفّر مع تحذير
+test/instant_open_integrity_test.dart: integrity migration (v15, nullable-only) v14 -> v15 upgrade adds columns and preserves rows
+test/onboarding_defaults_test.dart: cash accounts follow customization ensure creates one cash per currency, skips existing
+test/recurring_insufficient_balance_test.dart: recurring expense balance guard (offline-first) USD expense vs 1000 SAR -> rejected (~259 USD only)
+test/recurring_insufficient_balance_test.dart: recurring expense balance guard (offline-first) USD expense vs 3857 SAR -> approved, converted debit (SAR)
+test/recurring_insufficient_balance_test.dart: recurring expense balance guard (offline-first) income is never blocked (money only enters)
+test/sara_ambient_render_test.dart: bounded CPU paint-recording benchmark (not an on-device FPS assertion)
+test/sara_ambient_render_test.dart: raster all phases and review themed smoke without covering message interiors
+test/sara_premium_test.dart: render premium visual review dark
+test/sara_premium_test.dart: render premium visual review light
+test/sara_recurring_actions_test.dart: contract (24-26) 24 three tools exist in contract
+test/sara_tool_contract_test.dart: contract parity: registry matches single source of truth required/optional params match per tool
+test/sara_tts_normalization_test.dart: Arabic amounts and real currency data unknown currency codes pass through untouched
+test/sara_tts_normalization_test.dart: Arabic mixed text and protected content product names with model numbers are not mangled
+test/sara_tts_normalization_test.dart: Arabic numbers (prepare + engine) billions and trillions keep exact meaning
+test/sara_tts_normalization_test.dart: Arabic numbers (prepare + engine) decimals are exact digit-by-digit after فاصلة
+test/sara_tts_normalization_test.dart: Arabic numbers (prepare + engine) grouping separators do not change value
+test/sara_tts_normalization_test.dart: Arabic numbers (prepare + engine) negatives use سالب and keep value
+test/sara_tts_normalization_test.dart: Arabic numbers (prepare + engine) zero to large numbers speak naturally
+test/tx_details_i18n_test.dart: english theme renders Paid + Manager
+test/tx_details_i18n_test.dart: status is translated (paid → مدفوعة) and manager labelled (ar)
