@@ -13,7 +13,7 @@ cd "$work"
 release="$base/releases/business-6193-relay.$(openssl rand -hex 4)"
 install -d -m 0755 "$release/tools" "$release/backend" "$release/rollback"
 chmod 0755 "$release"
-install -m 0644 "$previous/tools/run_directory_pilot_lab.py" "$release/tools/run_directory_pilot_lab.py"
+install -m 0644 tools/run_directory_pilot_lab.py "$release/tools/run_directory_pilot_lab.py"
 cp -a backend/app "$release/backend/app"
 find "$release/backend" -name '__pycache__' -type d -prune -exec rm -r {} +
 find "$release/backend" -type d -exec chmod 0755 {} +
