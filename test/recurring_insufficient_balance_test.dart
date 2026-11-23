@@ -29,7 +29,10 @@ void main() {
   Future<CurrencyEngine> engineWith({required Map<String, double> global}) async {
     SharedPreferences.setMockInitialValues({
       'currency_engine_cache_time': DateTime.now().toIso8601String(),
+      // The engine only restores an approved (v2) snapshot.
       'currency_engine_cache': jsonEncode({
+        'version': 2,
+        'approved': true,
         'global_rates': global,
         'yemen_sanaa': <String, dynamic>{},
         'yemen_aden': <String, dynamic>{},

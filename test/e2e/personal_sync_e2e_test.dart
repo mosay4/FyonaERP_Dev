@@ -95,6 +95,8 @@ void main() {
   }
 
   setUpAll(() async {
+    // Opt-in suite: without E2E_SYNC=1 every test is skipped, so no server.
+    if (!pythonOk) return;
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
 
@@ -159,6 +161,7 @@ void main() {
   });
 
   tearDownAll(() async {
+    if (!pythonOk) return;
     for (final d in devices) {
       d.dispose();
     }

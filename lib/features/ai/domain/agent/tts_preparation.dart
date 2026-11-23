@@ -597,7 +597,8 @@ class TtsPreparation {
     result = _restoreMixedTokens(result);
 
     result = result.replaceAll('،', '، ');
-    result = result.replaceAll('.', '. ');
+    // A sentence pause after a full stop, never inside a number (19.99).
+    result = result.replaceAll(RegExp(r'\.(?!\d)|(?<!\d)\.'), '. ');
     result = result.replaceAll('؟', '؟ ');
     result = result.replaceAll('!', '! ');
     result = result.replaceAll(RegExp(r'\s{2,}'), ' ').trim();

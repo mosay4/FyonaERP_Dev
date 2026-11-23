@@ -167,7 +167,7 @@ void main() {
       await tester.runAsync(() async {
         final image = await (capture.currentContext!.findRenderObject() as RenderRepaintBoundary).toImage();
         final data = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('/home/abdulrhman2/fyona-build-logs/sara-premium-${dark ? 'dark' : 'light'}.png').writeAsBytes(data!.buffer.asUint8List());
+        await File('${Directory.systemTemp.path}/sara-premium-${dark ? 'dark' : 'light'}.png').writeAsBytes(data!.buffer.asUint8List());
         image.dispose();
       });
       await tester.pumpWidget(const SizedBox());

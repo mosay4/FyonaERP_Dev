@@ -131,8 +131,9 @@ void main() {
       await svc.ensureCashAccounts(['SAR', 'USD', 'YER']);
       cash = await cashAccounts();
       expect(cash.length, 3, reason: 'no duplicates for existing');
+      // Bare YER is stored under its canonical code (Aden, YER_NEW).
       expect(cash.map((a) => a['currency']).toSet(),
-          {'SAR', 'USD', 'YER'});
+          {'SAR', 'USD', 'YER_NEW'});
     });
 
     test('remove deletes account + txs, restore brings back balance',

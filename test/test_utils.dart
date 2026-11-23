@@ -27,6 +27,9 @@ import 'package:fyona_flutter/core/localization/app_localizations.dart';
 /// Preloads the localization table. MUST be called from `setUpAll` (real
 /// async), never from inside a `testWidgets` body (FakeAsync).
 Future<void> ensureTestLocalization([String languageCode = 'ar']) {
+  // Plain `test()` files have no binding yet; without it rootBundle throws
+  // and preload silently keeps raw keys.
+  TestWidgetsFlutterBinding.ensureInitialized();
   return AppLocalizations.preload(languageCode);
 }
 

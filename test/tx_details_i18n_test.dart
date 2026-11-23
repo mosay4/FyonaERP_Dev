@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fyona_flutter/features/branches/data/branch_api.dart';
 import 'package:fyona_flutter/core/localization/app_localizations.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/features/dashboard/data/business_finance_api.dart';
@@ -27,7 +28,11 @@ void main() {
       'invoice_id': 'x', 'by_name': 'Fyona Shop', 'by_is_manager': true,
     };
     await tester.pumpWidget(ProviderScope(
-      overrides: [businessFinanceApiProvider.overrideWithValue(_FakeApi(row))],
+      overrides: [
+        businessFinanceApiProvider.overrideWithValue(_FakeApi(row)),
+        // The page reads the branch list; no server in widget tests.
+        branchAccessProvider.overrideWith((ref) async => const []),
+      ],
       child: MaterialApp(
         locale: const Locale('ar'),
         supportedLocales: AppLocalizations.supportedLocales,
@@ -55,7 +60,11 @@ void main() {
       'invoice_id': 'x', 'by_name': 'Fyona Shop', 'by_is_manager': true,
     };
     await tester.pumpWidget(ProviderScope(
-      overrides: [businessFinanceApiProvider.overrideWithValue(_FakeApi(row))],
+      overrides: [
+        businessFinanceApiProvider.overrideWithValue(_FakeApi(row)),
+        // The page reads the branch list; no server in widget tests.
+        branchAccessProvider.overrideWith((ref) async => const []),
+      ],
       child: MaterialApp(
         locale: const Locale('en'),
         supportedLocales: AppLocalizations.supportedLocales,
@@ -87,7 +96,11 @@ void main() {
       },
     };
     await tester.pumpWidget(ProviderScope(
-      overrides: [businessFinanceApiProvider.overrideWithValue(_FakeApi(row))],
+      overrides: [
+        businessFinanceApiProvider.overrideWithValue(_FakeApi(row)),
+        // The page reads the branch list; no server in widget tests.
+        branchAccessProvider.overrideWith((ref) async => const []),
+      ],
       child: MaterialApp(
         locale: const Locale('ar'),
         supportedLocales: AppLocalizations.supportedLocales,

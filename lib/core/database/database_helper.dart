@@ -226,6 +226,10 @@ class DatabaseHelper {
       ];
       final placeholders = List.filled(retiredTypes.length, '?').join(',');
       for (final table in ['personal_entity_cache', 'sync_queue', 'sync_operation_log']) {
+        // A partial older copy may lack one of them: nothing to clean there.
+        final exists = await db.rawQuery(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", [table]);
+        if (exists.isEmpty) continue;
         await db.delete(table,
           where: 'entity_type IN ($placeholders)', whereArgs: retiredTypes);
       }

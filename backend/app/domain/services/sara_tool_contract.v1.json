@@ -172,7 +172,7 @@
       "idempotency": "opkey",
       "offline": "supported",
       "required": ["from_account_id", "to_account_id", "amount"],
-      "optional": [],
+      "optional": ["from_currency", "to_currency", "exchange_rate", "destination_amount"],
       "result_keys": ["tool", "success", "entityId", "entityType", "verificationStatus", "verified", "retryable", "errorCode"],
       "reason": "Local-first transfer (real-FX gate or stop, P0 currency)."
     },

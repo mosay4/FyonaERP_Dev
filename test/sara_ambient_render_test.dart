@@ -85,7 +85,7 @@ void main() {
           expect(image.width, 390);
           if (const {SaraAmbientPhase.idle, SaraAmbientPhase.typing, SaraAmbientPhase.thinking, SaraAmbientPhase.executing}.contains(phase)) {
             final png = await image.toByteData(format: ui.ImageByteFormat.png);
-            await File('/home/abdulrhman2/fyona-build-logs/sara-ambient-${dark ? 'dark' : 'light'}-${phase.name}.png')
+            await File('${Directory.systemTemp.path}/sara-ambient-${dark ? 'dark' : 'light'}-${phase.name}.png')
                 .writeAsBytes(png!.buffer.asUint8List());
           }
           final raw = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
@@ -122,7 +122,7 @@ void main() {
       'mean_cpu_record_ms': timings.reduce((a, b) => a + b) / timings.length / 1000,
       'scope': 'Headless Linux CPU paint recording only; no device/GPU FPS claim',
       'size': '390x760', 'ribbons': 3, 'max_samples_per_ribbon': 32};
-    await tester.runAsync(() => File('/home/abdulrhman2/fyona-build-logs/sara-ambient-paint-metrics.json').writeAsString(jsonEncode(metrics)));
+    await tester.runAsync(() => File('${Directory.systemTemp.path}/sara-ambient-paint-metrics.json').writeAsString(jsonEncode(metrics)));
     expect(p95, lessThan(16.67));
     c.dispose();
   });
