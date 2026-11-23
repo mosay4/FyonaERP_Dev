@@ -1,0 +1,81 @@
+===============================================================================
+ continue-claude.txt — state after the Claude local-first Business work
+ Last updated: 2026-11-24. Read with docs/BUSINESS_SYNC_ENGINE.md.
+===============================================================================
+
+GOAL (owner's words, summarized): Business section works identically online
+and offline; all Business data stored only on devices; the server is only a
+relay/waiting station that deletes data once every party received it.
+Conflicts: the operation that reaches the server first wins; the other is
+cancelled and its author gets a system notice naming who was first. Only
+true conflicts (same remaining stock/cash/debt, same unique record, removed
+permission) — normal concurrent sales are not conflicts.
+
+CODE STATE
+- Git repo in this folder (local only, no remote). Commit history explains
+  each step (git log). Baseline before Claude: commit d058a18.
+- Backup of the pre-Claude tree: ../backup-before-claude/
+- QA server: managed by tools/claude/deploy_relay_qa.sh (owner approved).
+  Current release under /opt/fyona-directory-qa/releases/business-6193-relay.*
+  The script restores the previous release automatically if not ready.
+
+ARCHITECTURE (what exists now)
+1) Device sync engine — lib/features/core_business/data/local_directory/
+   business_sync_engine.dart (part of directory_database.dart, schema v17)
+   - TEMP triggers capture every write made through DirectoryDatabase._transaction
+     into one operation (outbox). Counter columns merge as deltas.
+   - Rules (same decision on every device, by relay sequence): floors (stock,
+     lots, cash unless allow_negative, debts/invoices over-paid, employee
+     debts), duplicates (bank/cash slot), constraint collisions (later loses),
+     employee permissions as of that sequence, cascade to dependants.
+   - Notices -> notifications list (notifications_providers.dart).
+   - Snapshot hand-over for new/absent devices (employee copy branch-limited).
+2) Business relay — backend/app/domain/services/business_relay.py,
+   API /api/v1/business-relay/* (register/push/pull(long-poll)/ack/
+   snapshot/request|serve|applied/retire/replicas). App worker:
+   lib/features/core_business/presentation/providers/business_sync_provider.dart
+3) Whole-organization local mode — backend/app/core/business_local_mode.py
+   (invited QA owners + the managed pinned QA account; employees of such orgs
+   via qa_member claim). Switch: FYONA_QA_LOCAL_ALL_BRANCHES=0 restores the
+   old per-branch fence. Device-born branches register id+name (POST /branches).
+4) Employees on devices — business_employees_local.dart (table
+   business_employees), employee_api.dart routes CRUD locally and syncs
+   identity/permissions to the server when online; linking stays online.
+5) Peer relay (merchant <-> linked party) — business_peer_relay.py,
+   API /api/v1/peer-relay/*; merchant pushes debt copies
+   (business_party_sharing.dart); customer stores them (personal/data/
+   peer_store.dart) and builds debt screens locally (merchant_api.dart);
+   chat history + offline outbox on device; server purges read chat.
+6) Exchange rates fetched by the device — core/services/currency/
+   public_exchange_rates.dart (5 public sources + 2dec.net), used by the
+   currency engine and Business report rates; server only fallback.
+7) Server write guard — backend/app/core/business_local_guard.py refuses
+   Business REST writes for device branches / local-mode orgs.
+
+TESTS / TOOLS
+- Flutter: see ../verification/claude-phase1/suite-final.log
+  (344 pass; 4 known pre-existing failures from OpenCode: device_followup v7,
+  directory_pilot load, directory_storage v1, employee_delegation v13 —
+  their old-schema fixtures keep business_cash_link_preparations).
+  Also pre-existing: test/sara_currency_mismatch_test.dart (5 failures).
+- Two-device engine tests: test/business_sync_engine_test.dart (8 scenarios).
+- Backend: tools/claude/backend_tests.sh <tests> (disposable Postgres).
+  backend/tests/unit/test_business_linked_cancellation_acceptance.py has a
+  pre-existing import error (excluded).
+- APK: tools/claude/fyona-6193-release-candidate.sh arm64 <proof> <1244 apk>
+  Final: ../verification/claude-phase1/apk-final/ (34,493,034 bytes).
+- Telegram: tools/send_telegram.py. Sent this round: 1260 plan, 1262, 1265-66,
+  1269 (QA credentials), 1271-72, 1274-77, 1278 final APK, 1279 report.
+
+OPEN ITEMS (need owner decision or next round)
+1) Migrating existing PRODUCTION Business data from Postgres to devices,
+   then deleting it — not done (production off-limits). OpenCode's cutover
+   import exists but only for fixtures.
+2) Chat attachments still use the old 7-day file cleanup; invoice chat
+   messages for device-ledger parties may fail (server checks its invoices).
+3) Backups (owner will extend the manual backup last). Without the server,
+   losing the only device loses the data.
+4) The «جيب» reconciliation discrepancy (60,500 shown vs -10,500 recorded)
+   was not reproduced; likely stale bank screen or old cash relay v3.
+5) Owner will test everything with the checklist (Telegram 1279) and send
+   all problems in one list; fix them together.
