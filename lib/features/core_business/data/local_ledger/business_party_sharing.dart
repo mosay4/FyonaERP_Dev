@@ -360,10 +360,14 @@ final class BusinessPartySharing {
         );
     // The merchant keeps the copy it shares too (chat invoice picker,
     // offline views use the same ids on both sides).
-    await PeerStore.of(scope.workspace.accountId).saveDebtSnapshot(
-      linkId,
-      Map<String, dynamic>.from(payload),
-    );
+    try {
+      await PeerStore.of(scope.workspace.accountId).saveDebtSnapshot(
+        linkId,
+        Map<String, dynamic>.from(payload),
+      );
+    } catch (_) {
+      // A convenience copy only; sharing never depends on it.
+    }
     await post('/register', {'device_id': device});
     await post('/push', {
       'device_id': device,
