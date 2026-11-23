@@ -211,7 +211,7 @@ class ReportValuationNote extends StatelessWidget {
 List<String> localReportNoticeKeys(Map data) => [
   if (data['uncosted_stock'] != null && data['uncosted_stock'] != 0)
     'repLocalUncostedStock',
-  if (data['profit_cost_unknown'] == true) 'repLocalProfitUnknown',
+  // Why profit shows «—» is explained by tapping it (owner's choice).
   if (data['legacy_flow_unclassified'] == true) 'repLocalLegacyFlow',
   if (data['legacy_settlements_unlinked'] == true) 'repLocalLegacySettlements',
   if (data['pending_shared_cash'] == true) 'repLocalPendingCash',

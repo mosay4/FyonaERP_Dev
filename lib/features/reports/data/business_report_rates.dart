@@ -8,6 +8,7 @@ import '../../../core/di/providers.dart' show apiClientProvider;
 import '../../../core/config/directory_pilot_build.dart';
 import '../../../core/network/api_client.dart' show serverBaseUrlProvider;
 import '../../../core/services/connectivity_service.dart';
+import '../../../core/services/currency/public_exchange_rates.dart';
 import '../../../shared/providers/current_user_provider.dart';
 import '../../core_business/data/local_directory/directory_pilot.dart';
 import '../../core_business/data/local_directory/directory_scope.dart';
@@ -64,6 +65,9 @@ final businessReportRateWarmupProvider = Provider.autoDispose<void>((ref) {
   Future<void> refresh() async {
     if (!active || !connectivity.isOnline) return;
     await store.refresh(() async {
+      // The device's own multi-source fetch first; the server is a fallback.
+      final public = await PublicExchangeRates().fetch();
+      if (public != null) return public;
       final response = await ref
           .read(apiClientProvider)
           .get(

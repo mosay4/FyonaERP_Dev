@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../di/providers.dart';
 import '../../network/api_client.dart';
 import '../connectivity_service.dart';
+import 'public_exchange_rates.dart';
 
 class RateFreshness {
   static const fresh = 'fresh';
@@ -23,10 +24,17 @@ class MissingExchangeRate implements Exception {
 }
 
 class CurrencyEngine {
-  CurrencyEngine({ApiClient? apiClient, void Function()? onChanged})
-    : _apiClient = apiClient,
-      _onChanged = onChanged;
+  CurrencyEngine({
+    ApiClient? apiClient,
+    void Function()? onChanged,
+    PublicExchangeRates? public,
+  }) : _apiClient = apiClient,
+       _onChanged = onChanged,
+       _public = public;
   final ApiClient? _apiClient;
+  /// The device fetches world rates itself (free public sources, first that
+  /// answers); the FYONA server is only a fallback.
+  final PublicExchangeRates? _public;
   final void Function()? _onChanged;
   static const _cacheKey = 'currency_engine_cache';
   static const _cacheTimeKey = 'currency_engine_cache_time';
@@ -89,7 +97,7 @@ class CurrencyEngine {
   }
 
   Future<void> _fetch({required bool force}) async {
-    if (_apiClient == null) return;
+    if (_apiClient == null && _public == null) return;
     if (_fetching != null) return _fetching!;
     final future = _fetchSnapshot(force);
     _fetching = future;
@@ -129,15 +137,19 @@ class CurrencyEngine {
 
   Future<void> _fetchSnapshot(bool force) async {
     try {
-      final response = await _apiClient!.get(
-        '/personal/exchange-rates',
-        queryParameters: {'force_refresh': force},
-      );
-      final body = response.data;
-      final data = body is Map && body['data'] is Map
-          ? body['data'] as Map
-          : body;
-      if (data is! Map) return;
+      Object? data = await _public?.fetch();
+      if (data == null && _apiClient != null) {
+        final response = await _apiClient.get(
+          '/personal/exchange-rates',
+          queryParameters: {'force_refresh': force},
+        );
+        final body = response.data;
+        data = body is Map && body['data'] is Map ? body['data'] as Map : body;
+      }
+      if (data is! Map) {
+        _lastCheckFailed = true;
+        return;
+      }
       final before = _fingerprint();
       final metadata = data['meta'] is Map
           ? Map<String, dynamic>.from(data['meta'])
@@ -371,6 +383,7 @@ final currencyEngineProvider = Provider<CurrencyEngine>((ref) {
   var alive = true;
   final engine = CurrencyEngine(
     apiClient: ref.read(apiClientProvider),
+    public: PublicExchangeRates(),
     onChanged: () {
       if (alive) ref.read(rateSnapshotRevisionProvider.notifier).state++;
     },
@@ -385,9 +398,10 @@ final currencyEngineProvider = Provider<CurrencyEngine>((ref) {
     if (connectivity.isOnline)
       unawaited(
         engine.refreshIfStale(
-          maxAge: const Duration(minutes: 1),
-          // Poll only the server's durable publication snapshot. External
-          // providers are refreshed on reconnect, never by this timer.
+          // World rates move slowly: the device asks the public sources at
+          // most every 30 minutes while online, and at every app start and
+          // reconnect. Offline, the last saved table keeps working.
+          maxAge: const Duration(minutes: 30),
           refreshSources: false,
         ),
       );
