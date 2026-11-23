@@ -1,0 +1,13 @@
+{
+  "name": "fyona-admin-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FYONA ERP admin console — static SPA served by admin/server/admin_server.py",
+  "license": "UNLICENSED",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

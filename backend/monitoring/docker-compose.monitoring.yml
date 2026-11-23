@@ -1,0 +1,198 @@
+# ── FYONA ERP Monitoring Stack ──
+# Usage: docker compose -f docker-compose.monitoring.yml --env-file .env up -d
+#
+# Components: Prometheus, Grafana, node-exporter, cAdvisor, postgres_exporter, redis_exporter
+# Network: joins backend_fyona-net to scrape API metrics + uses host network for exporters
+#
+# Prerequisites:
+#   1. Backend stack is running (docker-compose.yml + docker-compose.prod.yml)
+#   2. .env file with: GF_SECURITY_ADMIN_PASSWORD, GF_TELEGRAM_BOT_TOKEN, GF_TELEGRAM_CHAT_ID
+#   3. SMTP configured in .env for email alerts (GF_SMTP_*)
+
+networks:
+  fyona-net:
+    external: true
+
+volumes:
+  prometheus_data:
+  grafana_data:
+
+services:
+  # ── Prometheus: metrics collection + alerting ──
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: fyona-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--storage.tsdb.retention.size=1GB"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - fyona-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+        reservations:
+          memory: 256M
+          cpus: "0.1"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Grafana: dashboards + alerting UI ──
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: fyona-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_ALERTING_ENABLED=true
+      - GF_UNIFIED_ALERTING_ENABLED=true
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=
+      # SMTP for email alerts
+      - GF_SMTP_ENABLED=${GF_SMTP_ENABLED:-false}
+      - GF_SMTP_HOST=${GF_SMTP_HOST:-}
+      - GF_SMTP_USER=${GF_SMTP_USER:-}
+      - GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD:-}
+      - GF_SMTP_FROM_ADDRESS=${GF_SMTP_FROM_ADDRESS:-}
+      - GF_SMTP_STARTTLS_POLICY=${GF_SMTP_STARTTLS_POLICY:-OpportunisticStartTLS}
+      # Telegram bot for alerts
+      - GF_TELEGRAM_BOT_TOKEN=${GF_TELEGRAM_BOT_TOKEN:-}
+      - GF_TELEGRAM_CHAT_ID=${GF_TELEGRAM_CHAT_ID:-}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - fyona-net
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+        reservations:
+          memory: 128M
+          cpus: "0.1"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Node Exporter: host system metrics ──
+  node-exporter:
+    image: prom/node-exporter:v1.8.1
+    container_name: fyona-node-exporter
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    network_mode: host
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.1"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # ── cAdvisor: Docker container metrics ──
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: fyona-cadvisor
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    network_mode: host
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.2"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # ── PostgreSQL Exporter: database metrics ──
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    container_name: fyona-postgres-exporter
+    environment:
+      - DATA_SOURCE_NAME=postgresql://fyona:${POSTGRES_PASSWORD:-fyona}@127.0.0.1:5432/fyona_erp?sslmode=disable
+    network_mode: host
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.1"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # ── Redis Exporter: cache metrics ──
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.61.0
+    container_name: fyona-redis-exporter
+    environment:
+      - REDIS_ADDR=redis://127.0.0.1:6379
+    network_mode: host
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.1"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"

@@ -1,0 +1,55 @@
+# ── Secrets (MUST never be committed) ──
+.env
+.sara.env
+.env.*
+!.env.example
+!.env.production.example
+serviceAccount.json
+*.pem
+*.key
+!*.key.py
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ── Runtime data & uploads ──
+uploads/
+storage/
+*.db
+*.sqlite*
+
+# ── Logs & diagnostic artifacts ──
+*.log
+api_errors.txt
+api_last_50.txt
+trace.txt
+*.bak
+*.orig
+verify_all.bat
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── Build artifacts ──
+dist/
+build/
+*.whl
+*.tar.gz

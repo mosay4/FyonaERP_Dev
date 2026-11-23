@@ -1,0 +1,12 @@
+{
+  "venvPath": ".",
+  "venv": "venv",
+  "pythonVersion": "3.12",
+  "include": ["app", "tests", "scripts", "verify_all.py", "check_migrations.py", "reset_db.py", "run_server.py", "create_super_admin.py"],
+  "exclude": ["venv", "**/__pycache__", "**/.ruff_cache", "**/node_modules"],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": "none",
+  "reportMissingModuleSource": "none",
+  "useLibraryCodeForTypes": true
+}

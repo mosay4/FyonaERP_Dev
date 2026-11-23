@@ -1,0 +1,450 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/localization/app_localizations.dart';
+import '../../../../core/responsive/r_api.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
+import '../../../../shared/services/scan_sfx.dart';
+import '../../../../shared/widgets/styled_snack.dart';
+import '../../../core_business/data/local_commerce/local_commerce_api.dart';
+import '../../../purchases/presentation/pages/barcode_scan_page.dart';
+import '../../data/inventory_api.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+
+/// One product chosen in the fast picker, with its resolved unit (if any).
+class PickedProduct {
+  final Map<String, dynamic> product;
+  final Map<String, dynamic>? unit;
+  double quantity;
+  PickedProduct(this.product, {this.unit, this.quantity = 1});
+}
+
+/// Fast multi-select product picker: type the first letters, tap several
+/// products, tweak quantities, then «إضافة (n)» — all without leaving the
+/// sheet. A camera button scans barcodes into the SAME selection so the
+/// merchant can add many products by scanning them one after another.
+/// With [showQtyStepper] false the sheet becomes a pure check/uncheck
+/// multi-chooser (used when assigning products to a category).
+/// [checkStock] enforces the available-stock cap — ON for sales (cannot sell
+/// what is not in stock), OFF for purchases (buying ADDS stock) and for
+/// category assignment (stock is irrelevant there).
+Future<List<PickedProduct>?> showProductMultiPicker(
+  BuildContext context, {
+  required InventoryApi api,
+  required String title,
+  String? initialBarcode,
+  bool showBarcode = true,
+  bool showQtyStepper = true,
+  bool checkStock = true,
+  bool Function(WidgetRef)? allowed,
+}) {
+  return showModalBottomSheet<List<PickedProduct>>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) {
+      final sheet = _MultiPickerSheet(
+        api: api,
+        title: title,
+        initialBarcode: initialBarcode,
+        showBarcode: showBarcode,
+        showQtyStepper: showQtyStepper,
+        checkStock: checkStock,
+      );
+      if (allowed == null) return sheet;
+      return Consumer(builder: (context, ref, _) {
+        if (allowed(ref)) return sheet;
+        return Material(child: ListTile(
+          title: Text(AppLocalizations.of(context).translate('unauthorized')),
+        ));
+      });
+    },
+  );
+}
+
+class _MultiPickerSheet extends StatefulWidget {
+  final InventoryApi api;
+  final String title;
+  final String? initialBarcode;
+  final bool showBarcode;
+  final bool showQtyStepper;
+  final bool checkStock;
+  const _MultiPickerSheet(
+      {required this.api,
+      required this.title,
+      this.initialBarcode,
+      this.showBarcode = true,
+      this.showQtyStepper = true,
+      this.checkStock = true});
+  @override
+  State<_MultiPickerSheet> createState() => _MultiPickerSheetState();
+}
+
+class _MultiPickerSheetState extends State<_MultiPickerSheet> {
+  final _ctrl = TextEditingController();
+  final _barcodeCtrl = TextEditingController();
+  Timer? _debounce;
+  List<Map<String, dynamic>> _results = [];
+  bool _loading = false;
+  final Map<String, PickedProduct> _selected = {}; // productId -> picked
+  String _scanMsg = '';
+  bool _scanError = false;
+
+  Future<void> _playSfx({required bool ok}) =>
+      ok ? ScanSfx.success() : ScanSfx.error();
+
+  @override
+  void initState() {
+    super.initState();
+    _search('');
+    if (widget.initialBarcode != null && widget.initialBarcode!.isNotEmpty) {
+      _barcodeCtrl.text = widget.initialBarcode!;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scanOne());
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _barcodeCtrl.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  static int get _searchThreshold => 1;
+
+  Future<void> _search(String q) async {
+    setState(() => _loading = true);
+    try {
+      final raw = await widget.api.listProducts(search: q, perPage: 30);
+      if (mounted) setState(() => _results = raw);
+    } catch (_) {
+      if (mounted) setState(() => _results = []);
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  void _onQuery(String q) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300),
+        () => _search(q.trim()));
+  }
+
+  void _toggle(Map<String, dynamic> p) {
+    final pid = p['id'].toString();
+    if (_selected.containsKey(pid)) {
+      setState(() => _selected.remove(pid));
+      return;
+    }
+    final stock = _num(p['stock']);
+    final isService = p['is_service'] == true;
+    // Sales: a 0-stock product cannot be added (services unlimited).
+    // Purchases / category assignment: stock is never a blocker here.
+    if (widget.checkStock && !isService && stock <= 0) {
+      showFyonaSnack(
+          context,
+          AppLocalizations.of(context).translate('saleOutOfStock'),
+          success: false);
+      _playSfx(ok: false);
+      return;
+    }
+    _playSfx(ok: true);
+    setState(() => _selected[pid] = PickedProduct(p));
+  }
+
+  Future<void> _scan() async {
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const BarcodeScanPage()),
+    );
+    if (mounted && code != null && code.isNotEmpty) {
+      _barcodeCtrl.text = code;
+      await _scanOne();
+    }
+  }
+
+  Future<void> _scanOne() async {
+    final code = _barcodeCtrl.text.trim();
+    if (code.isEmpty) return;
+    final l10n = AppLocalizations.of(context);
+    setState(() => _scanMsg = '');
+    try {
+      final res = await widget.api.resolveBarcode(code);
+      if (!mounted) return;
+      final product = res['product'] as Map?;
+      final unit = res['unit'] as Map?;
+      if (product == null) throw StateError('no product');
+      final pid = product['id'].toString();
+      final stock = _num(product['stock']);
+      final isService = product['is_service'] == true;
+      final already = _selected[pid]?.quantity ?? 0;
+      if (widget.checkStock && !isService && already + 1 > stock + 1e-9) {
+        setState(() {
+          _scanMsg = l10n.translate('saleOutOfStock');
+          _scanError = true;
+        });
+        showFyonaSnack(context, l10n.translate('saleOutOfStock'),
+            success: false);
+        _playSfx(ok: false);
+        _barcodeCtrl.clear();
+        return;
+      }
+      setState(() {
+        if (_selected.containsKey(pid)) {
+          _selected[pid]!.quantity += 1;
+        } else {
+          _selected[pid] = PickedProduct(
+            Map<String, dynamic>.from(product),
+            unit: unit == null ? null : Map<String, dynamic>.from(unit),
+          );
+        }
+        _scanMsg = l10n.translate('invScanned',
+            params: {'name': (product['name'] ?? '').toString()});
+        _scanError = false;
+      });
+      _playSfx(ok: true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _scanMsg = l10n.translate('invBarcodeUnknown');
+        _scanError = true;
+      });
+      // Unmistakable solid-red alert for an invalid/unknown code.
+      showFyonaSnack(context, l10n.translate('invBarcodeUnknown'),
+          success: false);
+      _playSfx(ok: false);
+    }
+    _barcodeCtrl.clear();
+  }
+
+  bool _isSelected(String id) => _selected.containsKey(id);
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    return Container(
+      constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.9),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(bottom: bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(widget.title,
+                style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: R.fontSize(context, 16),
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary)),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: FyonaTextField(
+              controller: _ctrl,
+              onChanged: _onQuery,
+              decoration: InputDecoration(
+                hintText: l10n.translate('invSearchHint'),
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: widget.showBarcode
+                    ? IconButton(
+                        tooltip: l10n.translate('invScanBarcode'),
+                        icon: const Icon(Icons.qr_code_scanner),
+                        onPressed: _scan,
+                      )
+                    : null,
+              ),
+              style: const TextStyle(fontFamily: 'Cairo'),
+            ),
+          ),
+          if (_scanMsg.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(_scanMsg,
+                    style: TextStyle(
+                        fontFamily: 'Cairo',
+                        fontSize: R.fontSize(context, 12),
+                        color: _scanError
+                            ? AppColors.danger
+                            : AppColors.success)),
+              ),
+            ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: MediaQuery.of(context).size.height * 0.5,
+            child: _loading
+                 ? widget.api is LocalInventoryApi
+                     ? const SizedBox.shrink()
+                     : const Center(child: CircularProgressIndicator())
+                : _results.isEmpty
+                    ? Center(
+                        child: Text(l10n.translate('invNoProducts'),
+                            style: const TextStyle(fontFamily: 'Cairo')))
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _results.length,
+                        itemBuilder: (_, i) {
+                          final p = _results[i];
+                          final id = p['id'].toString();
+                          final sel = _isSelected(id);
+                          final stock = _num(p['stock']);
+                          final unit = (p['unit'] ?? 'قطعة').toString();
+                          final isService = p['is_service'] == true;
+                           return Material(
+                             color: Colors.transparent,
+                             child: ListTile(
+                            dense: true,
+                            selected: sel,
+                            selectedTileColor:
+                                AppColors.primary.withAlpha(26),
+                            leading: CircleAvatar(
+                              radius: 14,
+                              backgroundColor: sel
+                                  ? AppColors.primary
+                                  : AppColors.surfaceVariant.withAlpha(120),
+                              child: Icon(
+                                  sel ? Icons.check : Icons.inventory_2_outlined,
+                                  size: 16,
+                                  color: sel
+                                      ? Colors.white
+                                      : AppColors.textSecondary),
+                            ),
+                            title: Text((p['name'] ?? '').toString(),
+                                style: const TextStyle(
+                                    fontFamily: 'Cairo',
+                                    fontWeight: FontWeight.w600)),
+                            subtitle: Text(
+                                '${fmtNum(_num(p['price']))} • ${l10n.translate('invQtyNow')}: ${_fmt(stock)} $unit',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontFamily: 'Cairo')),
+                            trailing: sel
+                                ? (widget.showQtyStepper
+                                    ? _qtyStepper(id, stock, isService)
+                                    : const Icon(Icons.check_circle,
+                                        color: AppColors.primary))
+                                : const Icon(Icons.add, size: 20),
+                               onTap: () => _toggle(p),
+                             ),
+                           );
+                        },
+                      ),
+          ),
+          _selectionBar(l10n),
+        ],
+      ),
+    );
+  }
+
+  Widget _qtyStepper(String id, double stock, bool isService) {
+    final q = _selected[id]!.quantity;
+    // Sales: 0 stock = truly unavailable; services are open.
+    // Purchases: the stepper is never capped — buying grows stock.
+    final max = (!widget.checkStock || isService)
+        ? double.infinity
+        : stock;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          onPressed: () => setState(() {
+            final p = _selected[id]!;
+            if (p.quantity > 1) p.quantity -= 1;
+          }),
+          icon: const Icon(Icons.remove, size: 18),
+        ),
+        Text(_fmt(q),
+            style: const TextStyle(
+                fontFamily: 'Cairo', fontWeight: FontWeight.w700)),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          onPressed: () {
+            // Never allow MORE than the available stock (services unlimited).
+            if (q + 1 > max + 1e-9) {
+              showFyonaSnack(
+                  context,
+                  AppLocalizations.of(context).translate('saleOutOfStock'),
+                  success: false);
+              _playSfx(ok: false);
+              return;
+            }
+            setState(() => _selected[id]!.quantity += 1);
+          },
+          icon: const Icon(Icons.add, size: 18),
+        ),
+      ],
+    );
+  }
+
+  Widget _selectionBar(AppLocalizations l10n) {
+    final count = _selected.length;
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+          16, 10, 16, 12 + MediaQuery.of(context).padding.bottom),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Text(
+                l10n.translate('invSelectedCount', params: {'n': '$count'}),
+                style: const TextStyle(
+                    fontFamily: 'Cairo', fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: FilledButton.icon(
+              onPressed: count == 0
+                  ? null
+                  : () => Navigator.pop(context, _selected.values.toList()),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.check, size: 20),
+              label: Text(
+                  '${l10n.translate('save')} ($count)',
+                  style: const TextStyle(
+                      fontFamily: 'Cairo', fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _fmt(double v) =>
+    v == v.roundToDouble() ? v.round().toString() : v.toStringAsFixed(2);
+
+/// Tolerant numeric parse: the API serializes Decimal/Float as a STRING, so a
+/// raw `as num?` cast would throw and blank the whole product list.
+double _num(dynamic v) {
+  if (v is num) return v.toDouble();
+  return double.tryParse('$v') ?? 0;
+}

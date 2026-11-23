@@ -1,0 +1,36 @@
+# ── Grafana Alerting: Contact Points ──
+# Configures notification channels for unified alerting.
+# Set GF_TELEGRAM_BOT_TOKEN and GF_TELEGRAM_CHAT_ID in .env or compose environment.
+
+apiVersion: 1
+
+contactPoints:
+  # ── Admin email ──
+  - orgId: 1
+    name: admin-email
+    receivers:
+      - uid: admin-email-01
+        type: email
+        settings:
+          addresses: "${GF_ALERT_EMAIL:-admin@fyona.com}"
+          singleEmail: false
+        disableResolveMessage: false
+
+  # ── Telegram bot ──
+  - orgId: 1
+    name: telegram-alerts
+    receivers:
+      - uid: telegram-alerts-01
+        type: telegram
+        settings:
+          botToken: "${GF_TELEGRAM_BOT_TOKEN}"
+          chatId: "${GF_TELEGRAM_CHAT_ID}"
+          message: |
+            🔔 *FYONA ERP Alert*
+            Status: {{ len .Statuses }} firing
+            {{ range .Alerts }}
+            *{{ .Labels.alertname }}* ({{ .Labels.severity }})
+            {{ .Annotations.summary }}
+            {{ .Annotations.description }}
+            {{ end }}
+          disableResolveMessage: false

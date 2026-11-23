@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Notification resources referenced ONLY by runtime strings, so the
+  release resource shrinker cannot see them statically and would strip them:
+  - @drawable/ic_launcher (Flutter plugin resolves drawables only; thin
+    reference to the base @mipmap/ic_launcher App Icon — no custom image)
+  - @raw/sound_1 / @raw/sound_2 (notification channel sounds referenced via
+    android.resource:// URIs; stripped files mean silent channels)
+  Keep them explicitly. Orphan raw files (alarm.wav, crystal_echo.mp3) stay
+  strippable — nothing references them.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_launcher,@raw/sound_1,@raw/sound_2" />
+
+

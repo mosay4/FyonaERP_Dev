@@ -1,0 +1,125 @@
+name: FYONA Release APK
+
+# Builds the production APKs (split per ABI) and publishes them as GitHub
+# Release assets (public download links, no Actions-artifact storage quota).
+# Optionally copies the APKs to the server when APK_DEPLOY_ENABLED=true.
+#
+# Triggers:
+#   * Manual:  Actions → FYONA Release APK → Run workflow
+#   * Tag:     git tag v1.0.4 && git push origin v1.0.4
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version label (e.g. v1.0.4). Empty = run number.'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # create the GitHub Release + upload assets
+
+env:
+  # Settings → Variables → Actions → API_BASE_URL (defaults to production API)
+  API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.dssdfs.fun/api/v1' }}
+
+jobs:
+  build-and-release:
+    name: Build + publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.4'
+
+      - name: Resolve version label
+        id: meta
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            if [ "${{ github.ref_type }}" = "tag" ]; then
+              VERSION="${{ github.ref_name }}"
+            else
+              VERSION="v1.0.${{ github.run_number }}"
+            fi
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release: $VERSION"
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release APKs (split per ABI)
+        run: |
+          flutter build apk --release --split-per-abi \
+            --obfuscate --split-debug-info=build/symbols \
+            --dart-define=API_BASE_URL="${{ env.API_BASE_URL }}"
+
+      - name: Package debug symbols
+        run: tar czf build/fyona-symbols.tar.gz -C build/symbols .
+
+      - name: Show sizes
+        run: |
+          echo "API_BASE_URL: ${{ env.API_BASE_URL }}"
+          ls -lh build/app/outputs/flutter-apk/*-release.apk build/fyona-symbols.tar.gz
+
+      - name: Create GitHub Release (assets are public download links)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.version }}
+          name: FYONA ERP ${{ steps.meta.outputs.version }}
+          body: |
+            FYONA ERP release built automatically from `${{ github.sha }}`.
+
+            | ABI | File | Devices |
+            |-----|------|---------|
+            | arm64-v8a | `app-arm64-v8a-release.apk` | Modern Android phones |
+            | armeabi-v7a | `app-armeabi-v7a-release.apk` | Older Android phones |
+            | x86_64 | `app-x86_64-release.apk` | Emulators only |
+
+            API endpoint baked into this build: `${{ env.API_BASE_URL }}`
+          files: |
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-release.apk
+            build/fyona-symbols.tar.gz
+          draft: false
+          prerelease: false
+
+      - name: Copy APKs to the server (optional)
+        if: ${{ vars.APK_DEPLOY_ENABLED == 'true' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: 'build/app/outputs/flutter-apk/*-release.apk'
+          target: ${{ vars.APK_SERVER_DIR || '/var/www/fyona/apk' }}
+          strip_components: 4
+
+      - name: Publish stable download names on the server
+        if: ${{ vars.APK_DEPLOY_ENABLED == 'true' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            DIR="${{ vars.APK_SERVER_DIR || '/var/www/fyona/apk' }}"
+            cd "$DIR"
+            cp -f app-arm64-v8a-release.apk fyona-latest-arm64.apk
+            cp -f app-armeabi-v7a-release.apk fyona-latest-arm32.apk
+            echo "${{ steps.meta.outputs.version }}" > VERSION
+            ls -lh

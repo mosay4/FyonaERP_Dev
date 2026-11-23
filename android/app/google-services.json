@@ -1,0 +1,23 @@
+{
+  "project_info": {
+    "project_number": "123456789012",
+    "project_id": "fyona-directory-test",
+    "storage_bucket": "fyona-directory-test.invalid"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:123456789012:android:0000000000000000",
+        "android_client_info": {
+          "package_name": "com.fyona.erp.fyona_flutter.directorypilot"
+        }
+      },
+      "api_key": [
+        {
+          "current_key": "test-not-a-firebase-key"
+        }
+      ]
+    }
+  ],
+  "configuration_version": "1"
+}

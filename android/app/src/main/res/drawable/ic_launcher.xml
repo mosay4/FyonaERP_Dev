@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same base App Icon as the launcher (@mipmap/ic_launcher).
+     flutter_local_notifications resolves icons as DRAWABLE only,
+     so this is a reference to the existing launcher resource —
+     not a second image and not a custom notification icon. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@mipmap/ic_launcher" />
+</layer-list>

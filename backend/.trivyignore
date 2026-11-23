@@ -1,0 +1,38 @@
+# ── Accepted / Ignored Vulnerabilities ──
+# Each CVE is documented with the technical reason it is not exploitable
+# in the Fyona ERP production environment.
+# Review this file whenever python-jose or starlette is upgraded.
+
+# ═══════════════════════════════════════════════════════
+# pyasn1 0.4.8 — locked by python-jose 3.4.0
+# Constraint: pyasn1<0.5.0,>=0.4.1 (hardcoded in python-jose setup.cfg)
+# ═══════════════════════════════════════════════════════
+#
+# Fyona uses JWT_ALGORITHM = "HS256" (HMAC-SHA256, symmetric key).
+# pyasn1 is ONLY invoked by python-jose for asymmetric algorithms
+# (RS256/ES256) that parse ASN.1-encoded keys.
+# With HS256, jwt.encode() and jwt.decode() use HMAC only —
+# pyasn1 is never called in any code path.
+# These CVEs are all DoS via crafted ASN.1 input, but no user input
+# reaches pyasn1 in Fyona's JWT flow.
+#
+# To remove these ignores: replace python-jose with PyJWT or authlib,
+# OR upgrade python-jose to a version that allows pyasn1>=0.6.3.
+
+CVE-2026-30922
+CVE-2026-59884
+CVE-2026-59885
+CVE-2026-59886
+
+# ═══════════════════════════════════════════════════════
+# starlette 0.41.3 — CVE-2026-48818 (SSRF via UNC paths)
+# ═══════════════════════════════════════════════════════
+#
+# UNC paths (\\server\share) are a Windows-only feature.
+# Fyona production runs on Ubuntu 24.04 (Linux).
+# The SSRF vector via UNC paths is not exploitable on Linux.
+#
+# To remove this ignore: upgrade fastapi to >=0.133.1
+# which allows starlette>=1.1.0 (fixes this CVE).
+
+CVE-2026-48818

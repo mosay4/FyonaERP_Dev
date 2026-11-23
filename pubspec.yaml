@@ -1,0 +1,149 @@
+name: fyona_flutter
+description: "FYONA ERP - Business Suite (Flutter)"
+publish_to: 'none'
+
+version: 1.4.133+6193
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_riverpod: 2.6.1
+  riverpod_annotation: 2.6.1
+  go_router: ^17.3.0
+  dio: ^5.7.0
+  flutter_secure_storage: ^10.3.1
+  flutter_screenutil: ^5.9.3
+  shimmer: ^3.0.0
+  cached_network_image: ^3.4.1
+  lottie: ^3.3.1
+  intl: ^0.20.2
+  cupertino_icons: ^1.0.8
+  fl_chart: ^1.2.0
+  path_provider: ^2.1.5
+  package_info_plus: ^9.0.1
+  device_info_plus: ^11.3.0
+  url_launcher: ^6.3.1
+  json_annotation: ^4.12.0
+  equatable: ^2.0.7
+  crypto: ^3.0.6
+  logger: ^2.5.0
+  collection: ^1.19.1
+  country_picker: ^2.0.27
+  async: ^2.12.0
+  file_picker: ^11.0.2
+  csv: ^8.0.0
+  pdf: ^3.13.0
+  printing: ^5.15.0
+  share_plus: ^10.0.0
+  screenshot: ^3.0.0
+  qr_flutter: ^4.1.0
+  video_player: ^2.12.0
+  shared_preferences: ^2.3.4
+  sqflite: ^2.4.2
+  sqflite_common_ffi: ^2.4.2+1
+  uuid: ^4.5.3
+  synchronized: ^3.4.1
+  path: ^1.9.1
+  hugeicons: ^1.1.7
+  local_auth: ^2.3.0
+  gal: ^2.3.0
+  flutter_local_notifications: ^22.1.0
+  timezone: ^0.11.1
+  connectivity_plus: ^6.1.4
+  permission_handler: ^11.3.1
+  record: ^7.1.1
+  audioplayers: ^6.8.1
+  image_picker: ^1.2.3
+  image_picker_android: ^0.8.13+19
+  image_picker_platform_interface: ^2.11.1
+  mobile_scanner: ^7.4.2
+  open_filex: ^4.7.0
+  firebase_core: ^3.12.1
+  firebase_auth: ^5.5.1
+  firebase_messaging: ^15.2.5
+  google_sign_in: ^6.3.0
+  flutter_stripe: ^13.1.0
+  multicast_dns: ^0.3.3+1
+  workmanager: ^0.10.10
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.15.1
+  json_serializable: ^6.14.0
+
+# The new Business directory uses a separate FFI factory and SQLCipher.
+# Personal continues to use the Android sqflite plugin and its existing file.
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlcipher
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/shaders/sara_fluid.frag
+    - assets/shaders/sara_fluid.frag.sprv
+    - assets/fonts/
+    - assets/fonts/phosphor/
+    - assets/images/
+    - assets/images/banks/
+    - assets/images/transfers/
+    - assets/images/international/
+    - assets/images/connect/
+    - assets/l10n/
+    - assets/audio/crystal_echo.mp3
+    - assets/audio/sound_2.mp3
+    - assets/audio/scan_success.mp3
+    - assets/audio/scan_error.mp3
+    - assets/audio/recon_scan.mp3
+    - assets/audio/recon_crystal.mp3
+    - assets/audio/motion_section.wav
+    - assets/audio/motion_branch.wav
+    - assets/audio/chat_sent.wav
+    - assets/audio/chat_received.wav
+    - assets/audio/sara_welcome.wav
+    - assets/audio/sara_sent.wav
+    - assets/audio/sara_reply.wav
+    - assets/audio/sara_success.wav
+    - assets/audio/sara_error.wav
+    - assets/audio/sara_tap.wav
+    - assets/audio/financial_sales.ogg
+    - assets/audio/financial_treasury.ogg
+    - assets/audio/financial_inventory.ogg
+    - assets/audio/financial_debts.ogg
+    - assets/audio/financial_executive.ogg
+    - assets/audio/financial_precision.ogg
+    - assets/audio/financial_balance.ogg
+    - assets/video/intro.mp4
+    - assets/video/intro_poster.png
+  fonts:
+    - family: Cairo
+      fonts:
+        - asset: assets/fonts/Cairo-200.ttf
+          weight: 200
+        - asset: assets/fonts/Cairo-300.ttf
+          weight: 300
+        - asset: assets/fonts/Cairo-400.ttf
+          weight: 400
+        - asset: assets/fonts/Cairo-500.ttf
+          weight: 500
+        - asset: assets/fonts/Cairo-600.ttf
+          weight: 600
+        - asset: assets/fonts/Cairo-700.ttf
+          weight: 700
+        - asset: assets/fonts/Cairo-800.ttf
+          weight: 800
+        - asset: assets/fonts/Cairo-900.ttf
+          weight: 900
+    - family: Phosphor
+      fonts:
+        - asset: assets/fonts/phosphor/Phosphor-Regular.ttf
+    - family: PhosphorDuotone
+      fonts:
+        - asset: assets/fonts/phosphor/Phosphor-Duotone.ttf

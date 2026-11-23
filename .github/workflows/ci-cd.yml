@@ -1,0 +1,202 @@
+name: FYONA ERP CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy to production after push'
+        type: boolean
+        default: false
+      run_migrations:
+        description: 'Run alembic upgrade head on the server after deploy (default: no)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  PYTHON_VERSION: '3.12'
+  GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/fyona-api
+
+jobs:
+  # Job 1: Backend tests
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fyona
+          POSTGRES_PASSWORD: fyona
+          POSTGRES_DB: fyona_erp
+        ports:
+          - 15432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 16379:6379
+    env:
+      JWT_SECRET_KEY: ${{ secrets.JWT_TEST_SECRET || 'ci-test-jwt-secret-key-not-for-production-32chars' }}
+      ALLOWED_HOSTS: '["localhost", "127.0.0.1"]'
+      DATABASE_URL: postgresql+asyncpg://fyona:fyona@127.0.0.1:15432/fyona_erp
+      REDIS_URL: redis://127.0.0.1:16379/0
+      CELERY_BROKER_URL: redis://127.0.0.1:16379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:16379/2
+      CELERY_IMPORTS: "app.workers.tasks:app"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install dependencies
+        run: |
+          pip install --quiet --disable-pip-version-check -r requirements.txt
+          pip install --quiet --disable-pip-version-check -r requirements-dev.txt
+      - name: Wait for services
+        run: |
+          python -c "import socket,time; [time.sleep(2) for _ in range(15) if not (lambda: (lambda s: (s.settimeout(2), s.connect(('127.0.0.1',15432)), s.close(), True)[-1])(socket.socket(socket.AF_INET,socket.SOCK_STREAM)))()]" || true
+          python -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('127.0.0.1',15432)); s.close(); print('postgres ready')"
+          python -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('127.0.0.1',16379)); s.close(); print('redis ready')"
+      - name: Run database migrations
+        run: alembic upgrade head
+      - name: Run unit + health tests
+        run: python -m pytest tests/unit tests/api/test_health.py -q -p no:cacheprovider
+
+  # Job 2: Build Docker image + security scan
+  docker-build:
+    name: Build and push Docker image
+    runs-on: ubuntu-latest
+    needs: [backend-tests]
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+      image_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set image tag
+        id: tag
+        run: |
+          echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "full_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Extract metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GHCR_IMAGE }}
+          tags: ${{ steps.tag.outputs.tag }}
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: backend
+          push: true
+          tags: ${{ env.GHCR_IMAGE }}:${{ steps.tag.outputs.tag }}
+          labels: |
+            org.opencontainers.image.title=FYONA ERP API
+            org.opencontainers.image.version=1.0.0
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.source=${{ github.repository }}
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_COMMIT=${{ github.sha }}
+            APP_VERSION=1.0.0
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.GHCR_IMAGE }}:${{ steps.tag.outputs.tag }}
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: backend/.trivyignore
+
+  # Job 3: Deploy to production
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://api.dssdfs.fun
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage admin files on VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "admin/*"
+          target: "/tmp/fyona-admin"
+          strip_components: 1
+          overwrite: true
+          timeout: 60s
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_SHA: ${{ needs.docker-build.outputs.image_tag }}
+          GHCR_ORG: ${{ github.repository_owner }}
+          DEPLOY_GIT_SHA: ${{ github.sha }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 120s
+          command_timeout: 5m
+          envs: DEPLOY_SHA,GHCR_ORG,DEPLOY_GIT_SHA,GHCR_TOKEN
+          script_stop: false
+          script: |
+            export DEPLOY_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+            export DEPLOY_SHA GHCR_ORG DEPLOY_GIT_SHA DEPLOY_TIME GHCR_TOKEN
+            cd /opt/fyona/backend
+            sudo /opt/fyona/bin/deploy-backend.sh || true
+
+      - name: Run migrations (optional)
+        if: github.event.inputs.run_migrations == 'true'
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 120s
+          command_timeout: 5m
+          envs: GHCR_TOKEN
+          script_stop: true
+          script: |
+            export GHCR_TOKEN
+            cd /opt/fyona/backend
+            sudo /opt/fyona/bin/migrate-backend.sh

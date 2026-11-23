@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Version control
+.git/
+.gitignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+docker-compose*.yml
+
+# Env
+.env
+.env.example
+
+# Secrets
+serviceAccount.json
+*.pem
+*.key
+id_rsa
+
+# Build artifacts
+dist/
+build/
+
+# Uploaded content (runtime data, not code) — do NOT bake into the image.
+# It is bind-mounted from the host at /app/app/uploads in docker-compose.yml.
+app/uploads/
+uploads/
+
+# Tests
+tests/
+*.test.py
+
+# Scripts
+scripts/
+
+# Logs
+*.log
+
+# Caches & diagnostics (build hygiene)
+.pytest_cache/
+.ruff_cache/
+verify_all.py
+verify_all.bat
+test_direct.py
+test_yer_e2e.py
+api_errors.txt
+api_last_50.txt
+trace.txt
+build_attempt.log

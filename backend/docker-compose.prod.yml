@@ -1,0 +1,61 @@
+# ── Production Override ──
+# Usage: DEPLOY_SHA=abc123 docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d
+#
+# Replaces `build: .` with GHCR image references tagged by Git SHA.
+# This file is NEVER used for local development.
+#
+# Required env vars (set by CI/CD or manually on VPS):
+#   DEPLOY_SHA    — Git commit SHA (12-char short form)
+#   GHCR_ORG      — GitHub org/user (e.g., fyona-erp)
+#   DEPLOY_TIME   — ISO 8601 deployment timestamp
+#
+# The GHCR image uses the short SHA as tag (never 'latest').
+# Rollback works by redeploying with a previous SHA tag.
+
+services:
+  api:
+    # Reset build from base compose (removes local build)
+    build: !reset null
+    # GHCR image with SHA-based tag — never uses 'latest'
+    image: ghcr.io/${GHCR_ORG:-fyona-erp}/fyona-api:${DEPLOY_SHA}
+    env_file: .env.production
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-fyona}:${POSTGRES_PASSWORD:-fyona}@db:5432/${POSTGRES_DB:-fyona_erp}
+      - REDIS_URL=redis://redis:6379/0
+      - S3_ENDPOINT_URL=http://minio:9000
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      # Deployment metadata (visible in /version endpoint)
+      - DEPLOY_SHA=${DEPLOY_SHA}
+      - APP_VERSION=1.0.0
+
+  celery-worker:
+    build: !reset null
+    image: ghcr.io/${GHCR_ORG:-fyona-erp}/fyona-api:${DEPLOY_SHA}
+    env_file: .env.production
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-fyona}:${POSTGRES_PASSWORD:-fyona}@db:5432/${POSTGRES_DB:-fyona_erp}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - DEPLOY_SHA=${DEPLOY_SHA}
+
+  celery-beat:
+    build: !reset null
+    image: ghcr.io/${GHCR_ORG:-fyona-erp}/fyona-api:${DEPLOY_SHA}
+    env_file: .env.production
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - DEPLOY_SHA=${DEPLOY_SHA}
+
+  # WAL archive mount for Point-in-Time Recovery (PITR)
+  # Requires: mkdir -p /opt/fyona/backups/wal on the VPS before first deploy
+  db:
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - /opt/fyona/backups/wal:/var/lib/postgresql/wal_archive
+
+  # MinIO: Pin to specific version for reproducibility
+  minio:
+    image: minio/minio:RELEASE.2025-07-26T04-12-07Z
