@@ -9,6 +9,7 @@ import 'package:fyona_flutter/features/core_business/data/local_directory/direct
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_pilot.dart';
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_scope.dart';
 import 'package:fyona_flutter/features/core_business/data/local_ledger/business_party_sharing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'support/directory_test_keys.dart';
@@ -16,6 +17,8 @@ import 'support/directory_test_keys.dart';
 String id() => const Uuid().v4();
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  SharedPreferences.setMockInitialValues({});
   test(
     'lost acknowledgement, consent, money change, reopen and revoke use only share transport',
     () async {
@@ -69,6 +72,19 @@ void main() {
             onRequest: (options, handler) {
               calls.add(options);
               expect(options.uri.host, Uri.parse(base).host);
+              if (options.uri.path.startsWith('/api/v1/peer-relay/')) {
+                // The debt copy now travels through the peer relay.
+                expect(options.headers['Authorization'], 'Bearer fixture-access');
+                if (options.uri.pathSegments.last == 'push') {
+                  final body = Map<String, dynamic>.from(options.data as Map);
+                  expect(status, 'accepted');
+                  expect(body['link_id'], linkId);
+                  expect(body['kind'], 'debt_snapshot');
+                  published.add(Map<String, dynamic>.from(body['payload'] as Map));
+                }
+                handler.resolve(Response(requestOptions: options, data: {'data': {}}));
+                return;
+              }
               expect(
                 options.uri.path,
                 startsWith('/api/v1/business/party-sharing/'),
