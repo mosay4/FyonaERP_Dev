@@ -32,7 +32,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 metadata = MetaData()
 
 RETENTION = timedelta(days=90)
-MAX_PAYLOAD = 4 * 1024 * 1024
+# A legacy branch moved onto a device can be one large operation.
+MAX_PAYLOAD = 16 * 1024 * 1024
 MAX_SNAPSHOT = 48 * 1024 * 1024
 MAX_BATCH = 200
 OP_KINDS = frozenset({"ops"})

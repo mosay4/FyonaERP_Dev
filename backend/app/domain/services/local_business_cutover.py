@@ -454,6 +454,7 @@ async def _catalogue(
 async def _snapshot(
     conn: AsyncConnection, scope: CutoverScope, snapshot_id: UUID,
     allow_negative: bool, *, capture_catalog: bool, images: _CatalogImages | None = None,
+    server: str = FIXTURE_SERVER,
 ):
     tables = {}
     for name, rule in sorted(_rules.items()):
@@ -526,7 +527,7 @@ async def _snapshot(
     body = json.dumps({
         "version": 3 if catalogue else 2,
         "snapshot_id": str(snapshot_id),
-        "server": FIXTURE_SERVER,
+        "server": server,
         "allow_negative": allow_negative,
         **{k: str(v) for k, v in params.items()},
         "tables": {**tables, **catalogue},

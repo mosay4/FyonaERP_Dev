@@ -203,8 +203,12 @@ extension BusinessCutoverFixtureArchive on DirectoryDatabase {
   };
   static const _catalogue = {'product_categories', 'warehouse_settings'};
 
-  void _checkFixture(DirectoryAccess access) {
-    if (workspace.server != _fixtureServer ||
+  /// [live]: the one-time move of a branch's legacy server data to the
+  /// owner's device (business_local_migration on the server). Otherwise only
+  /// the synthetic cutover rehearsal server is accepted.
+  void _checkFixture(DirectoryAccess access, {bool live = false}) {
+    if ((!live && workspace.server != _fixtureServer) ||
+        (live && access.member) ||
         access.workspace.storageId != workspace.storageId) {
       throw const DirectoryAccessDenied();
     }
@@ -220,8 +224,9 @@ extension BusinessCutoverFixtureArchive on DirectoryDatabase {
     DirectoryAccess access, {
     required List<int> payload,
     required String expectedDigest,
+    bool live = false,
   }) async {
-    _checkFixture(access);
+    _checkFixture(access, live: live);
     if (sha256.convert(payload).toString() != expectedDigest) {
       throw const BusinessCutoverImportRejected();
     }
@@ -347,9 +352,10 @@ extension BusinessCutoverFixtureArchive on DirectoryDatabase {
   }
 
   Future<BusinessCutoverReceipt?> cutoverFixtureReceipt(
-    DirectoryAccess access,
-  ) {
-    _checkFixture(access);
+    DirectoryAccess access, {
+    bool live = false,
+  }) {
+    _checkFixture(access, live: live);
     return _read((db) => _receipt(db, access.branchId));
   }
 

@@ -5,9 +5,10 @@ part of 'directory_database.dart';
 extension BusinessCutoverFixtureCommerce on DirectoryDatabase {
   Future<BusinessCutoverReceipt> projectFixtureCommerce(
     DirectoryAccess access,
-    BusinessCutoverReceipt expected,
-  ) {
-    BusinessCutoverFixtureArchive(this)._checkFixture(access);
+    BusinessCutoverReceipt expected, {
+    bool live = false,
+  }) {
+    BusinessCutoverFixtureArchive(this)._checkFixture(access, live: live);
     final branch = access.branchId;
     return _transaction((txn) async {
       _requireFixture(

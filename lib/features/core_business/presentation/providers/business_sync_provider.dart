@@ -118,6 +118,66 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
   Future<T> local<T>(Future<T> Function(DirectoryDatabase db) action) =>
       store.withSync(scope, action);
 
+  var migrated = false;
+
+  /// Once per branch: a branch that still holds Business data on the server
+  /// (from before local mode) is moved onto this owner device, then carried
+  /// to the other devices by the relay. Retries are safe: the same export is
+  /// returned and an existing receipt is never imported twice.
+  Future<void> migrateLegacy() async {
+    if (migrated || scope.member) return;
+    final auth = await readBusinessRelayIdentity(secure, scope.workspace.accountId);
+    if (auth == null || !current() || !network.isOnline) return;
+    final headers = {
+      'Authorization': 'Bearer ${auth.accessToken}',
+      if (BranchScope.token != null) 'X-Branch-Token': BranchScope.token!,
+    };
+    final base = '${scope.workspace.server}/local-migration';
+    final status = (await http.get<Map<String, dynamic>>(
+      '$base/status',
+      queryParameters: {'branch_id': scope.branchId},
+      cancelToken: cancel,
+      options: Options(headers: headers),
+    )).data?['data'];
+    if (status is! Map || status['needed'] != true) {
+      migrated = true;
+      return;
+    }
+    final export = (await http.post<Map<String, dynamic>>(
+      '$base/export',
+      data: {'branch_id': scope.branchId, 'server': scope.workspace.server},
+      cancelToken: cancel,
+      options: Options(headers: headers, receiveTimeout: const Duration(minutes: 3)),
+    )).data?['data'];
+    if (export is! Map || '${export['body']}'.isEmpty) return;
+    final digest = '${export['digest']}';
+    var receipt = await local((db) => db.cutoverFixtureReceipt(scope, live: true));
+    receipt ??= await local(
+      (db) => db.importCutoverFixture(
+        scope,
+        payload: base64Decode('${export['body']}'),
+        expectedDigest: digest,
+        live: true,
+      ),
+    );
+    final BusinessCutoverReceipt done = receipt!;
+    await local((db) => db.projectFixtureCommerce(scope, done, live: true));
+    await http.post<Map<String, dynamic>>(
+      '$base/ack',
+      data: {
+        'branch_id': scope.branchId,
+        'snapshot_id': done.snapshotId,
+        'digest': done.digest,
+      },
+      cancelToken: cancel,
+      options: Options(headers: headers),
+    );
+    migrated = true;
+    ref.read(businessSyncRevisionProvider.notifier).state++;
+    ref.read(businessBankRevisionProvider.notifier).state++;
+    ref.read(businessOperationsRevisionProvider.notifier).state++;
+  }
+
   void changed() {
     if (!current()) return;
     ref.read(businessSyncRevisionProvider.notifier).state++;
@@ -152,6 +212,11 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
   /// before a resync.
   Future<void> push() async {
     final id = await ready();
+    try {
+      await migrateLegacy();
+    } catch (_) {
+      // Retried on the next round; nothing is lost on either side.
+    }
     while (current()) {
       final out = await local((db) => db.syncOutbox(limit: 100));
       if (out.isEmpty) break;

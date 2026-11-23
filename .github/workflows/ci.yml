@@ -95,6 +95,8 @@ jobs:
           backend/tests/unit/test_business_peer_relay.py
           backend/tests/unit/test_business_local_mode.py
           backend/tests/unit/test_business_local_guard.py
+          backend/tests/unit/test_business_local_migration.py
+          backend/tests/unit/test_local_business_cutover.py
           backend/tests/unit/test_business_media_transit.py
           backend/tests/unit/test_qa_business_ledger.py
           backend/tests/unit/test_qa_business_party_sharing.py
