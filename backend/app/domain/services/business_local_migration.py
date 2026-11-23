@@ -46,7 +46,8 @@ async def install(conn: AsyncConnection) -> None:
 async def legacy_rows(conn: AsyncConnection, branch_id: UUID) -> int:
     total = 0
     for name, rule in sorted(cutover._rules.items()):
-        if not rule.archive:
+        # The branch's own row is not Business data to move.
+        if not rule.archive or name == "branches":
             continue
         total += await conn.scalar(text(f"""
             SELECT COUNT(*) FROM public.{name} src
