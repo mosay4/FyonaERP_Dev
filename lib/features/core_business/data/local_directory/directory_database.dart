@@ -49,6 +49,7 @@ part 'business_inventory_report.dart';
 part 'business_inventory_reconciliation.dart';
 part 'business_bank_reconciliation.dart';
 part 'business_money_report.dart';
+part 'business_sync_engine.dart';
 
 abstract interface class DirectoryKeyStore {
   Future<String?> read(String workspaceId);
@@ -69,7 +70,7 @@ final class DirectoryDatabase {
   // isolate while the first connection is waiting to send its COMMIT.
   static final _ioLanes = List.generate(32, (_) => Lock());
   static final _factory = createDatabaseFactoryFfi();
-  static const _schemaVersion = 15;
+  static const _schemaVersion = 16;
   static const _table = 'directory_parties';
   static const _groupTable = 'business_debt_groups';
   static const _deleted = 'business_deleted_directory_parties';
@@ -190,6 +191,7 @@ final class DirectoryDatabase {
              await _createBusinessStockTransfer(db);
               await _createBusinessSyncReapproval(db);
               await _createCashLinkPrepares(db);
+              await _createBusinessSync(db);
           },
           onDowngrade: (_, _, _) =>
               throw StateError('Unsupported directory schema'),
@@ -227,6 +229,13 @@ final class DirectoryDatabase {
                await _createBusinessSyncReapproval(db);
               }
               if (from < 15) await _createCashLinkPrepares(db);
+              if (from < 16) await _createBusinessSync(db);
+          },
+          onOpen: (db) async {
+            await _createBusinessSync(db);
+            await _installBusinessSyncTriggers(db);
+            // A context left by an interrupted process must not capture.
+            await db.delete(_syncContext);
           },
         ),
       ),
@@ -236,13 +245,24 @@ final class DirectoryDatabase {
 
   Future<void> close() => _io.synchronized(_db.close);
 
+
   Future<T> _read<T>(Future<T> Function(DatabaseExecutor) read) =>
       _io.synchronized(() => read(_db));
 
+  /// The single Business write path: the write and the operation that will
+  /// carry it to the other devices commit together.
   Future<T> _transaction<T>(
     Future<T> Function(Transaction) run, {
     bool exclusive = false,
-  }) => _io.synchronized(() => _db.transaction(run, exclusive: exclusive));
+  }) => _io.synchronized(
+    () => _db.transaction((txn) async {
+      final op = const Uuid().v4();
+      await _syncBegin(txn, op);
+      final result = await run(txn);
+      await _syncSeal(txn, op);
+      return result;
+    }, exclusive: exclusive),
+  );
 
   static Future<void> _createDebtGroups(DatabaseExecutor db) async {
     await db.execute('''
