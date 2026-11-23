@@ -1,6 +1,6 @@
 ===============================================================================
  continue-claude.txt — state after the Claude local-first Business work
- Last updated: 2026-11-24. Read with docs/BUSINESS_SYNC_ENGINE.md.
+ Last updated: 2026-11-23. Read with docs/BUSINESS_SYNC_ENGINE.md.
 ===============================================================================
 
 GOAL (owner's words, summarized): Business section works identically online
@@ -12,7 +12,7 @@ true conflicts (same remaining stock/cash/debt, same unique record, removed
 permission) — normal concurrent sales are not conflicts.
 
 CODE STATE
-- Git repo in this folder (local only, no remote). Commit history explains
+- Git repo in this folder; remote: GitHub mosay4/FyonaERP_Dev (main). Commit history explains
   each step (git log). Baseline before Claude: commit d058a18.
 - Backup of the pre-Claude tree: ../backup-before-claude/
 - QA server: managed by tools/claude/deploy_relay_qa.sh (owner approved).
@@ -76,21 +76,25 @@ TESTS / TOOLS
    tools/ci/known_failures.txt, backend tests, Android/iOS/Windows builds).
    ci-cd.yml (production deploy of the original project) is manual-only.
 
+10) Legacy rows are deleted from the server after the device receipt
+   (/local-migration/purge; children first, one transaction; the device
+   retries a pending purge). QA only; production rollout needs go-ahead.
+11) Chat invoice messages for device-ledger parties: picker reads the shared
+   debt copy; the message carries the invoice number; server accepts device
+   invoices only for local-mode businesses.
+12) Chat attachments kept on the device for good: core/services/media/
+   chat_media_store.dart (background download on arrival, sender keeps its
+   upload; view/play/open/save read the device copy).
+
 OPEN ITEMS (need owner decision or next round)
-1) Deleting the legacy rows from the server after the device receipt is a
-   separate explicit step (not implemented: irreversible). Production
-   rollout of the migration needs the owner's go-ahead.
-2) Chat attachments still use the old 7-day file cleanup. Invoice chat
-   messages for device-ledger parties: the chat's invoice picker lists server
-   invoices (empty in local mode) and the server checks its Invoice table —
-   needs a device-side picker + carrying the invoice summary.
-3) Backups (owner will extend the manual backup last). Without the server,
+1) 10 known failing tests remain (tools/ci/known_failures.txt), both
+   deliberate product changes by the previous developer — owner decision:
+   a) Sara speaks bare numbers (no currency) as digits, not words (7 tests).
+   b) Sara no longer opens Business screens (customers/invoices/inventory)
+      from Personal chat (3 tests).
+2) Backups (owner will extend the manual backup last). Without the server,
    losing the only device loses the data.
-4) The «جيب» reconciliation discrepancy (60,500 shown vs -10,500 recorded)
-   was not reproduced. A two-device regression test proves the logic gives
-   before 60,500 / after 50,000 / decrease 10,500 on both devices.
-6) 31 known failing tests outside Business (Sara/Personal), pre-existing in
-   the original project; listed in tools/ci/known_failures.txt. Some may be
-   real issues (financial tree validation, recurring balance guard).
-5) Owner will test everything with the checklist (Telegram 1279) and send
-   all problems in one list; fix them together.
+3) The «جيب» reconciliation discrepancy was not reproduced; regression test
+   proves before 60,500 / after 50,000 / decrease 10,500 on both devices.
+4) Owner will test everything (checklist Telegram 1279) and send all
+   problems in one list; fix them together.
