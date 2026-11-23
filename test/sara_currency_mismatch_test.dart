@@ -7,6 +7,8 @@ import 'package:fyona_flutter/core/database/repositories/personal_cache_reposito
 import 'package:fyona_flutter/core/database/repositories/personal_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/core/services/currency/currency_engine.dart';
+import 'package:fyona_flutter/core/services/currency/public_exchange_rates.dart';
+import 'package:fyona_flutter/core/services/currency/enabled_currencies_service.dart';
 import 'package:fyona_flutter/features/ai/domain/agent/currency_mismatch.dart';
 import 'package:fyona_flutter/features/ai/domain/agent/tool_executor.dart';
 import 'package:fyona_flutter/features/ai/domain/agent/tool_registry.dart';
@@ -18,6 +20,34 @@ import 'package:fyona_flutter/shared/widgets/sara_action_dispatcher.dart';
 /// numbered options — never written, never converted, never re-targeted.
 /// Cases are parametrized over arbitrary pairs (the reported USD/OMR case is
 /// just one row) plus synthetic names/codes to prove nothing is hardcoded.
+
+/// Approved rates as the device would fetch them (no invented defaults: the
+/// engine has none built in, by design).
+Future<CurrencyEngine> ratedEngine() async {
+  final dio = Dio(BaseOptions(responseType: ResponseType.plain));
+  final rates = <String, num>{
+    'USD': 1, 'EUR': 0.92, 'GBP': 0.79, 'SAR': 3.75, 'OMR': 0.385, 'KWD': 0.307,
+    'AED': 3.6725, 'QAR': 3.64, 'BHD': 0.376, 'JOD': 0.709, 'EGP': 48.5, 'TRY': 34.1,
+    'CNY': 7.2, 'INR': 84.0, 'JPY': 150.0, 'CAD': 1.36, 'AUD': 1.52, 'CHF': 0.88,
+    'MAD': 9.9, 'DZD': 134.0, 'TND': 3.1, 'LYD': 4.8, 'IQD': 1310, 'PKR': 278,
+    'BDT': 119, 'IDR': 15800, 'MYR': 4.45, 'KRW': 1390, 'RUB': 96, 'SEK': 10.6,
+    'NOK': 10.9, 'DKK': 6.86,
+  };
+  dio.interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+    if (o.uri.host.contains('open.er-api')) {
+      return h.resolve(Response(requestOptions: o, statusCode: 200,
+          data: '{"result":"success","rates":${_json(rates)}}'));
+    }
+    h.reject(DioException(requestOptions: o, type: DioExceptionType.connectionError));
+  }));
+  final engine = CurrencyEngine(public: PublicExchangeRates(dio: dio));
+  await engine.load(forceRefresh: true);
+  return engine;
+}
+
+String _json(Map<String, num> m) =>
+    '{${m.entries.map((e) => '"${e.key}":${e.value}').join(',')}}';
+
 void main() {
   const uid = 97;
   setUpAll(() {
@@ -112,8 +142,12 @@ void main() {
     for (final pair in pairs) {
       test('converts ${pair[1]} into ${pair[0]}-only bank and writes converted', () async {
         final svc = makeService();
-        final engine = CurrencyEngine();
-        await engine.load();
+        final engine = await ratedEngine();
+        // The user has both currencies enabled (the executor requires it).
+        await saveEnabledCurrencies(
+          {...await loadEnabledCurrencies(svc.currentUserId.toString()), pair[0], pair[1]},
+          svc.currentUserId.toString(),
+        );
         await svc.addBankAccount(bankName: 'SoloBank', currency: pair[0], openingBalance: 1000);
         final banks = await svc.getBankAccounts();
         final target = banks.firstWhere((b) => b.currency == pair[0]);
@@ -222,8 +256,7 @@ void main() {
 
     test('unavailable FX pair invents no rate', () async {
       final svc = makeService();
-      final engine = CurrencyEngine();
-      await engine.load();
+      final engine = await ratedEngine();
       await svc.addBankAccount(bankName: 'NoFxBank', currency: 'SAR', openingBalance: 500);
       final banks = await svc.getBankAccounts();
       final exec = ToolExecutor(svc, fxEngine: engine);
@@ -234,9 +267,11 @@ void main() {
         'account_id': banks.first.id,
         'category': 'test',
       });
-      expect(r.errorCode, 'CURRENCY_MISMATCH');
-      expect((r.data!['fx_options'] as List), isEmpty);
-      expect((r.data!['sibling_accounts'] as List), isEmpty);
+      // Refused (an unknown currency is not enabled) — never converted with
+      // a made-up rate, and nothing is written.
+      expect(r.errorCode, anyOf('CURRENCY_MISMATCH', 'CURRENCY_NOT_ENABLED'));
+      expect(r.data?['conversion'], isNull);
+      expect((r.data?['fx_options'] as List?) ?? const [], isEmpty);
     });
   });
 

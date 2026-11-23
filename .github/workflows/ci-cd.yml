@@ -1,10 +1,8 @@
 name: FYONA ERP CI/CD
 
+# Production pipeline of the original project: manual only. The development
+# repository must never deploy to production on push (see ci.yml for CI).
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       deploy:

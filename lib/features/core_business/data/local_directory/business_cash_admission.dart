@@ -3,7 +3,7 @@ part of 'directory_database.dart';
 const _cashLinkPrepares = 'business_cash_link_preparations';
 
 Future<void> _createCashLinkPrepares(DatabaseExecutor db) => db.execute('''
-  CREATE TABLE $_cashLinkPrepares (
+  CREATE TABLE IF NOT EXISTS $_cashLinkPrepares (
     branch_id TEXT PRIMARY KEY,
     plan_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
