@@ -75,6 +75,7 @@ const Map<String, List<String>> _syncTables = {
   'business_employee_debts': ['branch_id', 'debt_id'],
   'business_employee_debt_legs': ['branch_id', 'command_id'],
   'business_employee_receipts': ['branch_id', 'command_id'],
+  'business_employees': ['id'],
 };
 
 /// Counter columns: merged as deltas, so concurrent work adds up.
@@ -96,6 +97,7 @@ enum BusinessSyncConflict {
   balanceShort,
   duplicate,
   dependent,
+  revoked,
 }
 
 /// A floor on a counter. [crossed] sees the row as it was after each operation.
@@ -702,6 +704,7 @@ extension BusinessSyncEngine on DirectoryDatabase {
   }) async {
     for (var round = 0; round < 20; round++) {
       final changed =
+          await _syncResolvePermissions(txn, through, complete: complete) |
           await _syncResolveDuplicates(txn, through, complete: complete) |
           await _syncResolveFloors(txn, through, complete: complete);
       if (!changed) return;
@@ -710,6 +713,96 @@ extension BusinessSyncEngine on DirectoryDatabase {
 
   bool _syncDecidable(int? seq, int through, bool complete) =>
       seq == null ? complete : seq <= through;
+
+  /// An employee's operation is checked against the permissions the owner
+  /// had given that employee at that point in server order (the owner may
+  /// have removed them offline, earlier). Removed → cancelled with a notice.
+  Future<bool> _syncResolvePermissions(
+    Transaction txn,
+    int through, {
+    required bool complete,
+  }) async {
+    final members = {
+      for (final row in await txn.query(
+        'business_employees',
+        columns: ['linked_user_id'],
+        where: 'linked_user_id IS NOT NULL',
+      ))
+        row['linked_user_id'] as String,
+    };
+    if (members.isEmpty) return false;
+    final checked =
+        int.tryParse(await _syncGet(txn, 'permissions_checked_through') ?? '') ?? 0;
+    final ops = await txn.rawQuery(
+      '''
+      SELECT op_id, seq, author_user FROM $_syncLog
+      WHERE status = 'applied' AND author_user IN (${members.map((_) => '?').join(',')})
+        AND (seq IS NULL OR seq > ?)
+      ORDER BY COALESCE(seq, $_syncNever), applied_us
+      ''',
+      [...members, checked],
+    );
+    var changed = false;
+    var decided = checked;
+    for (final op in ops) {
+      final seq = op['seq'] as int?;
+      if (!_syncDecidable(seq, through, complete)) break;
+      final opId = op['op_id'] as String;
+      final changes = await txn.query(
+        _syncChanges,
+        where: 'op_id = ?',
+        whereArgs: [opId],
+        orderBy: 'ord',
+      );
+      final needed = _syncRequiredPermission(changes);
+      if (needed != null) {
+        final grant = await _syncMemberGrant(txn, op['author_user'] as String, seq);
+        if (grant == null || !_syncAllowed(grant, needed)) {
+          await _syncReject(txn, opId, BusinessSyncConflict.revoked, winner: null);
+          changed = true;
+        }
+      }
+      if (seq != null && seq > decided) decided = seq;
+    }
+    if (decided != checked) {
+      await _syncPut(txn, 'permissions_checked_through', '$decided');
+    }
+    return changed;
+  }
+
+  /// The employee's permissions as of [seq] (null: removed or unknown).
+  Future<Map<String, bool>?> _syncMemberGrant(
+    DatabaseExecutor db,
+    String userId,
+    int? seq,
+  ) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT c.new_row FROM $_syncChanges c JOIN $_syncLog l ON l.op_id = c.op_id
+      WHERE c.tbl = 'business_employees' AND l.status = 'applied'
+        AND json_extract(c.new_row, '\$.linked_user_id') = ?
+        AND COALESCE(l.seq, $_syncNever) <= ?
+      ORDER BY COALESCE(l.seq, $_syncNever) DESC, l.applied_us DESC, c.ord DESC
+      LIMIT 1
+      ''',
+      [userId, seq ?? _syncNever],
+    );
+    Map? row = rows.isEmpty ? null : jsonDecode(rows.single['new_row'] as String) as Map;
+    // No history here (e.g. a device that joined by snapshot): the record.
+    row ??= (await db.query(
+      'business_employees',
+      where: 'linked_user_id = ?',
+      whereArgs: [userId],
+      limit: 1,
+    )).singleOrNull;
+    if (row == null || row['deleted_us'] != null) return null;
+    try {
+      final raw = jsonDecode('${row['permissions'] ?? '{}'}') as Map;
+      return {for (final e in raw.entries) '${e.key}': e.value == true};
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// The same bank/cash slot (name + currency + type) opened on two devices:
   /// the one sequenced first stays.
@@ -1094,6 +1187,20 @@ extension BusinessSyncEngine on DirectoryDatabase {
     return {};
   }
 
+  /// The relay refused this device's unsent work (its access was removed):
+  /// cancel it here and tell the user.
+  Future<void> syncRejectOutbox() => _transactionRaw((txn) async {
+    final pending = await txn.query(_syncOutbox, columns: ['op_id'], orderBy: 'created_us DESC');
+    for (final row in pending) {
+      await _syncReject(
+        txn,
+        row['op_id'] as String,
+        BusinessSyncConflict.revoked,
+        winner: null,
+      );
+    }
+  }, exclusive: true);
+
   // ── notices ───────────────────────────────────────────────────────────────
 
   Future<List<BusinessSyncNotice>> syncNotices() => _read(
@@ -1128,14 +1235,19 @@ extension BusinessSyncEngine on DirectoryDatabase {
 
   /// Everything this device holds, and which operations it contains. Only
   /// served with an empty outbox, so every contained operation is sequenced.
-  Future<Map<String, Object?>?> syncSnapshot() => _read((db) async {
+  /// With [branchIds], only those branches (an employee's copy).
+  Future<Map<String, Object?>?> syncSnapshot({Set<String>? branchIds}) =>
+      _read((db) async {
     if ((await db.query(_syncOutbox, limit: 1)).isNotEmpty) return null;
     final tables = <String, Object?>{};
     for (final table in _syncTables.keys) {
       final columns = await _syncColumns(db, table);
       tables[table] = [
         for (final row in await db.query(table, columns: columns.map((c) => '"$c"').toList()))
-          row,
+          if (branchIds == null ||
+              !row.containsKey('branch_id') ||
+              branchIds.contains(row['branch_id']))
+            row,
       ];
     }
     return {
@@ -1317,3 +1429,60 @@ Future<void> _syncPut(DatabaseExecutor db, String key, String value) =>
       'key': key,
       'value': value,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+
+/// The permission an operation needs, from what it wrote (first match wins).
+String? _syncRequiredPermission(List<Map<String, Object?>> changes) {
+  Map? first(String table, {String kind = 'insert'}) {
+    for (final c in changes) {
+      if (c['tbl'] == table && c['kind'] == kind && c['new_row'] != null) {
+        return jsonDecode(c['new_row'] as String) as Map;
+      }
+    }
+    return null;
+  }
+
+  bool touches(String table) => changes.any((c) => c['tbl'] == table);
+  if (touches('business_employees') ||
+      touches('business_employee_payroll') ||
+      touches('business_employee_debts')) {
+    return 'employees';
+  }
+  final returned = first('business_commerce_returns');
+  if (returned != null) {
+    return returned['invoice_type'] == 'purchase' ? 'purchases.returns' : 'sales.returns';
+  }
+  final invoice = first('business_commerce_invoices');
+  if (invoice != null) {
+    return invoice['invoice_type'] == 'purchase' ? 'purchases.create' : 'sales.create';
+  }
+  if (touches('business_reconciliations')) return 'reconciliation';
+  if (touches('business_branch_transfers')) return 'branches.transfer';
+  if (first('business_local_accounts') != null) return 'banks.add_delete';
+  if (first('business_local_payment_parts') != null) return 'debts.settle';
+  if (first('business_local_debts') != null) return 'debts.add';
+  final leg = first('business_local_bank_legs');
+  if (leg != null) {
+    final kind = '${leg['kind']}';
+    if (kind.startsWith('transfer')) return 'banks.transfer';
+    if (kind == 'deposit') return 'income';
+    if (kind == 'withdrawal') return leg['expense_category'] != null ? 'expenses' : 'transactions';
+  }
+  final party = first('directory_parties') ?? first('directory_parties', kind: 'update');
+  if (party != null) {
+    final group = party['kind'] == 'supplier' ? 'suppliers' : 'customers';
+    return first('directory_parties') != null ? '$group.add' : '$group.edit';
+  }
+  if (first('business_commerce_products') != null) return 'inventory.add';
+  if (first('business_commerce_products', kind: 'update') != null) return 'inventory.edit';
+  return null;
+}
+
+/// Mirrors employeePermissionAllowed (lib/features/employees/data/employee_permissions.dart).
+bool _syncAllowed(Map<String, bool> permissions, String key) {
+  final parent = key.split('.').first;
+  if (parent == 'employees') return false;
+  const legacy = {'transactions': 'dashboard', 'income': 'reports', 'expenses': 'reports'};
+  final enabled = permissions[parent] ?? permissions[legacy[parent]] ?? false;
+  return enabled && (permissions[key] ?? enabled);
+}

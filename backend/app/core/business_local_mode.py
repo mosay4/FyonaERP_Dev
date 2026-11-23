@@ -71,3 +71,54 @@ async def branch_names(db: AsyncSession, org_id: UUID) -> dict[str, str]:
         Branch.is_archived.is_(False),
     ).order_by(Branch.created_at))).all()
     return {str(branch_id): name for branch_id, name in rows}
+
+
+async def organization_enabled(db: AsyncSession, org_id: UUID) -> bool:
+    """The organization's Business lives on devices (its owner is enabled)."""
+    from app.domain.entities.auth_entities import User
+
+    owners = (await db.execute(select(User).where(
+        User.organization_id == org_id, User.role == "owner",
+        User.status == "active",
+    ))).scalars().all()
+    return any(enabled_for(owner) for owner in owners)
+
+
+async def member_branches(db: AsyncSession, user, org_id: UUID) -> list[str] | None:
+    """Branches an active employee (branch member) may work in, or None."""
+    from sqlalchemy import text
+
+    if not await db.scalar(text(
+        "SELECT to_regclass('public.branch_members') IS NOT NULL"
+    )):
+        return None
+    row = (await db.execute(text("""
+        SELECT m.branch_ids, m.all_branches FROM public.branch_members m
+        WHERE m.user_id = :user AND m.organization_id = :org AND m.status = 'active'
+    """), {"user": user.id, "org": org_id})).first()
+    if row is None:
+        return None
+    names = await branch_names(db, org_id)
+    if row.all_branches:
+        return list(names)
+    try:
+        allowed = {str(b) for b in json.loads(row.branch_ids or "[]")}
+    except ValueError:
+        return []
+    return [b for b in names if b in allowed]
+
+
+async def member_scope(db: AsyncSession, user, branch) -> dict[str, str] | None:
+    """For an employee of a local-mode organization: the branches (id→name)
+    their device works in, when [branch] is one of them; otherwise None."""
+    if user.organization_id == branch.organization_id:
+        return None
+    if not branch.is_active or branch.is_archived:
+        return None
+    if not await organization_enabled(db, branch.organization_id):
+        return None
+    allowed = await member_branches(db, user, branch.organization_id)
+    if not allowed or str(branch.id) not in allowed:
+        return None
+    names = await branch_names(db, branch.organization_id)
+    return {b: names[b] for b in allowed if b in names}

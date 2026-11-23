@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core_business/data/local_directory/directory_pilot.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -270,7 +271,12 @@ class _BusinessActionCardState extends State<_BusinessActionCard>
     });
     // Live buttons navigate; the rest stay shells until their step lands.
     final key = widget.labelKey;
-    if (key == 'bizEmployees' || key == 'bizSara') {
+    // Sara always needs the internet. Employees work on the device when
+    // the branch is local; only linking an account needs the internet.
+    final local = ProviderScope.containerOf(context, listen: false)
+            .read(businessLocalLedgerScopeProvider) !=
+        null;
+    if (key == 'bizSara' || (key == 'bizEmployees' && !local)) {
       if (!await ensureBusinessOnline(context) || !context.mounted) return;
     }
     if (BranchScope.readOnly &&

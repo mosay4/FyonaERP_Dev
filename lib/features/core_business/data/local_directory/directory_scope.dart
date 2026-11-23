@@ -58,6 +58,7 @@ final class DirectoryAccess {
     this.writerSession,
     this.transferExpiry,
     this.cashLinkId,
+    this.member = false,
     Map<String, String>? transferBranches,
   }) : _readable = Set.unmodifiable(readable),
        _writable = Set.unmodifiable(writable),
@@ -73,6 +74,8 @@ final class DirectoryAccess {
   final String? writerSession;
   final DateTime? transferExpiry;
   final String? cashLinkId;
+  /// An employee's device working in its employer's organization.
+  final bool member;
   final Map<String, String> transferBranches;
   final Set<DirectoryPartyKind> _readable;
   final Set<DirectoryPartyKind> _writable;

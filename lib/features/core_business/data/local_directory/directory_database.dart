@@ -51,6 +51,7 @@ part 'business_inventory_reconciliation.dart';
 part 'business_bank_reconciliation.dart';
 part 'business_money_report.dart';
 part 'business_sync_engine.dart';
+part 'business_employees_local.dart';
 
 abstract interface class DirectoryKeyStore {
   Future<String?> read(String workspaceId);
@@ -71,7 +72,7 @@ final class DirectoryDatabase {
   // isolate while the first connection is waiting to send its COMMIT.
   static final _ioLanes = List.generate(32, (_) => Lock());
   static final _factory = createDatabaseFactoryFfi();
-  static const _schemaVersion = 16;
+  static const _schemaVersion = 17;
   static const _table = 'directory_parties';
   static const _groupTable = 'business_debt_groups';
   static const _deleted = 'business_deleted_directory_parties';
@@ -193,6 +194,7 @@ final class DirectoryDatabase {
               await _createBusinessSyncReapproval(db);
               await _createCashLinkPrepares(db);
               await _createBusinessSync(db);
+              await _createBusinessEmployees(db);
           },
           onDowngrade: (_, _, _) =>
               throw StateError('Unsupported directory schema'),
@@ -231,9 +233,11 @@ final class DirectoryDatabase {
               }
               if (from < 15) await _createCashLinkPrepares(db);
               if (from < 16) await _createBusinessSync(db);
+              if (from < 17) await _createBusinessEmployees(db);
           },
           onOpen: (db) async {
             await _createBusinessSync(db);
+            await _createBusinessEmployees(db);
             await _installBusinessSyncTriggers(db);
           },
         ),

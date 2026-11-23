@@ -87,6 +87,11 @@ class RelayInvalid(ValueError):
     pass
 
 
+class RelayRevoked(Exception):
+    """The author no longer works in this organization/branch: what it did
+    offline after losing access is not carried to anyone."""
+
+
 def _now_us(now: datetime | None = None) -> int:
     return int((now or datetime.now(timezone.utc)).timestamp() * 1_000_000)
 
@@ -233,7 +238,7 @@ async def push(conn: AsyncConnection, *, org: UUID, user: UUID,
             result.append({"id": str(op_id), "seq": prior})
             continue
         if not await _user_can_use_branch(conn, org, user, branch):
-            raise RelayAccessDenied
+            raise RelayRevoked
         seq = await _next_seq(conn, org)
         audience = await _destinations(conn, org, branch, source["id"])
         await conn.execute(insert(ops).values(
@@ -350,10 +355,26 @@ async def request_snapshot(conn: AsyncConnection, *, org: UUID, user: UUID,
         return {"requested": False, "resync_required": False}
     from uuid import uuid4
     op_id = uuid4()
+    # An employee's copy holds only the branches they may work in.
+    own = await conn.scalar(text("""
+        SELECT 1 FROM public.users WHERE id = :user AND organization_id = :org
+    """), {"user": user, "org": org})
+    branches = None
+    if not own and await _has_members(conn):
+        row = (await conn.execute(text("""
+            SELECT branch_ids, all_branches FROM public.branch_members
+            WHERE user_id = :user AND organization_id = :org AND status = 'active'
+        """), {"user": user, "org": org})).first()
+        if row is not None and not row.all_branches:
+            try:
+                branches = [str(b) for b in json.loads(row.branch_ids or "[]")]
+            except ValueError:
+                branches = []
     await conn.execute(insert(ops).values(
         id=op_id, organization_id=org, branch_id=None, seq=None,
         kind="snapshot_request", replica_id=source["id"], actor_user_id=user,
-        payload=json.dumps({"replica_id": str(source["id"])}).encode(),
+        payload=json.dumps({"replica_id": str(source["id"]),
+                            "branch_ids": branches}).encode(),
         created_us=_now_us(now),
     ))
     await conn.execute(insert(inbox), [

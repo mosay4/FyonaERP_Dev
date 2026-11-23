@@ -42,6 +42,8 @@ NotificationItem businessSyncNotification(BusinessSyncNotice n) {
       'أُلغيت $operation لأن $who سجّل نفس المبلغ قبلك، فاعتمد النظام عمليته. $retry',
     'duplicate' =>
       'أُلغي $operation لأن $who أنشأه قبلك، فاعتمد النظام ما أنشأه. استخدم الموجود بدلاً منه.',
+    'revoked' =>
+      'أُلغيت $operation لأن صلاحيتك على هذا الفرع أُلغيت قبل تنفيذها.',
     'dependent' =>
       'أُلغيت $operation لأنها مبنية على عملية أُلغيت بعد أن سبقك $who إليها. $retry',
     _ =>

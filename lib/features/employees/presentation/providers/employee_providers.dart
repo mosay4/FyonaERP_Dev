@@ -16,6 +16,8 @@ import '../../../core_business/data/local_ledger/business_relay_identity.dart';
 import '../../../../shared/providers/current_user_provider.dart';
 import '../../../personal/data/models/personal_models.dart';
 import 'employee_device_finance_provider.dart';
+import '../../../core_business/data/local_directory/directory_database.dart';
+import '../../../core_business/presentation/providers/business_sync_provider.dart';
 
 /// The device-ledger writer for employee payroll and debts. It exists only
 /// while a registered Business ledger is selected; otherwise every call in
@@ -230,8 +232,22 @@ Widget protectEmployeeReceipt(
   },
 );
 
+/// An employee device's own permissions as synced from the owner through the
+/// relay — the owner can change them offline and they arrive on reconnect.
+final localMemberPermissionsProvider = FutureProvider<Map<String, bool>?>((ref) async {
+  ref.watch(businessSyncRevisionProvider);
+  final scope = ref.watch(businessLocalLedgerScopeProvider);
+  final user = ref.watch(currentUserProvider);
+  if (scope == null || !scope.member || user == null) return null;
+  return ref
+      .read(directoryPilotStoreProvider)
+      .withSync(scope, (db) => db.memberPermissions(scope, user.id));
+});
+
 final employeePermissionsProvider = Provider<Map<String, bool>>((ref) {
   ref.watch(branchEpochProvider);
+  final synced = ref.watch(localMemberPermissionsProvider).valueOrNull;
+  if (synced != null) return {...synced, 'employees': false};
   final companies = ref.watch(branchAccessProvider).valueOrNull ?? const [];
   final org = BranchScope.organizationId;
   for (final c in companies) {

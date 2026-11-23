@@ -25,8 +25,8 @@ final directoryPilotAccessProvider = Provider<DirectoryAccess?>((ref) {
   if (!auth.isAuthenticated ||
       user == null ||
       !user.hasPhone ||
-      !user.isActive ||
-      user.role != 'owner') {
+      !user.isActive) {
+    // Owners and employees alike: the server's signed branch claims decide.
     return null;
   }
   return resolveDirectoryPilot(
@@ -43,6 +43,19 @@ final directoryPilotAccessProvider = Provider<DirectoryAccess?>((ref) {
 /// The token is the existing app context received from /branches/select.
 /// Checking its claims here binds that context to our one lab account, not
 /// to arbitrary prefs or deep links. This does not replace API verification.
+Map? _tokenClaims(String? token) {
+  try {
+    final parts = token?.split('.');
+    if (parts == null || parts.length != 3) return null;
+    final data = jsonDecode(
+      utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+    );
+    return data is Map ? data : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 DirectoryAccess? resolveDirectoryPilot({
   required String server,
   required String accountId,
@@ -52,17 +65,19 @@ DirectoryAccess? resolveDirectoryPilot({
   required String? selectedToken,
   required bool readOnly,
 }) {
-  if (!validDirectoryPilotScope(
-        server,
-        accountId,
-        organizationId,
-        selectedBranchId,
-      ) ||
-      selectedOrganizationId != organizationId ||
+  // An employee works in the employer's organization: the signed token says
+  // so (qa_member) and names that organization.
+  final member = selectedOrganizationId != organizationId &&
+      _tokenClaims(selectedToken)?['qa_member'] == true &&
+      _tokenClaims(selectedToken)?['org'] == selectedOrganizationId;
+  final org = member ? selectedOrganizationId : organizationId;
+  if (!validDirectoryPilotScope(server, accountId, org, selectedBranchId) ||
+      selectedOrganizationId != org ||
       selectedToken == null ||
       readOnly) {
     return null;
   }
+  organizationId = org;
   bool financialCutover;
   String? writerSession;
   DateTime? transferExpiry;
@@ -131,6 +146,7 @@ DirectoryAccess? resolveDirectoryPilot({
     transferExpiry: transferExpiry,
     transferBranches: transferBranches,
     cashLinkId: cashLinkId,
+    member: member,
   );
 }
 
@@ -375,7 +391,11 @@ final class DirectoryPilotStore {
     )) {
       throw const DirectoryAccessDenied();
     }
-    if (await entry(scope) == null) throw const DirectoryAccessDenied();
+    // An employee works under the employer's subscription, which the
+    // workspace gate already enforces; it has no Business entitlement of its own.
+    if (!scope.member && await entry(scope) == null) {
+      throw const DirectoryAccessDenied();
+    }
     if (scope.writerSession != null &&
         await _writerSession?.call(scope.workspace.accountId) !=
             scope.writerSession) {

@@ -9,6 +9,7 @@ import '../../../../core/config/directory_pilot_build.dart';
 import '../../../../core/di/providers.dart' show secureStorageProvider;
 import '../../../../core/services/connectivity_service.dart';
 import '../../../../shared/providers/current_user_provider.dart';
+import '../../../branches/data/branch_scope.dart';
 import '../../data/local_directory/directory_database.dart';
 import '../../data/local_directory/directory_pilot.dart';
 import '../../data/local_directory/directory_scope.dart';
@@ -91,7 +92,12 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
       options: Options(
         followRedirects: false,
         receiveTimeout: receive,
-        headers: {'Authorization': 'Bearer ${auth.accessToken}'},
+        headers: {
+          'Authorization': 'Bearer ${auth.accessToken}',
+          // Names the organization this device works in (an employee works
+          // in the employer's).
+          if (BranchScope.token != null) 'X-Branch-Token': BranchScope.token!,
+        },
       ),
     );
     final data = response.data?['data'];
@@ -184,6 +190,14 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
       } catch (error) {
         // Offline, expired login, server busy: it waits in the outbox.
         forgetOn403(error);
+        if (error is DioException && error.response?.statusCode == 410) {
+          // Access was removed: what was done here after that is cancelled,
+          // and the user is told why.
+          try {
+            await local((db) => db.syncRejectOutbox());
+            changed();
+          } catch (_) {}
+        }
       } finally {
         pushing = false;
       }
@@ -217,8 +231,11 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
       switch (item['kind']) {
         case 'snapshot_request':
           final target = (payload as Map)['replica_id'] as String;
+          final branches = (payload['branch_ids'] as List?)?.cast<String>();
           await push(); // a copy is complete only with nothing unsent
-          final snapshot = await local((db) => db.syncSnapshot());
+          final snapshot = await local(
+            (db) => db.syncSnapshot(branchIds: branches?.toSet()),
+          );
           if (snapshot == null) continue;
           await send('/snapshot/serve', {
             'replica_id': id,

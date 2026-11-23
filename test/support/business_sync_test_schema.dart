@@ -16,6 +16,7 @@ Future<void> removeBusinessSyncSchema(DatabaseExecutor db) async {
     'business_sync_rows',
     'business_sync_state',
     'business_sync_notices',
+    'business_employees',
   ]) {
     await db.execute('DROP TABLE IF EXISTS $table');
   }

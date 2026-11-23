@@ -265,7 +265,15 @@ async def select_branch(
     from ...core import qa_business_ledger, qa_directory
     from ...domain.services import qa_cash_admission, qa_employee_finance
     from ...core import business_local_mode
-    if await business_local_mode.whole_organization(db, user, branch):
+    member_scope = await business_local_mode.member_scope(db, user, branch)
+    if member_scope is not None:
+        # An employee of a local-mode business: their phone holds the branches
+        # they are allowed in, synced through the relay like the owner's.
+        local_directory = local_ledger = True
+        employee_finance = None
+        cash_link = None
+        writer_branches = member_scope
+    elif await business_local_mode.whole_organization(db, user, branch):
         # Every branch of this account lives on its devices; the server only
         # carries operations between them (see docs/BUSINESS_SYNC_ENGINE.md).
         local_directory = local_ledger = True
@@ -289,6 +297,7 @@ async def select_branch(
         qa_transfer_branches=writer_branches,
         qa_writer_session=session_id if writer_branches is not None else None,
         qa_cash_link=cash_link,
+        qa_member=member_scope is not None,
     )
     return ok({"token": token, "mode": "branch",
                "branch_id": str(branch.id),

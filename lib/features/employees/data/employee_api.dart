@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import '../../../core/network/api_client.dart';
 import '../../core_business/data/local_directory/directory_database.dart';
 import '../../core_business/data/local_directory/directory_scope.dart';
@@ -54,7 +56,61 @@ class EmployeeApi {
       ? Map<String, dynamic>.from(body['data'])
       : {};
 
+  /// Employees recorded on this device: the screens never wait for the
+  /// network; the server learns identity/permissions in the background.
+  EmployeeLocalFinance? _records() {
+    if (_employeeDeviceSelected?.call() == true) return null;
+    return _localFinance?.call();
+  }
+
+  /// Tells the server, when online, what account linking and access control
+  /// need about the employees recorded here (and learns who is linked).
+  Future<void> syncEmployeesWithServer() async {
+    final local = _records();
+    if (local == null) return;
+    for (final row in await local.employeesForServer()) {
+      final id = row['id'] as String;
+      final body = {
+        'full_name': row['full_name'],
+        if (row['phone'] != null) 'phone': row['phone'],
+        if (row['employee_code'] != null) 'employee_code': row['employee_code'],
+        'salary_currency': row['salary_currency'],
+        'permissions': jsonDecode('${row['permissions'] ?? '{}'}'),
+        if (row['branch_ids'] != null) 'branch_ids': jsonDecode('${row['branch_ids']}'),
+      };
+      if (row['deleted_us'] != null) {
+        try {
+          await _client.delete('/employees/$id');
+        } on DioException catch (e) {
+          if (e.response?.statusCode != 404) rethrow;
+        }
+      } else if (row['server_state'] == 'new') {
+        await _client.post('/employees', data: {'id': id, ...body});
+      } else {
+        await _client.put('/employees/$id', data: body);
+      }
+      await local.markEmployeeServer(id);
+    }
+    final r = await _client.get('/employees');
+    for (final e in ((_data(r.data)['employees'] as List?) ?? const []).whereType<Map>()) {
+      if (e['linked_user_id'] == null) continue;
+      try {
+        await local.markEmployeeServer(
+          '${e['id']}',
+          linkedUserId: '${e['linked_user_id']}',
+          userName: e['user_name'] as String?,
+          userCode: e['user_code'] as String?,
+        );
+      } catch (_) {}
+    }
+  }
+
   Future<List<Map<String, dynamic>>> list() async {
+    final local = _records();
+    if (local != null) {
+      unawaited(syncEmployeesWithServer().catchError((_) {}));
+      return local.employees();
+    }
     final r = await _client.get('/employees');
     return ((_data(r.data)['employees'] as List?) ?? const [])
         .whereType<Map>()
@@ -71,6 +127,12 @@ class EmployeeApi {
   }
 
   Future<Map<String, dynamic>> create(Map<String, dynamic> body) async {
+    final local = _records();
+    if (local != null && body['link_code'] == null) {
+      final result = await local.createEmployee(body);
+      unawaited(syncEmployeesWithServer().catchError((_) {}));
+      return result;
+    }
     final r = await _client.post('/employees', data: body);
     return _data(r.data);
   }
@@ -79,6 +141,12 @@ class EmployeeApi {
     String id,
     Map<String, dynamic> body,
   ) async {
+    final local = _records();
+    if (local != null) {
+      final result = await local.updateEmployee(id, body);
+      unawaited(syncEmployeesWithServer().catchError((_) {}));
+      return result;
+    }
     final r = await _client.put('/employees/$id', data: body);
     return _data(r.data);
   }
@@ -89,6 +157,8 @@ class EmployeeApi {
     Map<String, bool> permissions, {
     List<String>? branchIds,
   }) async {
+    // Linking needs the server (online only): it must know the employee.
+    if (_records() != null) await syncEmployeesWithServer();
     final r = await _client.post(
       '/employees/$id/invite',
       data: {
@@ -101,6 +171,12 @@ class EmployeeApi {
   }
 
   Future<void> remove(String id) async {
+    final local = _records();
+    if (local != null) {
+      await local.removeEmployee(id);
+      unawaited(syncEmployeesWithServer().catchError((_) {}));
+      return;
+    }
     await _client.delete('/employees/$id');
   }
 

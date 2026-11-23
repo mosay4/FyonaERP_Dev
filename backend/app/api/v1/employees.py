@@ -260,6 +260,8 @@ def _employee_branch_ids(workspace, member, branches):
 
 
 class EmployeeCreateBody(BaseModel):
+    # An employee recorded on a device keeps its id everywhere.
+    id: Optional[uuid.UUID] = None
     full_name: str = Field(min_length=2, max_length=200)
     employee_code: Optional[str] = Field(default=None, max_length=50)
     salary: Decimal = Decimal('0')
@@ -385,6 +387,14 @@ async def create_employee(data: EmployeeCreateBody, request: Request,
     await _owner_check(db, org_id, user_id)
     org = uuid.UUID(str(org_id))
     await _lock_employee_org(db, org)
+    if data.id is not None:
+        known = await db.get(Employee, data.id)
+        if known is not None:
+            if known.organization_id != org:
+                raise HTTPException(403, detail='غير مصرح')
+            # A retry of the same device record.
+            return created({'employee': _employee_dict(known, await _workspace(db, known.id, org)),
+                            'invitation': None}, 'تم إنشاء الموظف')
     branch_scope = await _validate_employee_branches(db, org,
         data.branch_ids if data.branch_ids is not None or scope.all_mode else [scope.branch_id])
     target = None
@@ -401,6 +411,8 @@ async def create_employee(data: EmployeeCreateBody, request: Request,
     employee = Employee(organization_id=org, employee_code=code,
         full_name=data.full_name.strip(), salary=data.salary,
         phone=(data.phone or '').strip() or None, notes=data.notes, created_by=user_id, status='active')
+    if data.id is not None:
+        employee.id = data.id
     db.add(employee)
     await db.flush()
     ws = EmployeeWorkspace(employee_id=employee.id, organization_id=org,

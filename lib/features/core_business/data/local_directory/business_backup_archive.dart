@@ -415,6 +415,7 @@ Future<void> _requireMainSchema(DatabaseExecutor db) async {
     _syncRows,
     _syncState,
     _syncNotices,
+    _employeesTable,
   };
   if (actual.length != expected.length || !actual.containsAll(expected))
     throw _badBackup;

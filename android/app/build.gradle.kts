@@ -94,8 +94,15 @@ android {
     packaging {
         jniLibs {
             // Compress native libraries in the APK; Android extracts the same
-            // bytes on install. Do not filter or exclude any packaged ABI.
+            // bytes on install.
             useLegacyPackaging = true
+            // Some plugins ship prebuilt copies for every ABI. A device build
+            // targets one ABI (see abiFilters): the other copies are never
+            // loaded and only add size (~0.5 MB compressed).
+            val target = if (directoryPilotEmulator) "x86_64" else "arm64-v8a"
+            listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+                .filter { it != target }
+                .forEach { excludes += "lib/$it/**" }
         }
     }
 }

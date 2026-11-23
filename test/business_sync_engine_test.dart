@@ -394,4 +394,66 @@ void main() {
     expect((await b.db.syncNotices()).map((n) => n.kind), ['balanceShort']);
     expect(await a.db.syncNotices(), isEmpty);
   });
+
+  test('an employee works on their own phone; what they did after the owner '
+      'removed the permission (in server order) is cancelled', () async {
+    final owner = await device('المالك');
+    // The employee's phone: its own account, the employer's organization.
+    final staffId = _id();
+    final staffWorkspace = DirectoryWorkspace(
+      server: workspace.server,
+      accountId: staffId,
+      organizationId: workspace.organizationId,
+    );
+    final root = await Directory.systemTemp.createTemp('fyona-sync-staff-');
+    roots.add(root);
+    final staffDb = await DirectoryDatabase.open(
+      root: root,
+      workspace: staffWorkspace,
+      keys: FixtureDirectoryKeys(),
+    );
+    final staffReplica = await staffDb.syncReplicaId();
+    await staffDb.syncSetAuthor(userId: staffId, name: 'الموظف خالد');
+    relay.register(staffReplica);
+    final staffAccess = DirectoryAccess(
+      workspace: staffWorkspace,
+      branchId: branch,
+      readable: {_customer, DirectoryPartyKind.supplier},
+      writable: {_customer, DirectoryPartyKind.supplier},
+      member: true,
+    );
+    final staff = _Device(
+      staffDb,
+      staffReplica,
+      BusinessLedgerAccess(staffAccess, BusinessLedgerAction.values.toSet()),
+      staffAccess,
+    );
+    devices.add(staff);
+
+    // The owner records the employee (offline-capable) and links the account.
+    final employee = await owner.db.createLocalEmployee(owner.directory, {
+      'full_name': 'خالد',
+      'permissions': {'customers': true, 'sales': true},
+    });
+    await owner.db.markEmployeeServer(owner.directory, employee['id'] as String, linkedUserId: staffId);
+    await relay.sync([owner, staff]);
+    expect(await staff.db.memberPermissions(staffAccess, staffId), {'customers': true, 'sales': true});
+
+    // Both offline: the owner removes «customers»; then the employee adds one.
+    await owner.db.updateLocalEmployee(owner.directory, employee['id'] as String, {
+      'permissions': {'customers': false, 'sales': true},
+    });
+    final added = await staff.db.create(staffAccess, _customer, name: 'عميل الموظف');
+    await relay.push(owner); // the owner reaches the server first
+    await relay.push(staff);
+    await relay.sync([owner, staff]);
+    await relay.sync([owner, staff]);
+
+    for (final d in [owner, staff]) {
+      final names = (await d.db.search(d.directory, _customer, '')).map((p) => p.id);
+      expect(names, isNot(contains(added.id)), reason: 'on ${d.replica}');
+    }
+    expect((await staff.db.syncNotices()).map((n) => n.kind), ['revoked']);
+    expect(await owner.db.syncNotices(), isEmpty);
+  });
 }

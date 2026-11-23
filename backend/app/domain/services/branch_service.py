@@ -182,7 +182,8 @@ def issue_scope_token(user_id: UUID, org_id: UUID,
                       qa_employee_finance: Optional[Dict[str, str]] = None,
                       qa_transfer_branches: Optional[Dict[str, str]] = None,
                       qa_writer_session: Optional[UUID] = None,
-                      qa_cash_link: Optional[UUID] = None) -> str:
+                      qa_cash_link: Optional[UUID] = None,
+                      qa_member: bool = False) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "typ": "branch_scope",
@@ -204,6 +205,9 @@ def issue_scope_token(user_id: UUID, org_id: UUID,
     # empty and whose old writer is fenced.
     if qa_business_ledger and branch_id is not None and not all_mode:
         payload['qa_business_ledger'] = True
+        if qa_member:
+            # The device works in its employer's organization.
+            payload['qa_member'] = True
         if qa_writer_session is not None:
             payload['qa_writer_session'] = str(qa_writer_session)
             payload['qa_transfer_branches'] = qa_transfer_branches or {}

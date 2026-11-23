@@ -69,6 +69,55 @@ final class EmployeeLocalFinance {
     return BusinessMoney.minor(value);
   }
 
+  // ── employee records (on the device, synced through the relay) ─────────
+
+  Future<T> _records<T>(Future<T> Function(DirectoryDatabase db, DirectoryAccess scope) run) async {
+    final scope = _scope();
+    if (scope == null || !_selected(scope)) throw const DirectoryAccessDenied();
+    return _store().withSync(scope, (db) => run(db, scope));
+  }
+
+  Future<List<Map<String, dynamic>>> employees() => _records(
+    (db, scope) async => [
+      for (final row in await db.localEmployees(scope)) Map<String, dynamic>.from(row),
+    ],
+  );
+
+  Future<Map<String, dynamic>> createEmployee(Map<String, dynamic> body) => _records(
+    (db, scope) async => {
+      'employee': Map<String, dynamic>.from(await db.createLocalEmployee(scope, body)),
+      'invitation': null,
+    },
+  );
+
+  Future<Map<String, dynamic>> updateEmployee(String id, Map<String, dynamic> body) =>
+      _records(
+        (db, scope) async => {
+          'employee': Map<String, dynamic>.from(await db.updateLocalEmployee(scope, id, body)),
+        },
+      );
+
+  Future<void> removeEmployee(String id) =>
+      _records((db, scope) => db.deleteLocalEmployee(scope, id));
+
+  Future<List<Map<String, Object?>>> employeesForServer() =>
+      _records((db, scope) => db.employeesForServer(scope));
+
+  Future<void> markEmployeeServer(
+    String id, {
+    String? linkedUserId,
+    String? userName,
+    String? userCode,
+  }) => _records(
+    (db, scope) => db.markEmployeeServer(
+      scope,
+      id,
+      linkedUserId: linkedUserId,
+      userName: userName,
+      userCode: userCode,
+    ),
+  );
+
   /// The accounts the payroll and debt forms pick from.
   Future<List<Map<String, Object?>>> bankAccounts() => _run({
     BusinessLedgerAction.readBank,

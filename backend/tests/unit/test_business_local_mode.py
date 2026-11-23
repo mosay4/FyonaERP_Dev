@@ -44,3 +44,44 @@ def test_the_managed_pinned_account_is_included(monkeypatch):
                             role="owner", status="active")
     assert business_local_mode.enabled_for(pinned)
     assert not business_local_mode.enabled_for(other)
+
+
+@pytest.mark.asyncio
+async def test_an_employee_works_only_in_their_branches(engine, monkeypatch):
+    import json
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.domain.entities.auth_entities import User
+    from app.domain.entities.branch_entities import BranchMember
+    from app.domain.entities.sale_entities import Branch
+    from app.domain.services import business_relay as relay
+
+    boss = f"local-{uuid4().hex[:20]}@example.test"
+    org, owner, branch, main = await _seed(engine, boss)
+    _, staff, _, _ = await _seed(engine, f"staff-{uuid4().hex[:20]}@example.test")
+    monkeypatch.setattr(qa_directory, "INVITES", frozenset({boss}))
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker.begin() as db:
+        db.add(BranchMember(organization_id=org, user_id=staff,
+                            branch_ids=json.dumps([str(branch)]), permissions="{}",
+                            status="active"))
+    async with maker() as db:
+        employee = await db.get(User, staff)
+        allowed = await business_local_mode.member_scope(db, employee, await db.get(Branch, branch))
+        assert set(allowed) == {str(branch)}
+        assert await business_local_mode.member_scope(db, employee, await db.get(Branch, main)) is None
+    async with engine.begin() as conn:
+        await relay.install(conn)
+        boss_phone, staff_phone = uuid4(), uuid4()
+        await relay.register(conn, org=org, user=owner, session=None, replica_id=boss_phone)
+        await relay.register(conn, org=org, user=staff, session=None, replica_id=staff_phone)
+        await relay.request_snapshot(conn, org=org, user=staff, replica_id=staff_phone)
+        asked = (await relay.pull(conn, org=org, user=owner, replica_id=boss_phone))["items"]
+        import base64
+        body = json.loads(base64.b64decode(asked[0]["payload"]))
+        assert body["branch_ids"] == [str(branch)]
+        # Once removed, what the employee did offline is not carried.
+        await conn.execute(text("UPDATE branch_members SET status = 'removed' WHERE user_id = :u"), {"u": staff})
+        with pytest.raises(relay.RelayRevoked):
+            await relay.push(conn, org=org, user=staff, replica_id=staff_phone, items=[
+                {"id": str(uuid4()), "branch_id": str(branch), "kind": "ops", "payload": {"changes": []}}])

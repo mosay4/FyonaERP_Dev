@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core_business/data/local_directory/directory_pilot.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -53,7 +54,8 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
                   tooltip: 'إضافة موظف',
                   icon: const Icon(Icons.person_add_alt_1_rounded),
                   onPressed: () async {
-                    if (!await ensureBusinessOnline(context) ||
+                    if (ref.read(businessLocalLedgerScopeProvider) == null &&
+                        !await ensureBusinessOnline(context) ||
                         !context.mounted) {
                       return;
                     }
@@ -118,7 +120,8 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
                     if (!BranchScope.readOnly)
                       FilledButton.icon(
                         onPressed: () async {
-                          if (!await ensureBusinessOnline(context) ||
+                          if (ref.read(businessLocalLedgerScopeProvider) == null &&
+                        !await ensureBusinessOnline(context) ||
                               !context.mounted) {
                             return;
                           }
@@ -155,7 +158,8 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(16),
                     onTap: () async {
-                      if (!await ensureBusinessOnline(context) ||
+                      if (ref.read(businessLocalLedgerScopeProvider) == null &&
+                        !await ensureBusinessOnline(context) ||
                           !context.mounted) {
                         return;
                       }

@@ -92,6 +92,8 @@ async def push(body: PushBody, org_id: str = Depends(get_current_org_id),
             replica_id=body.replica_id,
             items=[item.model_dump() for item in body.items],
         )
+    except relay.RelayRevoked as exc:
+        raise HTTPException(410, "انتهت صلاحية الوصول") from exc
     except relay.RelayAccessDenied as exc:
         raise _denied(exc) from exc
     except relay.RelayInvalid as exc:
