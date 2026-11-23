@@ -20,6 +20,12 @@ def _op(branch, body="x"):
             "payload": {"changes": body}}
 
 
+async def _org_ops(conn, org):
+    return (await conn.execute(text(
+        "SELECT COUNT(*) FROM business_relay_ops WHERE organization_id = :o"
+    ), {"o": org})).scalar()
+
+
 async def _count(conn, table):
     return (await conn.execute(text(f"SELECT COUNT(*) FROM {table}"))).scalar()
 
@@ -117,3 +123,25 @@ async def test_strangers_cannot_use_another_organization_replica(engine):
         with pytest.raises(relay.RelayAccessDenied):
             await relay.register(conn, org=other_org, user=stranger, session=None,
                                  replica_id=mine)
+
+
+@pytest.mark.asyncio
+async def test_a_retired_device_no_longer_holds_anything_back(engine):
+    org, owner, branch, _ = await _seed(engine, f"relay-{uuid4().hex[:20]}@example.test")
+    await _ready(engine)
+    a, gone = uuid4(), uuid4()
+    async with engine.begin() as conn:
+        await relay.register(conn, org=org, user=owner, session=None, replica_id=a)
+        await relay.register(conn, org=org, user=owner, session=None, replica_id=gone)
+        await relay.push(conn, org=org, user=owner, replica_id=a, items=[_op(branch)])
+        assert await _org_ops(conn, org) == 1
+        await relay.retire(conn, org=org, user=owner, replica_id=gone)
+        # It only waited for the retired device: deleted.
+        assert await _org_ops(conn, org) == 0
+        # A device that is alone again holds the only copy: no resync.
+        fresh = await relay.request_snapshot(conn, org=org, user=owner, replica_id=a)
+        assert fresh["requested"] is False
+        with pytest.raises(relay.RelayAccessDenied):
+            await relay.pull(conn, org=org, user=owner, replica_id=gone)
+        mine = await relay.my_replicas(conn, org=org, user=owner)
+        assert [r["replica_id"] for r in mine] == [str(a)]

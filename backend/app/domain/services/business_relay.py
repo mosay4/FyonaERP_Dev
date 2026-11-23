@@ -394,6 +394,27 @@ async def snapshot_applied(conn: AsyncConnection, *, org: UUID, user: UUID,
                        .values(resync_required=False))
 
 
+async def my_replicas(conn: AsyncConnection, *, org: UUID,
+                      user: UUID) -> list[dict]:
+    """The caller's own live devices (for device management)."""
+    rows = (await conn.execute(select(replicas).where(
+        replicas.c.organization_id == org, replicas.c.user_id == user,
+        replicas.c.retired.is_(False),
+    ).order_by(replicas.c.created_us))).mappings().all()
+    return [{"replica_id": str(r["id"]), "created_us": r["created_us"],
+             "last_seen_us": r["last_seen_us"],
+             "session_id": str(r["session_id"]) if r["session_id"] else None}
+            for r in rows]
+
+
+async def retire(conn: AsyncConnection, *, org: UUID, user: UUID,
+                 replica_id: UUID) -> None:
+    """A device leaves (logout, uninstall, test device): nothing waits for it
+    any more, and what only waited for it is deleted."""
+    source = await _replica(conn, org, user, replica_id, lock=True)
+    await _retire(conn, org, source["id"])
+
+
 async def retire_sessions(conn: AsyncConnection, *, org: UUID) -> int:
     """A replica whose last session was revoked (logout, removed device) stops
     receiving; what waited for it is dropped."""

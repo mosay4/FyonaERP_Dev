@@ -170,3 +170,24 @@ async def snapshot_applied(body: _Body, org_id: str = Depends(get_current_org_id
         raise _denied(exc) from exc
     await db.commit()
     return ok({})
+
+
+@router.post("/retire", summary="إيقاف هذا الجهاز عن استلام العمليات")
+async def retire(body: _Body, org_id: str = Depends(get_current_org_id),
+                 user_id: UUID = Depends(get_current_user_uuid),
+                 db: AsyncSession = Depends(get_db)):
+    try:
+        await relay.retire(await _ready(db), org=UUID(org_id), user=user_id,
+                           replica_id=body.replica_id)
+    except relay.RelayAccessDenied as exc:
+        raise _denied(exc) from exc
+    await db.commit()
+    return ok({})
+
+
+@router.get("/replicas", summary="أجهزتي المرتبطة بمحطة العبور")
+async def replicas(org_id: str = Depends(get_current_org_id),
+                   user_id: UUID = Depends(get_current_user_uuid),
+                   db: AsyncSession = Depends(get_db)):
+    return ok({"items": await relay.my_replicas(await _ready(db), org=UUID(org_id),
+                                                user=user_id)})
