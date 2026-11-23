@@ -233,7 +233,7 @@ def _reply_summary(m: ChatMessage, side: str, numbers: Dict[str, str]) -> Dict[s
         "file_name": m.file_name,
         "duration_ms": m.duration_ms,
         "media_count": _media_count(m),
-        "invoice_number": (numbers.get(str(m.invoice_id))
+        "invoice_number": ((numbers.get(str(m.invoice_id)) or m.file_name)
                            if m.invoice_id else None),
         "deleted": m.deleted_at is not None,
     }
@@ -279,7 +279,8 @@ def _msg_dict(m: ChatMessage, side: str, numbers: Dict[str, str],
         "file_name": m.file_name,
         "duration_ms": m.duration_ms,
         "invoice_id": str(m.invoice_id) if m.invoice_id else None,
-        "invoice_number": numbers.get(str(m.invoice_id)) if m.invoice_id else None,
+        "invoice_number": ((numbers.get(str(m.invoice_id)) or m.file_name)
+                           if m.invoice_id else None),
     })
     return base
 
@@ -482,7 +483,15 @@ async def send_message(
     if kind == "invoice":
         if invoice_id is None:
             raise ValueError("اختر فاتورة")
-        inv = await _invoice_for_link(db, link, invoice_id)
+        try:
+            inv = await _invoice_for_link(db, link, invoice_id)
+        except ValueError:
+            # A device-ledger business: its invoices live on the devices. The
+            # message carries the shared invoice id and its number.
+            from ...core import business_local_mode
+            if not (file_name and await business_local_mode.organization_enabled(
+                    db, link.merchant_org_id)):
+                raise
     recipient = (link.invited_by if side == "personal"
                  else link.external_user_id)
     if recipient is None:

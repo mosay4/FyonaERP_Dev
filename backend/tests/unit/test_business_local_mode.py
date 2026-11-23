@@ -85,3 +85,36 @@ async def test_an_employee_works_only_in_their_branches(engine, monkeypatch):
         with pytest.raises(relay.RelayRevoked):
             await relay.push(conn, org=org, user=staff, replica_id=staff_phone, items=[
                 {"id": str(uuid4()), "branch_id": str(branch), "kind": "ops", "payload": {"changes": []}}])
+
+
+@pytest.mark.asyncio
+async def test_chat_invoice_message_for_a_device_ledger_business(engine, monkeypatch):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.domain.entities.merchant_entities import MerchantLink
+    from app.domain.services import chat_service
+
+    boss = f"local-{uuid4().hex[:20]}@example.test"
+    org, owner, _branch, _ = await _seed(engine, boss)
+    _, customer, _, _ = await _seed(engine, f"c-{uuid4().hex[:20]}@example.test")
+    link, invoice = uuid4(), uuid4()
+    from app.domain.entities import chat_entities
+    async with engine.begin() as conn:
+        for table in (chat_entities.ChatMessage.__table__, chat_entities.ChatPresence.__table__):
+            await conn.run_sync(table.create, checkfirst=True)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker.begin() as db:
+        db.add(MerchantLink(id=link, merchant_org_id=org, party_kind="customer",
+                            party_id=uuid4(), external_user_id=customer,
+                            invited_by=owner, status="accepted"))
+    # Not a device-ledger business: an unknown invoice is refused as before.
+    async with maker() as db:
+        with pytest.raises(ValueError):
+            await chat_service.send_message(db, owner, link, side="merchant", kind="invoice",
+                                            invoice_id=invoice, file_name="INV-1")
+    monkeypatch.setattr(qa_directory, "INVITES", frozenset({boss}))
+    async with maker() as db:
+        sent = await chat_service.send_message(db, owner, link, side="merchant", kind="invoice",
+                                               invoice_id=invoice, file_name="INV-1")
+        await db.commit()
+    message = sent.get("message", sent)
+    assert message["invoice_number"] == "INV-1"

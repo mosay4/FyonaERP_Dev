@@ -697,13 +697,21 @@ class MerchantApi {
   Future<void> deleteChat(String linkId, String messageId) =>
       _client.delete('/chat/$linkId/messages/$messageId');
 
-  Future<List<Map<String, dynamic>>> chatInvoices(String linkId, {String? q}) =>
-      _list(
-        _client.get(
-          '/chat/$linkId/invoices',
-          queryParameters: {if (q != null && q.isNotEmpty) 'q': q},
-        ),
-      );
+  Future<List<Map<String, dynamic>>> chatInvoices(String linkId, {String? q}) async {
+    // Device-ledger merchant: the invoices both sides hold in the shared debt
+    // copy (works offline; ids match on both devices).
+    final shared = await _shared(linkId);
+    if (shared != null) {
+      final query = (q ?? '').trim();
+      return [
+        for (final op in PeerDebtViews.operations(shared, '${shared['kind'] ?? 'customer'}'))
+          if (query.isEmpty || '${op['number']}'.contains(query)) op,
+      ];
+    }
+    return _list(_client.get('/chat/$linkId/invoices', queryParameters: {
+      if (q != null && q.isNotEmpty) 'q': q,
+    }));
+  }
 
   Future<Map<String, String>> uploadChatMedia(
     String linkId,

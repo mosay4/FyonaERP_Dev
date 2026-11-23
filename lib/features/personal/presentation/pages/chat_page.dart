@@ -547,6 +547,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
           text: message['text'],
           replyToId: message['reply_to_id'],
           invoiceId: message['invoice_id'],
+          // A device-ledger invoice is known to the other side by its number.
+          fileName: message['kind'] == 'invoice'
+              ? message['invoice_number']?.toString()
+              : null,
           clientId: message['client_id'],
         );
         if (result['message'] is! Map || result['message']['id'] == null) {

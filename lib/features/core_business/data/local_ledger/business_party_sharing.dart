@@ -11,6 +11,7 @@ import '../local_directory/directory_database.dart';
 import '../local_directory/directory_party.dart';
 import '../local_directory/directory_pilot.dart';
 import '../local_directory/directory_scope.dart';
+import '../../../personal/data/peer_store.dart';
 import 'business_money.dart';
 import 'business_relay_identity.dart';
 
@@ -357,6 +358,12 @@ final class BusinessPartySharing {
             headers: {'Authorization': 'Bearer ${auth.accessToken}'},
           ),
         );
+    // The merchant keeps the copy it shares too (chat invoice picker,
+    // offline views use the same ids on both sides).
+    await PeerStore.of(scope.workspace.accountId).saveDebtSnapshot(
+      linkId,
+      Map<String, dynamic>.from(payload),
+    );
     await post('/register', {'device_id': device});
     await post('/push', {
       'device_id': device,
