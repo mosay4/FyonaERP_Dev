@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_database.dart';
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_party.dart';
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_scope.dart';
+import 'package:fyona_flutter/features/core_business/data/local_ledger/business_money.dart';
 import 'package:uuid/uuid.dart';
 
 import 'support/directory_test_keys.dart';
@@ -249,5 +250,148 @@ void main() {
       (await a.db.search(a.directory, _customer, '')).map((p) => p.name).toSet(),
       {'قديم', 'جديد'},
     );
+  });
+
+  Future<String> stockedProduct(_Device d, int pieces) async {
+    final supplier = await d.db.create(d.directory, DirectoryPartyKind.supplier, name: 'مورد');
+    final purchase = await d.ledger.issueCommerceDocument(
+      d.access,
+      kind: BusinessInvoiceKind.purchase,
+      commandId: _id(),
+      currency: 'YER_OLD',
+      partyId: supplier.id,
+      lines: [
+        CommerceIssueLine(
+          description: 'منتج',
+          quantity: '$pieces',
+          unitMinor: 300000,
+          newProduct: {'name': 'منتج', 'unit': 'قطعة', 'sell_price': '5000'},
+        ),
+      ],
+      payments: const [],
+    );
+    final doc = await d.ledger.commerceInvoice(
+      d.access,
+      BusinessInvoiceKind.purchase,
+      purchase['id'] as String,
+    );
+    return ((doc!['items'] as List).single as Map)['product_id'] as String;
+  }
+
+  Future<num> stock(_Device d, String product) async =>
+      (await d.ledger.commerceProducts(d.access))
+          .singleWhere((p) => p['id'] == product)['stock'] as num;
+
+  test('the same remaining stock sold on two devices offline: the first sale '
+      'to reach the server stays, the other invoice is cancelled', () async {
+    final a = await device('أحمد');
+    final b = await device('سالم');
+    final product = await stockedProduct(a, 50);
+    final customer = await a.db.create(a.directory, _customer, name: 'قاسم');
+    await relay.sync([a, b]);
+    await relay.sync([a, b]);
+    expect(await stock(b, product), 50);
+
+    Future<Map<String, Object?>> sellAll(_Device d) =>
+        d.ledger.issueCommerceDocument(
+          d.access,
+          kind: BusinessInvoiceKind.sale,
+          commandId: _id(),
+          currency: 'YER_OLD',
+          partyId: customer.id,
+          lines: [
+            CommerceIssueLine(
+              description: 'منتج',
+              quantity: '50',
+              unitMinor: 500000,
+              productId: product,
+            ),
+          ],
+          payments: const [],
+        );
+    final first = await sellAll(a);
+    final second = await sellAll(b);
+    // Both succeeded locally, as if online.
+    expect(await stock(a, product), 0);
+    expect(await stock(b, product), 0);
+
+    await relay.push(b); // Salem reaches the server first
+    await relay.push(a);
+    await relay.sync([a, b]);
+    await relay.sync([a, b]);
+
+    for (final d in [a, b]) {
+      expect(await stock(d, product), 0, reason: 'stock on ${d.replica}');
+      // Only Salem's invoice remains.
+      expect(
+        await d.ledger.commerceInvoice(d.access, BusinessInvoiceKind.sale, first['id'] as String),
+        isNull,
+        reason: 'cancelled invoice on ${d.replica}',
+      );
+      expect(
+        await d.ledger.commerceInvoice(d.access, BusinessInvoiceKind.sale, second['id'] as String),
+        isNotNull,
+      );
+    }
+    final notices = await a.db.syncNotices();
+    expect(notices.map((n) => n.kind), ['stockShort']);
+    expect(notices.single.details['by_name'], 'سالم');
+    expect(await b.db.syncNotices(), isEmpty);
+  });
+
+  test('the same bank account opened on two devices offline is kept once',
+      () async {
+    final a = await device('أحمد');
+    final b = await device('سالم');
+    await relay.sync([a, b]);
+    Future<String> open(_Device d) async {
+      final id = _id();
+      await d.ledger.createAccount(
+        d.access,
+        commandId: id,
+        bankName: 'كريمي',
+        accountName: 'كريمي',
+        accountNumber: '1',
+        currency: 'YER_OLD',
+        managed: true,
+      );
+      return id;
+    }
+
+    final mine = await open(a);
+    final theirs = await open(b);
+    // Ahmad later deposits into his copy: it goes with it.
+    await a.ledger.move(a.access, commandId: _id(), accountId: mine, amountMinor: 1000, withdraw: false);
+    await relay.push(b);
+    await relay.push(a);
+    await relay.sync([a, b]);
+    await relay.sync([a, b]);
+    for (final d in [a, b]) {
+      final banks = (await d.ledger.accounts(d.access))
+          .where((r) => r['bank_name'] == 'كريمي')
+          .map((r) => r['id'])
+          .toList();
+      expect(banks, [theirs], reason: 'accounts on ${d.replica}');
+    }
+    final kinds = (await a.db.syncNotices()).map((n) => n.kind).toSet();
+    expect(kinds, {'duplicate', 'dependent'});
+  });
+
+  test('the same cash withdrawn on two devices: the first one stays', () async {
+    final a = await device('أحمد');
+    final b = await device('سالم');
+    final till = await openAccount(a, opening: 10000);
+    await relay.sync([a, b]);
+    await a.ledger.move(a.access, commandId: _id(), accountId: till, amountMinor: 10000, withdraw: true);
+    await b.ledger.move(b.access, commandId: _id(), accountId: till, amountMinor: 10000, withdraw: true);
+    await relay.push(a);
+    await relay.push(b);
+    await relay.sync([a, b]);
+    await relay.sync([a, b]);
+    for (final d in [a, b]) {
+      expect(await d.balance(till), 0, reason: 'till on ${d.replica}');
+    }
+    expect((await b.db.syncNotices()).map((n) => n.kind), ['balanceShort']);
+    expect(await a.db.syncNotices(), isEmpty);
   });
 }

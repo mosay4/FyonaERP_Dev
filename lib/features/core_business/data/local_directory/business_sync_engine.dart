@@ -3,12 +3,24 @@ part of 'directory_database.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // Business sync engine — local-first, the server is only a relay.
 //
-// Every Business write commits here first (unchanged texts, no waiting). SQLite
+// Every Business write commits here first (unchanged texts, no waiting). TEMP
 // triggers capture the row images of the write into one operation that waits
 // in the outbox. The relay stamps operations with the organization's arrival
 // sequence and carries them to the other devices, then deletes them.
+//
 // Every device applies the same operations in the same sequence order with the
-// same rules, so all of them converge and take the same conflict decisions.
+// same rules, so all of them converge and take the same conflict decisions:
+//
+// * Counters (stock, lot quantities, balances, paid/remaining amounts) travel
+//   as deltas: «sold 50» from another device is −50 here, never «now 0».
+// * Other columns: the last writer by sequence wins.
+// * Floors: a counter replayed in sequence order may not cross its floor
+//   (stock below zero, cash below zero when not allowed, a debt paid twice).
+//   The first operation that crosses it is cancelled, with everything built
+//   on it, and its author gets a notice naming who was first.
+// * Duplicates: the same bank/cash slot created on two devices — the one
+//   sequenced first stays, the other is cancelled with everything built on it.
+//
 // See docs/BUSINESS_SYNC_ENGINE.md.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -19,6 +31,7 @@ const _syncRows = 'business_sync_rows';
 const _syncState = 'business_sync_state';
 const _syncContext = 'business_sync_context';
 const _syncNotices = 'business_sync_notices';
+const _syncNever = 9223372036854775807;
 
 /// Business tables that travel between devices, with the key that identifies
 /// a row on every device. A local AUTOINCREMENT is never a shared identity.
@@ -64,46 +77,83 @@ const Map<String, List<String>> _syncTables = {
   'business_employee_receipts': ['branch_id', 'command_id'],
 };
 
-/// Columns that are never copied from another device: each device keeps them
-/// as the sum of the facts it holds (see [_syncAggregates]).
-const Map<String, Set<String>> _syncDerived = {
+/// Counter columns: merged as deltas, so concurrent work adds up.
+const Map<String, Set<String>> _syncCounters = {
   'business_local_accounts': {'balance_minor'},
-  'business_local_bank_legs': {'balance_minor', 'sequence'},
   'business_local_debts': {'paid_minor'},
+  'business_commerce_stock': {'quantity_milli'},
+  'business_commerce_lots': {'remaining_micro'},
+  'business_commerce_lot_consumptions': {'restored_micro'},
+  'business_commerce_invoices': {'paid_minor', 'balance_minor'},
+  'business_commerce_party_balances': {'paid_minor'},
+  'business_employee_debts': {'remaining_minor'},
 };
 
-/// Additive facts: a child row adds its value to a parent column. Concurrent
-/// payments from two devices therefore add up instead of overwriting.
-typedef _SyncAggregate = ({
-  String child,
-  String value,
-  String parent,
+/// Why a device cancels one of two operations that cannot both hold.
+enum BusinessSyncConflict {
+  debtOverpaid,
+  stockShort,
+  balanceShort,
+  duplicate,
+  dependent,
+}
+
+/// A floor on a counter. [crossed] sees the row as it was after each operation.
+typedef _SyncFloor = ({
+  String table,
   String column,
-  Map<String, String> keys, // child column -> parent column
-  String? running, // child column receiving the parent value after the fact
+  BusinessSyncConflict reason,
+  Future<bool> Function(DatabaseExecutor db, Map<String, Object?> row) crossed,
 });
 
-const List<_SyncAggregate> _syncAggregates = [
+final List<_SyncFloor> _syncFloors = [
   (
-    child: 'business_local_bank_legs',
-    value: 'delta_minor',
-    parent: 'business_local_accounts',
-    column: 'balance_minor',
-    keys: {'branch_id': 'branch_id', 'account_id': 'id'},
-    running: 'balance_minor',
+    table: 'business_commerce_stock',
+    column: 'quantity_milli',
+    reason: BusinessSyncConflict.stockShort,
+    crossed: (_, row) async => _syncInt(row['quantity_milli']) < 0,
   ),
   (
-    child: 'business_local_payment_parts',
-    value: 'applied_minor',
-    parent: 'business_local_debts',
+    table: 'business_commerce_lots',
+    column: 'remaining_micro',
+    reason: BusinessSyncConflict.stockShort,
+    crossed: (_, row) async => _syncInt(row['remaining_micro']) < 0,
+  ),
+  (
+    table: 'business_local_accounts',
+    column: 'balance_minor',
+    reason: BusinessSyncConflict.balanceShort,
+    crossed: (db, row) async =>
+        _syncInt(row['balance_minor']) < 0 &&
+        (await db.query(
+              'business_ledger_policy',
+              columns: ['allow_negative'],
+              where: 'branch_id = ?',
+              whereArgs: [row['branch_id']],
+            )).singleOrNull?['allow_negative'] !=
+            1,
+  ),
+  (
+    table: 'business_local_debts',
     column: 'paid_minor',
-    keys: {'branch_id': 'branch_id', 'invoice_id': 'id'},
-    running: null,
+    reason: BusinessSyncConflict.debtOverpaid,
+    crossed: (_, row) async =>
+        row['cancelled_us'] == null &&
+        _syncInt(row['paid_minor']) > _syncInt(row['total_minor']),
+  ),
+  (
+    table: 'business_commerce_invoices',
+    column: 'balance_minor',
+    reason: BusinessSyncConflict.debtOverpaid,
+    crossed: (_, row) async => _syncInt(row['balance_minor']) < 0,
+  ),
+  (
+    table: 'business_employee_debts',
+    column: 'remaining_minor',
+    reason: BusinessSyncConflict.debtOverpaid,
+    crossed: (_, row) async => _syncInt(row['remaining_minor']) < 0,
   ),
 ];
-
-/// The reason a device cancels one of two operations that cannot both hold.
-enum BusinessSyncConflict { debtOverpaid, duplicate }
 
 /// One operation as stored/sent: the row changes of one local transaction.
 typedef BusinessSyncOperation = ({
@@ -132,6 +182,10 @@ typedef BusinessSyncNotice = ({
   bool read,
 });
 
+/// Fires after every local write that produced an operation, so it can leave
+/// the device at once.
+final businessSyncLocalWrites = StreamController<String>.broadcast(sync: false);
+
 Future<void> _createBusinessSync(DatabaseExecutor db) async {
   await db.execute('''
     CREATE TABLE IF NOT EXISTS $_syncState (
@@ -147,9 +201,16 @@ Future<void> _createBusinessSync(DatabaseExecutor db) async {
       pk TEXT NOT NULL,
       kind TEXT NOT NULL CHECK (kind IN ('insert', 'update', 'delete')),
       old_row TEXT,
-      new_row TEXT
+      new_row TEXT,
+      delta TEXT
     )
   ''');
+  final columns = {
+    for (final c in await db.rawQuery('PRAGMA table_info($_syncChanges)')) c['name'],
+  };
+  if (!columns.contains('delta')) {
+    await db.execute('ALTER TABLE $_syncChanges ADD COLUMN delta TEXT');
+  }
   await db.execute(
     'CREATE INDEX IF NOT EXISTS business_sync_changes_op ON $_syncChanges (op_id, ord)',
   );
@@ -246,10 +307,10 @@ Future<void> _installBusinessSyncTriggers(DatabaseExecutor db) async {
 }
 
 Future<List<String>> _syncColumns(DatabaseExecutor db, String table) async {
-  final derived = table == 'business_local_bank_legs' ? {'sequence'} : <String>{};
+  final local = table == 'business_local_bank_legs' ? {'sequence'} : <String>{};
   return [
     for (final row in await db.rawQuery('PRAGMA table_info("$table")'))
-      if (!derived.contains(row['name'])) row['name'] as String,
+      if (!local.contains(row['name'])) row['name'] as String,
   ];
 }
 
@@ -294,8 +355,8 @@ extension BusinessSyncEngine on DirectoryDatabase {
   }
 
   /// Turns the captured changes of this transaction into one operation in the
-  /// outbox, atomically with the write itself.
-  Future<void> _syncSeal(Transaction txn, String opId) async {
+  /// outbox, atomically with the write itself. Returns whether it made one.
+  Future<bool> _syncSeal(Transaction txn, String opId) async {
     await txn.execute('DELETE FROM temp.$_syncContext');
     final changes = await txn.query(
       _syncChanges,
@@ -303,10 +364,10 @@ extension BusinessSyncEngine on DirectoryDatabase {
       whereArgs: [opId],
       orderBy: 'ord',
     );
-    if (changes.isEmpty) return;
+    if (changes.isEmpty) return false;
     final now = DateTime.now().toUtc().microsecondsSinceEpoch;
     final payload = <String, Object?>{
-      'v': 1,
+      'v': 2,
       'id': opId,
       'author_replica': await _syncGet(txn, 'replica_id'),
       'author_user': await _syncGet(txn, 'author_user'),
@@ -334,8 +395,8 @@ extension BusinessSyncEngine on DirectoryDatabase {
       'applied_us': now,
     });
     for (final c in changes) {
-      // A change that only moved derived totals (a balance) does not make the
-      // row «ours»: another device may still rename that account.
+      // A change that only moved counters (a balance, a stock quantity) does
+      // not make the row «ours»: another device may still rename it.
       if (!_syncTouchesOwnColumns(c)) continue;
       await txn.rawInsert(
         '''
@@ -345,6 +406,7 @@ extension BusinessSyncEngine on DirectoryDatabase {
         [c['tbl'], c['pk'], opId],
       );
     }
+    return true;
   }
 
   // ── outbox / push ─────────────────────────────────────────────────────────
@@ -400,7 +462,7 @@ extension BusinessSyncEngine on DirectoryDatabase {
   }) async {
     final stored = <String>[];
     final ordered = [...items]
-      ..sort((a, b) => (a.seq ?? 1 << 62).compareTo(b.seq ?? 1 << 62));
+      ..sort((a, b) => (a.seq ?? _syncNever).compareTo(b.seq ?? _syncNever));
     var through = await syncConfirmedThrough();
     for (final item in ordered) {
       if (item.kind != 'ops') continue;
@@ -411,10 +473,19 @@ extension BusinessSyncEngine on DirectoryDatabase {
     if (drained && head > through) through = head;
     await _transactionRaw((txn) async {
       await _syncPut(txn, 'confirmed_through', '$through');
-      await _syncResolve(txn, through);
+      await _syncResolve(txn, through, complete: drained);
     }, exclusive: true);
     return stored;
   }
+
+  /// Decide conflicts with what is already stored (e.g. right after this
+  /// device's own writes were sequenced and nothing else is waiting).
+  Future<void> syncSettle({required int head}) => _transactionRaw((txn) async {
+    final known = int.tryParse(await _syncGet(txn, 'confirmed_through') ?? '') ?? 0;
+    final through = head > known ? head : known;
+    await _syncPut(txn, 'confirmed_through', '$through');
+    await _syncResolve(txn, through, complete: true);
+  }, exclusive: true);
 
   Future<void> _syncApplyOne(Transaction txn, BusinessSyncDelivery item) async {
     final known = await txn.query(
@@ -436,7 +507,8 @@ extension BusinessSyncEngine on DirectoryDatabase {
     }
     final p = item.payload;
     final changes = [
-      for (final c in p['changes'] as List? ?? const []) Map<String, Object?>.from(c as Map),
+      for (final c in p['changes'] as List? ?? const [])
+        Map<String, Object?>.from(c as Map),
     ];
     final now = DateTime.now().toUtc().microsecondsSinceEpoch;
     await txn.insert(_syncLog, {
@@ -466,8 +538,13 @@ extension BusinessSyncEngine on DirectoryDatabase {
         // Two operations that cannot both exist (e.g. the same unique row made
         // on two devices). The one sequenced later loses. Our unsent
         // operations are always later than anything already sequenced.
-        final pending = await _syncPendingLocal(txn);
-        if (attempt++ > 50 || pending.isEmpty || !_syncIsConstraint(error)) {
+        // The stored rows refuse it (a unique row made twice, a stock or
+        // balance that cannot go below zero...). Whatever touched the same
+        // rows *after* it in server order is what loses; retry without it.
+        final later = attempt++ > 50 || !_syncIsConstraint(error)
+            ? null
+            : await _syncLaterOnSameRows(txn, item.seq, changes);
+        if (later == null) {
           await _syncDiscardRemote(txn, item.id);
           await _syncNoteRejected(
             txn,
@@ -477,12 +554,7 @@ extension BusinessSyncEngine on DirectoryDatabase {
           );
           return;
         }
-        await _syncReject(
-          txn,
-          pending.first,
-          BusinessSyncConflict.duplicate,
-          winner: item.id,
-        );
+        await _syncReject(txn, later.$1, later.$2, winner: item.id);
       }
     }
   }
@@ -493,55 +565,99 @@ extension BusinessSyncEngine on DirectoryDatabase {
     int? seq,
     List<Map<String, Object?>> changes,
   ) async {
-    // Children added by this operation, per parent row, so a new parent row
-    // starts from the value its facts will add up to.
-    final incoming = <String, int>{};
-    for (final c in changes) {
-      final agg = _syncAggregateFor(c['t'] as String);
-      if (agg == null || c['k'] != 'insert') continue;
-      final row = c['new'] as Map;
-      final key = _syncParentKey(agg, row);
-      incoming[key] = (incoming[key] ?? 0) + ((row[agg.value] as num?)?.toInt() ?? 0);
-    }
+    final legs = <Map<String, Object?>>[];
     for (final c in changes) {
       final table = c['t'] as String;
-      final keyColumns = _syncTables[table];
-      if (keyColumns == null) continue; // a table this version does not hold
-      final pk = jsonEncode(c['pk']);
+      final keys = _syncTables[table];
+      if (keys == null) continue; // a table this version does not hold
+      final pkList = c['pk'] as List;
+      final pk = jsonEncode(pkList);
+      final kind = c['k'] as String;
+      final wireOld = c['old'] == null ? null : Map<String, Object?>.from(c['old'] as Map);
+      final wireNew = c['new'] == null ? null : Map<String, Object?>.from(c['new'] as Map);
+      final counters = _syncCounters[table] ?? const <String>{};
       final state = (await txn.query(
         _syncRows,
         where: 'tbl = ? AND pk = ?',
         whereArgs: [table, pk],
       )).singleOrNull;
-      final kind = c['k'] as String;
-      final newRow = c['new'] == null ? null : Map<String, Object?>.from(c['new'] as Map);
-      final current = await _syncCurrent(txn, table, keyColumns, c['pk'] as List);
+      final current = await _syncCurrent(txn, table, keys, pkList);
       // Last writer by sequence wins; our pending (later) change keeps its row.
       final stale = state != null &&
           (state['pending_op'] != null ||
               (seq != null && (state['last_seq'] as int? ?? 0) > seq));
-      if (stale && kind != 'insert') continue;
-      if (stale && current != null) continue;
+      final columns = (await _syncColumns(txn, table)).toSet();
+      String? recorded;
+      Map<String, int>? delta;
+      if (kind == 'delete') {
+        if (current == null || stale) continue;
+        await _syncDeleteRow(txn, table, keys, current);
+        recorded = 'delete';
+      } else if (current == null) {
+        if (kind == 'update' && stale) continue;
+        await txn.insert(table, {
+          for (final MapEntry(:key, :value) in wireNew!.entries)
+            if (columns.contains(key)) key: value,
+        });
+        recorded = 'insert';
+        if (table == 'business_local_bank_legs') legs.add(wireNew);
+      } else {
+        // Counters move by what the other device changed, not to its value.
+        // (A row that already exists here is never «added» twice.)
+        delta = {
+          if (kind == 'update')
+            for (final col in counters)
+              if (wireNew!.containsKey(col))
+                col: _syncInt(wireNew[col]) - _syncInt(wireOld?[col]),
+        }..removeWhere((_, v) => v == 0);
+        final updates = <String, Object?>{
+          if (!stale)
+            for (final MapEntry(:key, :value) in wireNew!.entries)
+              if (columns.contains(key) &&
+                  !keys.contains(key) &&
+                  !counters.contains(key))
+                key: value,
+        };
+        if (kind == 'insert' && updates.isEmpty && delta.isEmpty) continue;
+        final set = [
+          for (final c in updates.keys) '"$c" = ?',
+          for (final c in delta.keys) '"$c" = "$c" + ?',
+        ];
+        if (set.isEmpty) continue;
+        await txn.rawUpdate(
+          'UPDATE "$table" SET ${set.join(', ')} WHERE ${keys.map((k) => '"$k" IS ?').join(' AND ')}',
+          [...updates.values, ...delta.values, for (final k in keys) current[k]],
+        );
+        recorded = 'update';
+      }
       await txn.insert(_syncChanges, {
         'op_id': opId,
         'tbl': table,
         'pk': pk,
-        'kind': current == null ? 'insert' : (kind == 'delete' ? 'delete' : 'update'),
+        'kind': recorded,
         'old_row': current == null ? null : jsonEncode(current),
-        'new_row': newRow == null ? null : jsonEncode(newRow),
+        'new_row': wireNew == null ? null : jsonEncode(wireNew),
+        'delta': delta == null || delta.isEmpty ? null : jsonEncode(delta),
       });
-      if (kind == 'delete') {
-        if (current == null) continue;
-        await _syncDelete(txn, table, keyColumns, current);
-      } else {
-        await _syncUpsert(txn, table, keyColumns, newRow!, current, incoming);
-      }
       await txn.rawInsert(
         '''
         INSERT INTO $_syncRows (tbl, pk, last_seq, pending_op) VALUES (?, ?, ?, NULL)
         ON CONFLICT (tbl, pk) DO UPDATE SET last_seq = MAX(COALESCE(last_seq, 0), excluded.last_seq)
         ''',
         [table, pk, seq],
+      );
+    }
+    // A statement line shows the account balance after it, on this device.
+    for (final leg in legs) {
+      await txn.rawUpdate(
+        '''
+        UPDATE business_local_bank_legs SET balance_minor = (
+          SELECT balance_minor FROM business_local_accounts a
+          WHERE a.branch_id = business_local_bank_legs.branch_id
+            AND a.id = business_local_bank_legs.account_id)
+        WHERE branch_id = ? AND command_id = ? AND account_id = ?
+        ''',
+        [leg['branch_id'], leg['command_id'], leg['account_id']],
       );
     }
   }
@@ -562,208 +678,214 @@ extension BusinessSyncEngine on DirectoryDatabase {
     return rows.isEmpty ? null : Map<String, Object?>.from(rows.single);
   }
 
-  Future<void> _syncUpsert(
-    Transaction txn,
-    String table,
-    List<String> keys,
-    Map<String, Object?> wire,
-    Map<String, Object?>? current,
-    Map<String, int> incoming,
-  ) async {
-    final columns = await _syncColumns(txn, table);
-    final derived = _syncDerived[table] ?? const <String>{};
-    final row = <String, Object?>{
-      for (final c in columns)
-        if (wire.containsKey(c)) c: wire[c],
-    };
-    if (current == null) {
-      // A new parent starts at what its own facts in this operation do not
-      // explain (e.g. an imported opening balance); the facts then add up.
-      for (final agg in _syncAggregates.where((a) => a.parent == table)) {
-        final key = _syncParentKeyOfParent(agg, row);
-        row[agg.column] =
-            ((row[agg.column] as num?)?.toInt() ?? 0) - (incoming[key] ?? 0);
-      }
-      final child = _syncAggregateFor(table);
-      if (child?.running != null) row[child!.running!] = 0;
-      if (table == 'business_opening_debt_edits') {
-        await _syncFreeRevision(txn, row);
-      }
-      await txn.insert(table, row);
-      if (child != null) {
-        await _syncAddToParent(txn, child, row, (row[child.value] as num).toInt());
-      }
-      return;
-    }
-    final updates = <String, Object?>{
-      for (final c in row.keys)
-        if (!keys.contains(c) && !derived.contains(c)) c: row[c],
-    };
-    final child = _syncAggregateFor(table);
-    if (updates.isNotEmpty) {
-      await txn.update(
-        table,
-        updates,
-        where: keys.map((k) => '"$k" IS ?').join(' AND '),
-        whereArgs: [for (final k in keys) current[k]],
-      );
-    }
-    if (child != null) {
-      final before = (current[child.value] as num?)?.toInt() ?? 0;
-      final after = (row[child.value] as num?)?.toInt() ?? before;
-      if (after != before) await _syncAddToParent(txn, child, row, after - before);
-    }
-  }
-
-  Future<void> _syncDelete(
+  Future<void> _syncDeleteRow(
     Transaction txn,
     String table,
     List<String> keys,
     Map<String, Object?> current,
-  ) async {
-    await txn.delete(
-      table,
-      where: keys.map((k) => '"$k" IS ?').join(' AND '),
-      whereArgs: [for (final k in keys) current[k]],
-    );
-    final child = _syncAggregateFor(table);
-    if (child != null) {
-      await _syncAddToParent(
-        txn,
-        child,
-        current,
-        -((current[child.value] as num?)?.toInt() ?? 0),
-      );
-    }
-  }
-
-  Future<void> _syncAddToParent(
-    Transaction txn,
-    _SyncAggregate agg,
-    Map<String, Object?> child,
-    int delta,
-  ) async {
-    final where = agg.keys.values.map((p) => '"$p" IS ?').join(' AND ');
-    final args = [for (final c in agg.keys.keys) child[c]];
-    if (delta != 0) {
-      await txn.rawUpdate(
-        'UPDATE "${agg.parent}" SET "${agg.column}" = "${agg.column}" + ? WHERE $where',
-        [delta, ...args],
-      );
-    }
-    final running = agg.running;
-    if (running != null) {
-      final parent = await txn.query(
-        agg.parent,
-        columns: [agg.column],
-        where: where,
-        whereArgs: args,
-      );
-      if (parent.isNotEmpty) {
-        final childKeys = _syncTables[agg.child]!;
-        await txn.update(
-          agg.child,
-          {running: parent.single[agg.column]},
-          where: childKeys.map((k) => '"$k" IS ?').join(' AND '),
-          whereArgs: [for (final k in childKeys) child[k]],
-        );
-      }
-    }
-  }
-
-  /// Two devices editing the same opening debt both write «revision r+1».
-  /// The edit keeps its own identity; its revision number moves up.
-  Future<void> _syncFreeRevision(Transaction txn, Map<String, Object?> row) async {
-    final taken = await txn.query(
-      'business_opening_debt_edits',
-      columns: ['1'],
-      where: 'branch_id = ? AND invoice_id = ? AND revision = ?',
-      whereArgs: [row['branch_id'], row['invoice_id'], row['revision']],
-    );
-    if (taken.isEmpty) return;
-    final top = await txn.rawQuery(
-      'SELECT MAX(revision) AS r FROM business_opening_debt_edits WHERE branch_id = ? AND invoice_id = ?',
-      [row['branch_id'], row['invoice_id']],
-    );
-    row['revision'] = ((top.single['r'] as int?) ?? 0) + 1;
-  }
+  ) => txn.delete(
+    table,
+    where: keys.map((k) => '"$k" IS ?').join(' AND '),
+    whereArgs: [for (final k in keys) current[k]],
+  );
 
   // ── conflicts ─────────────────────────────────────────────────────────────
 
   /// Decides, for good, every conflict among operations sequenced up to
-  /// [through] — the same decisions on every device.
-  Future<void> _syncResolve(Transaction txn, int through) async {
-    await _syncResolveOverpaid(txn, through);
-  }
-
-  /// A debt cannot be paid beyond its amount: replay its facts in sequence
-  /// order; a payment that would pass the amount (someone collected it first)
-  /// is cancelled.
-  Future<void> _syncResolveOverpaid(Transaction txn, int through) async {
-    final debts = await txn.rawQuery('''
-      SELECT branch_id, id, total_minor, paid_minor FROM business_local_debts
-      WHERE paid_minor > total_minor AND cancelled_us IS NULL
-    ''');
-    for (final debt in debts) {
-      final pk = jsonEncode([debt['branch_id'], debt['id']]);
-      final events = await txn.rawQuery(
-        '''
-        SELECT c.op_id, c.tbl, c.kind, c.new_row, l.seq, l.status, c.ord
-        FROM $_syncChanges c JOIN $_syncLog l ON l.op_id = c.op_id
-        WHERE l.status = 'applied' AND (
-          (c.tbl = 'business_local_debts' AND c.pk = ?)
-          OR (c.tbl = 'business_local_payment_parts' AND c.kind = 'insert'
-              AND json_extract(c.new_row, '\$.branch_id') = ?
-              AND json_extract(c.new_row, '\$.invoice_id') = ?))
-        ORDER BY COALESCE(l.seq, 9223372036854775807), l.applied_us, c.ord
-        ''',
-        [pk, debt['branch_id'], debt['id']],
-      );
-      var total = 0, paid = 0;
-      String? lastPayer;
-      final losers = <String>[];
-      final winners = <String, String?>{};
-      for (final e in events) {
-        final row = e['new_row'] == null
-            ? const {}
-            : jsonDecode(e['new_row'] as String) as Map;
-        if (e['tbl'] == 'business_local_debts') {
-          total = (row['total_minor'] as num?)?.toInt() ?? total;
-          continue;
-        }
-        final seq = e['seq'] as int?;
-        final applied = (row['applied_minor'] as num).toInt();
-        if (paid + applied > total && seq != null && seq <= through) {
-          losers.add(e['op_id'] as String);
-          winners[e['op_id'] as String] = lastPayer;
-          continue;
-        }
-        paid += applied;
-        lastPayer = e['op_id'] as String;
-      }
-      for (final op in losers.toSet()) {
-        await _syncReject(
-          txn,
-          op,
-          BusinessSyncConflict.debtOverpaid,
-          winner: winners[op],
-        );
-      }
+  /// [through] — the same decisions on every device. With [complete], this
+  /// device holds every sequenced operation, so its own unsent work (always
+  /// later than all of them) can be judged too.
+  Future<void> _syncResolve(
+    Transaction txn,
+    int through, {
+    required bool complete,
+  }) async {
+    for (var round = 0; round < 20; round++) {
+      final changed =
+          await _syncResolveDuplicates(txn, through, complete: complete) |
+          await _syncResolveFloors(txn, through, complete: complete);
+      if (!changed) return;
     }
   }
 
-  Future<List<String>> _syncPendingLocal(Transaction txn) async => [
-    for (final row in await txn.query(
-      _syncLog,
-      columns: ['op_id'],
-      where: "origin = 'local' AND seq IS NULL AND status = 'applied'",
-      orderBy: 'applied_us DESC',
-    ))
-      row['op_id'] as String,
-  ];
+  bool _syncDecidable(int? seq, int through, bool complete) =>
+      seq == null ? complete : seq <= through;
 
-  /// Cancels an operation on this device: its row changes are undone (facts
-  /// adjust their totals), it is marked rejected, and its author is told why.
+  /// The same bank/cash slot (name + currency + type) opened on two devices:
+  /// the one sequenced first stays.
+  Future<bool> _syncResolveDuplicates(
+    Transaction txn,
+    int through, {
+    required bool complete,
+  }) async {
+    final accounts = await txn.query(
+      'business_local_accounts',
+      columns: ['branch_id', 'id', 'bank_name', 'currency', 'account_type'],
+      where: 'closed_us IS NULL',
+    );
+    final slots = <String, List<Map<String, Object?>>>{};
+    for (final a in accounts) {
+      final name = a['bank_name'] as String;
+      final type = _isLedgerCash(name)
+          ? _shownCashType(a['account_type'] as String)
+          : a['account_type'] as String;
+      (slots['${a['branch_id']}|${_slotKey(name)}|${a['currency']}|$type'] ??= [])
+          .add(a);
+    }
+    var changed = false;
+    for (final same in slots.values.where((rows) => rows.length > 1)) {
+      final creators = <(int, String, Map<String, Object?>)>[];
+      for (final row in same) {
+        final creator = await _syncCreator(
+          txn,
+          'business_local_accounts',
+          jsonEncode([row['branch_id'], row['id']]),
+        );
+        creators.add((creator?.$2 ?? -1, creator?.$1 ?? '', row));
+      }
+      creators.sort((a, b) => a.$1.compareTo(b.$1));
+      final first = creators.first;
+      for (final later in creators.skip(1)) {
+        if (later.$2.isEmpty) continue; // older than this device's history
+        final seq = later.$1 == _syncNever ? null : later.$1;
+        if (!_syncDecidable(seq, through, complete)) continue;
+        await _syncReject(
+          txn,
+          later.$2,
+          BusinessSyncConflict.duplicate,
+          winner: first.$2.isEmpty ? null : first.$2,
+        );
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /// (op, seq) of the operation that created a row, from the change log.
+  Future<(String, int)?> _syncCreator(
+    DatabaseExecutor db,
+    String table,
+    String pk,
+  ) async {
+    final row = (await db.rawQuery(
+      '''
+      SELECT c.op_id, COALESCE(l.seq, $_syncNever) AS seq FROM $_syncChanges c
+      JOIN $_syncLog l ON l.op_id = c.op_id
+      WHERE c.tbl = ? AND c.pk = ? AND c.kind = 'insert' AND l.status = 'applied'
+      ORDER BY COALESCE(l.seq, $_syncNever), l.applied_us LIMIT 1
+      ''',
+      [table, pk],
+    )).singleOrNull;
+    return row == null ? null : (row['op_id'] as String, row['seq'] as int);
+  }
+
+  /// Replays each counter that is now past its floor, in sequence order, and
+  /// cancels the first operation that pushed it there.
+  Future<bool> _syncResolveFloors(
+    Transaction txn,
+    int through, {
+    required bool complete,
+  }) async {
+    var changed = false;
+    for (final floor in _syncFloors) {
+      final keys = _syncTables[floor.table]!;
+      final columns = await _syncColumns(txn, floor.table);
+      for (final row in await txn.query(
+        floor.table,
+        columns: columns.map((c) => '"$c"').toList(),
+      )) {
+        if (!await floor.crossed(txn, row)) continue;
+        final pk = jsonEncode([for (final k in keys) row[k]]);
+        final events = await txn.rawQuery(
+          '''
+          SELECT c.op_id, c.kind, c.old_row, c.new_row, c.delta, l.seq
+          FROM $_syncChanges c JOIN $_syncLog l ON l.op_id = c.op_id
+          WHERE c.tbl = ? AND c.pk = ? AND l.status = 'applied'
+          ORDER BY COALESCE(l.seq, $_syncNever), l.applied_us, c.ord
+          ''',
+          [floor.table, pk],
+        );
+        if (events.isEmpty) continue;
+        // Rebuild the row as it stood before the first known operation.
+        final first = events.first;
+        final state = <String, Object?>{
+          ...row,
+          if (first['kind'] == 'insert') floor.column: 0,
+          if (first['kind'] != 'insert' && first['old_row'] != null)
+            floor.column: _syncInt(
+              (jsonDecode(first['old_row'] as String) as Map)[floor.column],
+            ),
+        };
+        String? previous;
+        for (final e in events) {
+          final move = _syncEventDelta(e, floor.column);
+          final newRow = e['new_row'] == null
+              ? const {}
+              : jsonDecode(e['new_row'] as String) as Map;
+          for (final MapEntry(:key, :value) in newRow.entries) {
+            if (key != floor.column && !(_syncCounters[floor.table]?.contains(key) ?? false)) {
+              state[key as String] = value;
+            }
+          }
+          final before = _syncInt(state[floor.column]);
+          state[floor.column] = before + move;
+          final op = e['op_id'] as String;
+          final seq = e['seq'] as int?;
+          final worse = floor.column == 'paid_minor' ? move > 0 : move < 0;
+          if (worse &&
+              await floor.crossed(txn, state) &&
+              _syncDecidable(seq == _syncNever ? null : seq, through, complete)) {
+            await _syncReject(txn, op, floor.reason, winner: previous);
+            changed = true;
+            break; // re-read the row: the rejection changed it
+          }
+          if (move != 0) previous = op;
+        }
+      }
+    }
+    return changed;
+  }
+
+  /// The latest applied operation, sequenced after [seq] (or not yet
+  /// sequenced), that touched one of the rows of [changes].
+  Future<(String, BusinessSyncConflict)?> _syncLaterOnSameRows(
+    Transaction txn,
+    int? seq,
+    List<Map<String, Object?>> changes,
+  ) async {
+    final rows = {
+      for (final c in changes) (c['t'] as String, jsonEncode(c['pk'])),
+    };
+    if (rows.isEmpty) return null;
+    final found = (await txn.rawQuery(
+      '''
+      SELECT c.op_id, c.tbl FROM $_syncChanges c JOIN $_syncLog l ON l.op_id = c.op_id
+      WHERE l.status = 'applied' AND COALESCE(l.seq, $_syncNever) > ?
+        AND (${rows.map((_) => '(c.tbl = ? AND c.pk = ?)').join(' OR ')})
+      ORDER BY COALESCE(l.seq, $_syncNever) DESC, l.applied_us DESC LIMIT 1
+      ''',
+      [seq ?? _syncNever - 1, for (final (t, pk) in rows) ...[t, pk]],
+    )).singleOrNull;
+    if (found == null) return null;
+    final reason = switch (found['tbl']) {
+      'business_commerce_stock' ||
+      'business_commerce_lots' ||
+      'business_commerce_lot_consumptions' ||
+      'business_commerce_stock_movements' => BusinessSyncConflict.stockShort,
+      'business_local_accounts' ||
+      'business_local_bank_legs' => BusinessSyncConflict.balanceShort,
+      'business_local_debts' ||
+      'business_local_payment_parts' ||
+      'business_commerce_invoices' ||
+      'business_commerce_invoice_payments' => BusinessSyncConflict.debtOverpaid,
+      _ => BusinessSyncConflict.duplicate,
+    };
+    return (found['op_id'] as String, reason);
+  }
+
+  /// Cancels an operation on this device: its row changes are undone (counters
+  /// move back by what it moved), it is marked rejected, everything built on
+  /// it is cancelled with it, and its author is told why.
   Future<void> _syncReject(
     Transaction txn,
     String opId,
@@ -776,12 +898,31 @@ extension BusinessSyncEngine on DirectoryDatabase {
       whereArgs: [opId],
     )).singleOrNull;
     if (log == null || log['status'] == 'rejected') return;
+    // Later work that used what this operation created goes with it.
+    final created = <String>{};
     final changes = await txn.query(
       _syncChanges,
       where: 'op_id = ?',
       whereArgs: [opId],
       orderBy: 'ord DESC',
     );
+    for (final c in changes) {
+      if (c['kind'] != 'insert') continue;
+      final row = jsonDecode((c['new_row'] ?? '{}') as String) as Map;
+      for (final k in const ['id', 'debt_id', 'account_id', 'invoice_id']) {
+        final v = row[k];
+        if (v is String && isDirectoryId(v) && c['tbl'] != 'business_ledger_commands') {
+          if (k == 'id' || c['tbl'] == 'business_local_accounts') created.add(v);
+        }
+      }
+    }
+    await txn.update(
+      _syncLog,
+      {'status': 'rejected'},
+      where: 'op_id = ?',
+      whereArgs: [opId],
+    );
+    await txn.delete(_syncOutbox, where: 'op_id = ?', whereArgs: [opId]);
     await txn.execute('PRAGMA defer_foreign_keys = ON');
     for (final c in changes) {
       final table = c['tbl'] as String;
@@ -792,14 +933,35 @@ extension BusinessSyncEngine on DirectoryDatabase {
       final old = c['old_row'] == null
           ? null
           : Map<String, Object?>.from(jsonDecode(c['old_row'] as String) as Map);
+      final counters = _syncCounters[table] ?? const <String>{};
       switch (c['kind']) {
         case 'insert':
-          if (current != null) await _syncDelete(txn, table, keys, current);
+          if (current != null) await _syncDeleteRow(txn, table, keys, current);
         case 'update':
-          if (old != null) await _syncUpsert(txn, table, keys, old, current, const {});
+          if (current == null || old == null) break;
+          final moves = {
+            for (final col in counters) col: _syncEventDelta(c, col),
+          }..removeWhere((_, v) => v == 0);
+          final restore = <String, Object?>{
+            for (final MapEntry(:key, :value) in old.entries)
+              if (!keys.contains(key) && !counters.contains(key)) key: value,
+          };
+          final set = [
+            for (final col in restore.keys) '"$col" = ?',
+            for (final col in moves.keys) '"$col" = "$col" - ?',
+          ];
+          if (set.isEmpty) break;
+          await txn.rawUpdate(
+            'UPDATE "$table" SET ${set.join(', ')} WHERE ${keys.map((k) => '"$k" IS ?').join(' AND ')}',
+            [...restore.values, ...moves.values, for (final k in keys) current[k]],
+          );
         case 'delete':
           if (old != null && current == null) {
-            await _syncUpsert(txn, table, keys, old, null, const {});
+            final columns = (await _syncColumns(txn, table)).toSet();
+            await txn.insert(table, {
+              for (final MapEntry(:key, :value) in old.entries)
+                if (columns.contains(key)) key: value,
+            });
           }
       }
       await txn.update(
@@ -809,13 +971,26 @@ extension BusinessSyncEngine on DirectoryDatabase {
         whereArgs: [table, c['pk'], opId],
       );
     }
-    await txn.update(
-      _syncLog,
-      {'status': 'rejected'},
-      where: 'op_id = ?',
-      whereArgs: [opId],
-    );
     await _syncNoteRejected(txn, opId, reason, winner: winner);
+    if (created.isEmpty) return;
+    final mySeq = log['seq'] as int? ?? _syncNever;
+    final dependants = await txn.rawQuery(
+      '''
+      SELECT DISTINCT c.op_id FROM $_syncChanges c JOIN $_syncLog l ON l.op_id = c.op_id
+      WHERE l.status = 'applied' AND c.op_id != ?
+        AND COALESCE(l.seq, $_syncNever) >= ?
+        AND (${created.map((_) => 'c.new_row LIKE ?').join(' OR ')})
+      ''',
+      [opId, mySeq, for (final id in created) '%"$id"%'],
+    );
+    for (final d in dependants) {
+      await _syncReject(
+        txn,
+        d['op_id'] as String,
+        BusinessSyncConflict.dependent,
+        winner: winner,
+      );
+    }
   }
 
   Future<void> _syncDiscardRemote(Transaction txn, String opId) async {
@@ -868,19 +1043,53 @@ extension BusinessSyncEngine on DirectoryDatabase {
 
   /// A short, readable trace of what the cancelled operation did.
   Map<String, Object?> _syncSummary(List<Map<String, Object?>> changes) {
-    for (final c in changes) {
-      final row = c['new_row'] == null
-          ? null
-          : jsonDecode(c['new_row'] as String) as Map;
-      if (row == null) continue;
-      if (c['tbl'] == 'business_local_bank_legs') {
-        return {
-          'kind': row['kind'],
-          'amount_minor': row['delta_minor'],
-          'currency': row['currency'],
-          'description': row['description'],
-        };
+    Map? row(String table) {
+      for (final c in changes) {
+        if (c['tbl'] == table && c['new_row'] != null) {
+          return jsonDecode(c['new_row'] as String) as Map;
+        }
       }
+      return null;
+    }
+
+    final invoice = row('business_commerce_invoices');
+    if (invoice != null) {
+      return {
+        'what': invoice['invoice_type'] == 'purchase' ? 'purchase' : 'sale',
+        'number': invoice['number'],
+        'amount_minor': invoice['total_minor'],
+        'currency': invoice['currency'],
+      };
+    }
+    final account = row('business_local_accounts');
+    final leg = row('business_local_bank_legs');
+    if (account != null && changes.any((c) => c['tbl'] == 'business_local_accounts' && c['kind'] == 'insert')) {
+      return {
+        'what': 'account',
+        'name': account['bank_name'],
+        'currency': account['currency'],
+      };
+    }
+    if (leg != null) {
+      return {
+        'what': 'money',
+        'description': leg['description'],
+        'amount_minor': leg['delta_minor'],
+        'currency': leg['currency'],
+      };
+    }
+    final product = row('business_commerce_products');
+    if (product != null) return {'what': 'product', 'name': product['name']};
+    final party = row('directory_parties');
+    if (party != null) return {'what': 'party', 'name': party['name']};
+    final debt = row('business_local_debts');
+    if (debt != null) {
+      return {
+        'what': 'debt',
+        'number': debt['number'],
+        'amount_minor': debt['total_minor'],
+        'currency': debt['currency'],
+      };
     }
     return {};
   }
@@ -930,7 +1139,7 @@ extension BusinessSyncEngine on DirectoryDatabase {
       ];
     }
     return {
-      'v': 1,
+      'v': 2,
       'confirmed_through':
           int.tryParse(await _syncGet(db, 'confirmed_through') ?? '') ?? 0,
       'tables': tables,
@@ -959,22 +1168,30 @@ extension BusinessSyncEngine on DirectoryDatabase {
           for (final row in await txn.query(
             _syncLog,
             where: "origin = 'local' AND status = 'applied'",
-            orderBy: 'COALESCE(seq, 9223372036854775807), applied_us',
+            orderBy: 'COALESCE(seq, $_syncNever), applied_us',
           ))
-            if (!contained.contains(row['op_id'])) row['op_id'] as String,
+            if (!contained.contains(row['op_id'])) row,
         ];
-        final ownChanges = <String, List<Map<String, Object?>>>{
-          for (final op in ownLater)
-            op: [
-              for (final c in await txn.query(
-                _syncChanges,
-                where: 'op_id = ?',
-                whereArgs: [op],
-                orderBy: 'ord',
-              ))
-                _syncWire(c),
-            ],
-        };
+        final ownChanges = <String, List<Map<String, Object?>>>{};
+        for (final op in ownLater) {
+          final id = op['op_id'] as String;
+          final outbox = (await txn.query(_syncOutbox, where: 'op_id = ?', whereArgs: [id])).singleOrNull;
+          // The original wire form (images as made here) is what re-applies.
+          ownChanges[id] = outbox != null
+              ? [
+                  for (final c in (jsonDecode(outbox['payload'] as String) as Map)['changes'] as List)
+                    Map<String, Object?>.from(c as Map),
+                ]
+              : [
+                  for (final c in await txn.query(
+                    _syncChanges,
+                    where: 'op_id = ?',
+                    whereArgs: [id],
+                    orderBy: 'ord',
+                  ))
+                    _syncWire(c),
+                ];
+        }
         final tables = snapshot['tables'] as Map? ?? const {};
         for (final table in _syncTables.keys.toList().reversed) {
           await txn.delete(table);
@@ -989,7 +1206,7 @@ extension BusinessSyncEngine on DirectoryDatabase {
           }
         }
         await txn.delete(_syncRows);
-        await txn.delete(_syncChanges, where: 'op_id NOT IN (${ownLater.map((_) => '?').join(',').ifEmpty("''")})', whereArgs: ownLater);
+        await txn.delete(_syncChanges);
         await txn.delete(_syncLog, where: "origin != 'local' OR status = 'rejected'");
         for (final o in operations) {
           await txn.insert(_syncLog, {
@@ -1012,14 +1229,17 @@ extension BusinessSyncEngine on DirectoryDatabase {
         );
         // Our own later work is still ours: put it back on top.
         for (final op in ownLater) {
-          final changes = ownChanges[op]!;
-          await txn.delete(_syncChanges, where: 'op_id = ?', whereArgs: [op]);
-          await _syncApplyChanges(txn, op, null, changes);
-          final seq = (await txn.query(_syncLog, columns: ['seq'], where: 'op_id = ?', whereArgs: [op])).singleOrNull?['seq'];
-          await txn.rawUpdate(
-            'UPDATE $_syncRows SET pending_op = ? WHERE pending_op IS NULL AND tbl || pk IN (SELECT tbl || pk FROM $_syncChanges WHERE op_id = ?)',
-            [seq == null ? op : null, op],
-          );
+          final id = op['op_id'] as String;
+          await _syncApplyChanges(txn, id, op['seq'] as int?, ownChanges[id]!);
+          if (op['seq'] == null) {
+            await txn.rawUpdate(
+              '''
+              UPDATE $_syncRows SET pending_op = ?
+              WHERE (tbl, pk) IN (SELECT tbl, pk FROM $_syncChanges WHERE op_id = ?)
+              ''',
+              [id, id],
+            );
+          }
         }
         await _syncPut(txn, 'resync_pending', '0');
       }, exclusive: true);
@@ -1032,8 +1252,28 @@ extension BusinessSyncEngine on DirectoryDatabase {
   }) => _io.synchronized(() => _db.transaction(run, exclusive: exclusive));
 }
 
-extension on String {
-  String ifEmpty(String other) => isEmpty ? other : this;
+int _syncInt(Object? value) => value is num ? value.toInt() : 0;
+
+/// What an operation moved a counter by (local: after − before; remote: the
+/// delta it applied here).
+int _syncEventDelta(Map<String, Object?> change, String column) {
+  if (change['delta'] != null) {
+    return _syncInt((jsonDecode(change['delta'] as String) as Map)[column]);
+  }
+  final newRow = change['new_row'] == null
+      ? null
+      : jsonDecode(change['new_row'] as String) as Map;
+  final oldRow = change['old_row'] == null
+      ? null
+      : jsonDecode(change['old_row'] as String) as Map;
+  switch (change['kind']) {
+    case 'insert':
+      return _syncInt(newRow?[column]);
+    case 'delete':
+      return -_syncInt(oldRow?[column]);
+    default:
+      return _syncInt(newRow?[column]) - _syncInt(oldRow?[column]);
+  }
 }
 
 Map<String, Object?> _syncWire(Map<String, Object?> c) => {
@@ -1046,10 +1286,10 @@ Map<String, Object?> _syncWire(Map<String, Object?> c) => {
 
 bool _syncTouchesOwnColumns(Map<String, Object?> c) {
   if (c['kind'] != 'update') return true;
-  final derived = _syncDerived[c['tbl']] ?? const <String>{};
+  final counters = _syncCounters[c['tbl']] ?? const <String>{};
   final old = jsonDecode(c['old_row'] as String) as Map;
   final now = jsonDecode(c['new_row'] as String) as Map;
-  return now.keys.any((k) => !derived.contains(k) && now[k] != old[k]);
+  return now.keys.any((k) => !counters.contains(k) && now[k] != old[k]);
 }
 
 String? _syncBranch(List<Map<String, Object?>> changes) {
@@ -1060,19 +1300,6 @@ String? _syncBranch(List<Map<String, Object?>> changes) {
   }
   return null;
 }
-
-_SyncAggregate? _syncAggregateFor(String child) {
-  for (final agg in _syncAggregates) {
-    if (agg.child == child) return agg;
-  }
-  return null;
-}
-
-String _syncParentKey(_SyncAggregate agg, Map row) =>
-    jsonEncode([for (final c in agg.keys.keys) row[c]]);
-
-String _syncParentKeyOfParent(_SyncAggregate agg, Map row) =>
-    jsonEncode([for (final p in agg.keys.values) row[p]]);
 
 bool _syncIsConstraint(DatabaseException error) =>
     error.toString().contains('constraint failed');

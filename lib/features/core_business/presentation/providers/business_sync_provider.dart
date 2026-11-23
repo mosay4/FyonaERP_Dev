@@ -44,6 +44,10 @@ Future<void> markBusinessSyncNoticesRead(Ref ref) async {
 
 /// Moves this device's Business operations to the relay and stores the
 /// operations of the other devices. Saving never waits for it.
+///
+/// * Sending: right after every local save (and on reconnect/resume).
+/// * Receiving: a long poll held open by the relay, so the other device's work
+///   shows up within a second or two while both are online.
 final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
   if (!DirectoryPilotBuild.enabled) return;
   final scope = ref.watch(businessLocalLedgerScopeProvider);
@@ -55,15 +59,24 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
   final store = ref.watch(directoryPilotStoreProvider);
   final secure = ref.watch(secureStorageProvider);
   final cancel = CancelToken();
-  var running = false;
-  var again = false;
-  var registered = false;
+  String? replica;
+  Future<void>? registering;
+  var pushing = false, pushAgain = false, listening = false;
 
   bool current() =>
       !cancel.isCancelled &&
       sameDirectoryScope(scope, ref.read(businessLocalLedgerScopeProvider));
 
-  Future<Map<String, dynamic>> send(String path, Map<String, Object?> body) async {
+  bool awake() =>
+      current() &&
+      network.isOnline &&
+      WidgetsBinding.instance.lifecycleState != AppLifecycleState.paused;
+
+  Future<Map<String, dynamic>> send(
+    String path,
+    Map<String, Object?> body, {
+    Duration? receive,
+  }) async {
     final auth = await readBusinessRelayIdentity(
       secure,
       scope.workspace.accountId,
@@ -77,6 +90,7 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
       cancelToken: cancel,
       options: Options(
         followRedirects: false,
+        receiveTimeout: receive,
         headers: {'Authorization': 'Bearer ${auth.accessToken}'},
       ),
     );
@@ -97,31 +111,38 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
     ref.read(businessOperationsRevisionProvider.notifier).state++;
   }
 
-  Future<void> cycle() async {
-    final replica = await local((db) => db.syncReplicaId());
-    final user = ref.read(currentUserProvider);
-    if (user != null) {
-      await local(
-        (db) => db.syncSetAuthor(
-          userId: user.id,
-          name: (user.fullName ?? user.username ?? '').trim(),
-        ),
-      );
-    }
-    if (!registered) {
-      final reg = await send('/register', {'replica_id': replica});
-      registered = true;
+  Future<String> ready() async {
+    final known = replica;
+    if (known != null) return known;
+    await (registering ??= () async {
+      final id = await local((db) => db.syncReplicaId());
+      final user = ref.read(currentUserProvider);
+      if (user != null) {
+        await local(
+          (db) => db.syncSetAuthor(
+            userId: user.id,
+            name: (user.fullName ?? user.username ?? '').trim(),
+          ),
+        );
+      }
+      final reg = await send('/register', {'replica_id': id});
       if (reg['resync_required'] == true) {
         await local((db) => db.syncMarkResync(true));
       }
-    }
-    // 1) What this device did goes out first — even before a resync, so
-    //    nothing made here is lost.
+      replica = id;
+    }().whenComplete(() => registering = null));
+    return replica!;
+  }
+
+  /// Everything saved here leaves the device; nothing made here is lost even
+  /// before a resync.
+  Future<void> push() async {
+    final id = await ready();
     while (current()) {
       final out = await local((db) => db.syncOutbox(limit: 100));
       if (out.isEmpty) break;
       final reply = await send('/push', {
-        'replica_id': replica,
+        'replica_id': id,
         'items': [
           for (final op in out)
             {'id': op.id, 'branch_id': op.branchId, 'kind': 'ops', 'payload': op.payload},
@@ -135,115 +156,142 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
       );
     }
     if (await local((db) => db.syncResyncPending())) {
-      await send('/snapshot/request', {'replica_id': replica});
+      await send('/snapshot/request', {'replica_id': id});
     }
-    // 2) What the other devices did comes in, in arrival order.
-    var stored = false;
-    while (current()) {
-      final batch = await send('/pull', {'replica_id': replica});
-      final items = [
-        for (final raw in batch['items'] as List? ?? const [])
-          Map<String, Object?>.from(raw as Map),
-      ];
-      if (batch['resync_required'] == true &&
-          !await local((db) => db.syncResyncPending())) {
-        await local((db) => db.syncMarkResync(true));
-        await send('/snapshot/request', {'replica_id': replica});
-      }
-      if (items.isEmpty) break;
-      final ack = <String>[];
-      final ops = <BusinessSyncDelivery>[];
-      for (final item in items) {
-        final payload = jsonDecode(
-          utf8.decode(base64Decode(item['payload'] as String)),
-        );
-        switch (item['kind']) {
-          case 'snapshot_request':
-            final target = (payload as Map)['replica_id'] as String;
-            final snapshot = await local((db) => db.syncSnapshot());
-            // With unsent work the copy would be incomplete: answer later.
-            if (snapshot == null) continue;
-            await send('/snapshot/serve', {
-              'replica_id': replica,
-              'target': target,
-              'payload': snapshot,
-            });
-            ack.add(item['id'] as String);
-          case 'snapshot':
-            await local(
-              (db) => db.syncApplySnapshot(Map<String, Object?>.from(payload as Map)),
-            );
-            await send('/snapshot/applied', {'replica_id': replica});
-            ack.add(item['id'] as String);
-            stored = true;
-          default:
-            ops.add((
-              id: item['id'] as String,
-              seq: item['seq'] as int?,
-              kind: 'ops',
-              branchId: item['branch_id'] as String?,
-              payload: Map<String, Object?>.from(payload as Map),
-            ));
-        }
-      }
-      if (ops.isNotEmpty) {
-        ack.addAll(
-          await local(
-            (db) => db.syncApply(
-              ops,
-              drained: batch['drained'] == true,
-              head: (batch['head'] as num?)?.toInt() ?? 0,
-            ),
-          ),
-        );
-        stored = true;
-      }
-      if (ack.isNotEmpty) {
-        await send('/ack', {'replica_id': replica, 'ids': ack});
-      }
-      if (batch['drained'] == true) break;
-    }
-    if (stored) changed();
   }
 
-  void tick() {
-    if (!current() ||
-        !network.isOnline ||
-        WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
+  void pushSoon() {
+    if (!awake()) return;
+    if (pushing) {
+      pushAgain = true;
       return;
     }
-    if (running) {
-      again = true;
-      return;
-    }
-    running = true;
+    pushing = true;
     unawaited(() async {
       try {
         do {
-          again = false;
-          await cycle();
-        } while (again && current());
+          pushAgain = false;
+          await push();
+        } while (pushAgain && awake());
       } catch (_) {
-        // Offline, expired login, server busy: everything waits safely in the
-        // local outbox/inbox and the next tick carries on. Saving and every
-        // text the user sees never depend on this cycle.
+        // Offline, expired login, server busy: it waits in the outbox.
       } finally {
-        running = false;
+        pushing = false;
       }
     }());
   }
 
+  /// One receive round. Returns whether the relay had nothing more.
+  Future<bool> receive({required int wait}) async {
+    final id = await ready();
+    final batch = await send(
+      '/pull',
+      {'replica_id': id, 'wait': wait},
+      receive: Duration(seconds: wait + 20),
+    );
+    final items = [
+      for (final raw in batch['items'] as List? ?? const [])
+        Map<String, Object?>.from(raw as Map),
+    ];
+    if (batch['resync_required'] == true &&
+        !await local((db) => db.syncResyncPending())) {
+      await local((db) => db.syncMarkResync(true));
+      await send('/snapshot/request', {'replica_id': id});
+    }
+    final ack = <String>[];
+    final ops = <BusinessSyncDelivery>[];
+    var stored = false;
+    for (final item in items) {
+      final payload = jsonDecode(
+        utf8.decode(base64Decode(item['payload'] as String)),
+      );
+      switch (item['kind']) {
+        case 'snapshot_request':
+          final target = (payload as Map)['replica_id'] as String;
+          await push(); // a copy is complete only with nothing unsent
+          final snapshot = await local((db) => db.syncSnapshot());
+          if (snapshot == null) continue;
+          await send('/snapshot/serve', {
+            'replica_id': id,
+            'target': target,
+            'payload': snapshot,
+          });
+          ack.add(item['id'] as String);
+        case 'snapshot':
+          await local(
+            (db) => db.syncApplySnapshot(Map<String, Object?>.from(payload as Map)),
+          );
+          await send('/snapshot/applied', {'replica_id': id});
+          ack.add(item['id'] as String);
+          stored = true;
+        default:
+          ops.add((
+            id: item['id'] as String,
+            seq: item['seq'] as int?,
+            kind: 'ops',
+            branchId: item['branch_id'] as String?,
+            payload: Map<String, Object?>.from(payload as Map),
+          ));
+      }
+    }
+    final drained = batch['drained'] == true;
+    // Even with nothing new, a drained inbox lets this device decide its own
+    // pending conflicts for good.
+    if (ops.isNotEmpty || drained) {
+      ack.addAll(
+        await local(
+          (db) => db.syncApply(
+            ops,
+            drained: drained,
+            head: (batch['head'] as num?)?.toInt() ?? 0,
+          ),
+        ),
+      );
+      stored = stored || ops.isNotEmpty;
+    }
+    if (ack.isNotEmpty) {
+      await send('/ack', {'replica_id': id, 'ids': ack});
+    }
+    if (stored) changed();
+    return drained && items.isEmpty;
+  }
+
+  void listen() {
+    if (listening || !awake()) return;
+    listening = true;
+    unawaited(() async {
+      var quiet = false;
+      try {
+        while (awake()) {
+          try {
+            quiet = await receive(wait: quiet ? 20 : 0);
+          } catch (_) {
+            quiet = false;
+            if (!awake()) break;
+            await Future<void>.delayed(const Duration(seconds: 5));
+          }
+        }
+      } finally {
+        listening = false;
+      }
+    }());
+  }
+
+  void wake() {
+    pushSoon();
+    listen();
+  }
+
+  final writes = businessSyncLocalWrites.stream.listen((_) => pushSoon());
   final subscription = network.onConnectivityChanged.listen((online) {
-    if (online) tick();
+    if (online) wake();
   });
-  final lifecycle = AppLifecycleListener(onResume: tick);
-  final timer = Timer.periodic(const Duration(seconds: 15), (_) => tick());
-  // A local save goes out as soon as possible.
-  ref.listen(businessBankRevisionProvider, (_, _) => tick());
-  ref.listen(businessOperationsRevisionProvider, (_, _) => tick());
-  scheduleMicrotask(tick);
+  final lifecycle = AppLifecycleListener(onResume: wake);
+  final timer = Timer.periodic(const Duration(seconds: 30), (_) => wake());
+  scheduleMicrotask(wake);
   ref.onDispose(() {
     cancel.cancel();
+    writes.cancel();
     subscription.cancel();
     lifecycle.dispose();
     timer.cancel();

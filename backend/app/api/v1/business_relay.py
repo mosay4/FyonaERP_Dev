@@ -100,17 +100,30 @@ async def push(body: PushBody, org_id: str = Depends(get_current_org_id),
     return ok({"items": data})
 
 
+class PullBody(_Body):
+    # Long poll: hold the request up to this many seconds until something
+    # arrives, so another device's work shows up within a second or two.
+    wait: int = Field(default=0, ge=0, le=25)
+
+
 @router.post("/pull", summary="العمليات الموجّهة لهذا الجهاز")
-async def pull(body: _Body, org_id: str = Depends(get_current_org_id),
+async def pull(body: PullBody, org_id: str = Depends(get_current_org_id),
                user_id: UUID = Depends(get_current_user_uuid),
                db: AsyncSession = Depends(get_db)):
-    try:
-        data = await relay.pull(await _ready(db), org=UUID(org_id),
-                                user=user_id, replica_id=body.replica_id)
-    except relay.RelayAccessDenied as exc:
-        raise _denied(exc) from exc
-    await db.commit()
-    return ok(data)
+    import asyncio
+
+    deadline = asyncio.get_running_loop().time() + body.wait
+    while True:
+        try:
+            data = await relay.pull(await _ready(db), org=UUID(org_id),
+                                    user=user_id, replica_id=body.replica_id)
+        except relay.RelayAccessDenied as exc:
+            raise _denied(exc) from exc
+        await db.commit()
+        if (data["items"] or data["resync_required"]
+                or asyncio.get_running_loop().time() >= deadline):
+            return ok(data)
+        await asyncio.sleep(1)
 
 
 @router.post("/ack", summary="إقرار الحفظ المحلي")

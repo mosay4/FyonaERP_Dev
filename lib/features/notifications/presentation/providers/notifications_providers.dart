@@ -11,21 +11,41 @@ import '../../di/notifications_providers.dart';
 /// another person did the same thing first) shown as system notifications.
 NotificationItem businessSyncNotification(BusinessSyncNotice n) {
   final by = '${n.details['by_name'] ?? ''}'.trim();
-  final summary = n.details['summary'] is Map ? n.details['summary'] as Map : const {};
-  final amount = summary['amount_minor'] is num
-      ? '${BusinessMoney.display((summary['amount_minor'] as num).abs().toInt())} ${summary['currency'] ?? ''}'.trim()
-      : '';
-  final what = '${summary['description'] ?? ''}'.trim();
   final who = by.isEmpty ? 'مستخدم آخر' : by;
-  final operation = [
-    if (what.isNotEmpty) what else 'العملية',
-    if (amount.isNotEmpty) 'بمبلغ $amount',
-  ].join(' ');
+  final summary =
+      n.details['summary'] is Map ? n.details['summary'] as Map : const {};
+  final currency = '${summary['currency'] ?? ''}'.trim();
+  final amount = summary['amount_minor'] is num
+      ? '${BusinessMoney.display((summary['amount_minor'] as num).abs().toInt())}${currency.isEmpty ? '' : ' $currency'}'
+      : '';
+  final number = '${summary['number'] ?? ''}'.trim();
+  final name = '${summary['name'] ?? ''}'.trim();
+  final what = switch (summary['what']) {
+    'sale' => 'فاتورة البيع${number.isEmpty ? '' : ' $number'}',
+    'purchase' => 'فاتورة الشراء${number.isEmpty ? '' : ' $number'}',
+    'account' => 'إنشاء الحساب «$name»${currency.isEmpty ? '' : ' بعملة $currency'}',
+    'product' => 'إضافة المنتج «$name»',
+    'party' => 'إضافة «$name»',
+    'debt' => 'الدين${number.isEmpty ? '' : ' $number'}',
+    'money' => '${summary['description'] ?? 'العملية المالية'}',
+    _ => 'العملية',
+  };
+  final money = amount.isEmpty || summary['what'] == 'account' ? '' : ' بمبلغ $amount';
+  final operation = '$what$money';
+  const retry = 'إذا ما زالت مطلوبة نفّذها مرة أخرى الآن.';
   final message = switch (n.kind) {
+    'stockShort' =>
+      'أُلغيت $operation لأن $who باع نفس الكمية المتبقية من المخزون قبلك، فاعتمد النظام عمليته. $retry',
+    'balanceShort' =>
+      'أُلغيت $operation لأن $who استخدم نفس الرصيد قبلك ولم يعد الرصيد يكفي، فاعتمد النظام عمليته. $retry',
     'debtOverpaid' =>
-      'أُلغيت عملية «$operation» لأن $who حصّل نفس المبلغ قبلك، فاعتمد النظام عمليته. إذا ما زالت مطلوبة نفّذها مرة أخرى الآن.',
+      'أُلغيت $operation لأن $who سجّل نفس المبلغ قبلك، فاعتمد النظام عمليته. $retry',
+    'duplicate' =>
+      'أُلغي $operation لأن $who أنشأه قبلك، فاعتمد النظام ما أنشأه. استخدم الموجود بدلاً منه.',
+    'dependent' =>
+      'أُلغيت $operation لأنها مبنية على عملية أُلغيت بعد أن سبقك $who إليها. $retry',
     _ =>
-      'أُلغيت عملية «$operation» لأن $who نفّذ نفس العملية قبلك، فاعتمد النظام عمليته. إذا ما زالت مطلوبة نفّذها مرة أخرى الآن.',
+      'أُلغيت $operation لأن $who نفّذ نفس العملية قبلك، فاعتمد النظام عمليته. $retry',
   };
   return NotificationItem(
     id: 'business-sync:${n.id}',
@@ -33,7 +53,8 @@ NotificationItem businessSyncNotification(BusinessSyncNotice n) {
     title: 'تم إلغاء عملية',
     message: message,
     isRead: n.read,
-    createdAt: DateTime.fromMicrosecondsSinceEpoch(n.createdUs, isUtc: true).toLocal(),
+    createdAt: DateTime.fromMicrosecondsSinceEpoch(n.createdUs, isUtc: true)
+        .toLocal(),
     isSystem: true,
   );
 }
@@ -56,7 +77,7 @@ final notificationListProvider = FutureProvider<List<NotificationItem>>((ref) as
   final service = ref.watch(notificationServiceProvider);
   try {
     final result = await service.getAll();
-    return _withDeviceNotices(ref, result.cast<NotificationItem>());
+    return await _withDeviceNotices(ref, result.cast<NotificationItem>());
   } catch (_) {
     // Offline-first guarantee: ANY failure (connectivity, transient 5xx,
     // cache-row parse hiccup) falls back to the local mirror if one exists,
@@ -64,7 +85,7 @@ final notificationListProvider = FutureProvider<List<NotificationItem>>((ref) as
     // of a full-screen server error.
     try {
       final cached = await service.getCached();
-      return _withDeviceNotices(ref, cached.cast<NotificationItem>());
+      return await _withDeviceNotices(ref, cached.cast<NotificationItem>());
     } catch (_) {
       return _withDeviceNotices(ref, <NotificationItem>[]);
     }

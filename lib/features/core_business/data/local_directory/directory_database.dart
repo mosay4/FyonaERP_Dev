@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -252,15 +253,21 @@ final class DirectoryDatabase {
   Future<T> _transaction<T>(
     Future<T> Function(Transaction) run, {
     bool exclusive = false,
-  }) => _io.synchronized(
-    () => _db.transaction((txn) async {
-      final op = const Uuid().v4();
-      await _syncBegin(txn, op);
-      final result = await run(txn);
-      await _syncSeal(txn, op);
-      return result;
-    }, exclusive: exclusive),
-  );
+  }) async {
+    final op = const Uuid().v4();
+    var made = false;
+    final result = await _io.synchronized(
+      () => _db.transaction((txn) async {
+        await _syncBegin(txn, op);
+        final result = await run(txn);
+        made = await _syncSeal(txn, op);
+        return result;
+      }, exclusive: exclusive),
+    );
+    // Committed: let it leave the device at once.
+    if (made) businessSyncLocalWrites.add(op);
+    return result;
+  }
 
   static Future<void> _createDebtGroups(DatabaseExecutor db) async {
     await db.execute('''
