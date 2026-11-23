@@ -57,7 +57,8 @@ class _BusinessTransactionDetailsPageState
 
   Future<void> _load() async {
     if (!_current) return;
-    setState(() => _loading = true);
+    // A reload keeps what is on screen until the new copy is read.
+    if (_tx == null) setState(() => _loading = true);
     try {
       final raw = await _source.getTransaction(widget.sourceType, widget.sourceId);
       if (_current)

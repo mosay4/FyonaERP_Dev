@@ -375,7 +375,8 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
     final l10n = AppLocalizations.of(context);
     final scope = ref.watch(businessLocalLedgerScopeProvider);
     return products.when(
-      skipLoadingOnRefresh: false,
+      // Device data: keep showing the list while it re-reads (no blank flash).
+      skipLoadingOnRefresh: scope != null,
       loading: () => scope != null
           ? const SizedBox.shrink()
           : const Center(child: CircularProgressIndicator()),
@@ -812,7 +813,7 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
         ),
         Expanded(
            child: catsAsync.when(
-              skipLoadingOnRefresh: false,
+              skipLoadingOnRefresh: api is LocalInventoryApi,
              loading: () => api is LocalInventoryApi
                  ? const SizedBox.shrink() : const Center(child: CircularProgressIndicator()),
             // Load failure must NOT read as a dead end: friendly retry plus
