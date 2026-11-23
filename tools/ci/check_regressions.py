@@ -38,4 +38,6 @@ for name in fixed:
     print(f"::notice::Known failure now passes (remove from known_failures.txt): {name}")
 for name in new:
     print(f"::error::New test failure: {name}")
-sys.exit(1 if new else 0)
+if not passed:
+    print("::error::No test results (the test run crashed)")
+sys.exit(1 if new or not passed else 0)

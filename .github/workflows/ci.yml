@@ -70,9 +70,11 @@ jobs:
       # (pre-existing in the original project, outside the Business work) are
       # tolerated; any new failure anywhere fails the build.
       - name: All app tests (regression gate)
+        # flutter exits 1 when any test fails (known ones too); the gate
+        # decides. A crash with no results fails the gate (passed=0).
         run: |
-          set -o pipefail
-          flutter test --no-pub --machine $QA_DEFINES test/ | python3 tools/ci/check_regressions.py
+          flutter test --no-pub --machine $QA_DEFINES test/ > results.jsonl || true
+          python3 tools/ci/check_regressions.py < results.jsonl
 
   backend-tests:
     name: Backend relay, local mode, guard (PostgreSQL)
@@ -159,7 +161,8 @@ jobs:
   windows:
     name: Windows build + engine tests
     needs: business-tests
-    runs-on: windows-latest
+    # Visual Studio 2022: VS 18 removed /await coroutines that plugins use.
+    runs-on: windows-2022
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
