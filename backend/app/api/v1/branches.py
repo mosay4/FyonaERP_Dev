@@ -85,6 +85,9 @@ router = APIRouter(prefix="/branches", tags=["Branches"], dependencies=[Depends(
 
 class BranchCreate(BaseModel):
     name: str
+    # A branch is born on the device with its own id; the server learns the
+    # id and the name only, so it can be selected and carried to other devices.
+    id: UUID | None = None
 
 
 class BranchUpdate(BaseModel):
@@ -183,8 +186,16 @@ async def create_branch(
     session_id: UUID | None = Depends(get_current_session_id),
 ):
     owner = await _require_owner(db, user_id, org_id)
+    if data.id is not None:
+        existing = (await db.execute(select(Branch).where(
+            Branch.id == data.id))).scalar_one_or_none()
+        if existing is not None:
+            if existing.organization_id != UUID(org_id):
+                raise HTTPException(status_code=403, detail="غير مصرح")
+            return ok(svc.branch_dict(existing))  # a retry of the same branch
     try:
-        branch = await svc.create_branch(db, UUID(org_id), data.name)
+        branch = await svc.create_branch(db, UUID(org_id), data.name,
+                                         branch_id=data.id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     from ...core import qa_business_ledger, qa_directory
@@ -253,16 +264,25 @@ async def select_branch(
     branch = await svc.resolve_branch_for_context(db, target_org, branch_id)
     from ...core import qa_business_ledger, qa_directory
     from ...domain.services import qa_cash_admission, qa_employee_finance
-    local_directory = await qa_directory.for_owner(db, user, branch)
-    local_ledger = await qa_business_ledger.for_owner(db, user, branch)
-    pair = await qa_business_ledger.pair_writer_scope(db, user, branch, session_id) \
-        if local_directory or local_ledger else None
-    if pair is False:
-        raise HTTPException(403, detail="لا تملك صلاحية الوصول إلى هذا الفرع")
-    employee_finance = await qa_employee_finance.select_claim(db, user, branch)
-    cash_link = await qa_cash_admission.scope_claim(db, branch, user_id, session_id) \
-        if local_ledger and local_directory else None
-    writer_branches = pair if local_ledger else None
+    from ...core import business_local_mode
+    if await business_local_mode.whole_organization(db, user, branch):
+        # Every branch of this account lives on its devices; the server only
+        # carries operations between them (see docs/BUSINESS_SYNC_ENGINE.md).
+        local_directory = local_ledger = True
+        employee_finance = None
+        cash_link = None
+        writer_branches = await business_local_mode.branch_names(db, target_org)
+    else:
+        local_directory = await qa_directory.for_owner(db, user, branch)
+        local_ledger = await qa_business_ledger.for_owner(db, user, branch)
+        pair = await qa_business_ledger.pair_writer_scope(db, user, branch, session_id) \
+            if local_directory or local_ledger else None
+        if pair is False:
+            raise HTTPException(403, detail="لا تملك صلاحية الوصول إلى هذا الفرع")
+        employee_finance = await qa_employee_finance.select_claim(db, user, branch)
+        cash_link = await qa_cash_admission.scope_claim(db, branch, user_id, session_id) \
+            if local_ledger and local_directory else None
+        writer_branches = pair if local_ledger else None
     token = svc.issue_scope_token(
         user_id, target_org, branch.id, False, qa_directory=local_directory,
         qa_business_ledger=local_ledger, qa_employee_finance=employee_finance,

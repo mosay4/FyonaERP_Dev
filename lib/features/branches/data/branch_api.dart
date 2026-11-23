@@ -288,6 +288,25 @@ class BranchApi {
   /// store what they sent. The server keeps nothing: every payload is dropped
   /// there once all destinations acknowledged it.
   Future<void> _flushPending() async {
+    for (final entry in (await _pendingBranchOps()).entries) {
+      final row = Map<String, dynamic>.from(entry.value as Map? ?? {});
+      if (row['registered'] != false) continue;
+      try {
+        await _client.post(
+          '/branches',
+          data: {'id': entry.key, 'name': row['name']},
+        );
+        await _putPending(entry.key, {'registered': true});
+      } on DioException catch (e) {
+        if (e.response?.statusCode == 400) {
+          // Another device registered a branch with this name first: the
+          // first one stays (same rule as every other duplicate).
+          await _clearPending(entry.key, row.keys.toList());
+        }
+      } catch (_) {
+        // Offline: it is registered when the connection is back.
+      }
+    }
     final ops = await _pendingBranchOps();
     final sent = await _sentRevs();
     for (final entry in ops.entries.toList()) {
@@ -373,8 +392,12 @@ class BranchApi {
       'is_archived': false,
       'is_default': false,
       'image': null,
+      // The server must learn the id and name (nothing else) before the
+      // branch can be selected and its work carried to other devices.
+      'registered': false,
       'rev': '${DateTime.now().microsecondsSinceEpoch}',
     });
+    unawaited(_flushPending());
     return {'id': id, 'name': name};
   }
 

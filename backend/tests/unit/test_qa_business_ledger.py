@@ -312,6 +312,9 @@ async def test_first_device_enrollment_registers_and_fences_its_writer(engine, m
     email = f"signup-{uuid4().hex}@example.test"
     monkeypatch.setattr(qa_business_ledger, "INVITES", frozenset({email}))
     monkeypatch.setattr(qa_directory, "INVITES", frozenset({email}))
+    # This test covers the earlier per-branch fence, not whole-org local mode.
+    from app.core import business_local_mode
+    monkeypatch.setattr(business_local_mode, "ENABLED", False)
     org, owner, branch, other = await _seed(engine, email)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     owner_row = _Owner(org, owner, email)

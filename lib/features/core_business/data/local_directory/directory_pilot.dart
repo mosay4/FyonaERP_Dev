@@ -98,7 +98,6 @@ DirectoryAccess? resolveDirectoryPilot({
           exp < 0 ||
           exp > 4102444800 ||
           peers is! Map ||
-          peers.length > 2 ||
           !peers.containsKey(selectedBranchId)) {
         return null;
       }
