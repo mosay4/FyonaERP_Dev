@@ -12,6 +12,7 @@ This replaces, for these accounts, the earlier per-branch registration fence
 
 from __future__ import annotations
 
+import json
 import os
 from uuid import UUID
 
@@ -26,13 +27,30 @@ from app.domain.entities.sale_entities import Branch
 ENABLED = os.getenv("FYONA_QA_LOCAL_ALL_BRANCHES", "1") != "0"
 
 
+def _granted_account(user) -> bool:
+    """The managed QA launcher's pinned ledger account (private env only)."""
+    if not qa_directory.INVITES or os.getenv("FYONA_QA_REMOTE") != "1":
+        return False
+    try:
+        grants = json.loads(os.getenv("FYONA_QA_EXISTING_LEDGER_GRANTS", "{}"))
+    except ValueError:
+        return False
+    return isinstance(grants, dict) and any(
+        isinstance(g, dict)
+        and g.get("account") == str(user.id)
+        and g.get("organization") == str(user.organization_id)
+        for g in grants.values()
+    )
+
+
 def enabled_for(user) -> bool:
     return (
         ENABLED
         and bool(qa_directory.INVITES)
-        and getattr(user, "email", None) in qa_directory.INVITES
         and getattr(user, "role", None) == "owner"
         and getattr(user, "status", "active") == "active"
+        and (getattr(user, "email", None) in qa_directory.INVITES
+             or _granted_account(user))
     )
 
 

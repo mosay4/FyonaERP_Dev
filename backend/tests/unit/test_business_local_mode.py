@@ -29,3 +29,18 @@ async def test_main_and_other_branches_are_all_device_branches(engine, monkeypat
                                    status="active", organization_id=org)
         assert not await business_local_mode.whole_organization(
             db, stranger, await db.get(Branch, main))
+
+
+def test_the_managed_pinned_account_is_included(monkeypatch):
+    org, account = uuid4(), uuid4()
+    monkeypatch.setattr(qa_directory, "INVITES", frozenset({"signup-" + "a" * 24 + "@example.test"}))
+    monkeypatch.setenv("FYONA_QA_REMOTE", "1")
+    import json
+    monkeypatch.setenv("FYONA_QA_EXISTING_LEDGER_GRANTS", json.dumps(
+        {str(uuid4()): {"account": str(account), "organization": str(org)}}))
+    pinned = SimpleNamespace(id=account, organization_id=org, email="directory-owner@example.test",
+                             role="owner", status="active")
+    other = SimpleNamespace(id=uuid4(), organization_id=org, email="x@example.test",
+                            role="owner", status="active")
+    assert business_local_mode.enabled_for(pinned)
+    assert not business_local_mode.enabled_for(other)
