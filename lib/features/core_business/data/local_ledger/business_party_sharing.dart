@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:synchronized/synchronized.dart';
 import 'package:uuid/uuid.dart';
 
@@ -10,6 +11,7 @@ import '../local_directory/directory_database.dart';
 import '../local_directory/directory_party.dart';
 import '../local_directory/directory_pilot.dart';
 import '../local_directory/directory_scope.dart';
+import 'business_money.dart';
 import 'business_relay_identity.dart';
 
 /// Only this transport can publish a device party. The opaque party key and
@@ -268,20 +270,111 @@ final class BusinessPartySharing {
     };
     final hash = sha256.convert(utf8.encode(jsonEncode(snapshot))).toString();
     if (cached['generation'] == status['generation'] &&
-        cached['revision'] == status['revision'] &&
         target['snapshot_hash'] == hash)
       return;
-    final saved = await _send(
-      'PUT',
-      '$path/snapshot',
-      body: {
+    // The customer's devices receive the copy through the peer relay, which
+    // deletes it once delivered; the server keeps nothing.
+    final now = DateTime.now().toUtc();
+    final linkId = '${status['id']}';
+    await _peerPush(
+      linkId: linkId,
+      opId: const Uuid().v5(linkId, 'fyona.debt-copy.v1:$hash'),
+      payload: {
         ...snapshot,
-        'link_id': status['id'],
-        'generation': status['generation'],
-        'revision': status['revision'],
+        'kind': kind.name,
+        'link_id': linkId,
+        'published_at': now.toIso8601String(),
+        'published_us': now.microsecondsSinceEpoch,
       },
+      notify: _debtNotice(cached['shared_totals'], totals, linkId, hash),
       allowed: canPublish,
     );
-    await _cache(key, saved, hash, canPublish);
+    await _cache(
+      key,
+      {
+        ...status,
+        'shared_totals': {
+          for (final e in totals.entries) e.key: [e.value.$1, e.value.$2],
+        },
+      },
+      hash,
+      canPublish,
+    );
+  }
+
+  /// The same texts the app sends for connected debts: a new debt, or a
+  /// payment. Nothing when only the operations' order/details changed.
+  Map<String, String>? _debtNotice(
+    Object? before,
+    Map<String, (int, int)> after,
+    String linkId,
+    String hash,
+  ) {
+    final previous = before is Map ? before : const {};
+    for (final MapEntry(key: currency, value: (remaining, paid)) in after.entries) {
+      final old = previous[currency] is List ? previous[currency] as List : const [0, 0];
+      final addedDebt = (remaining + paid) - ((old[0] as num).toInt() + (old[1] as num).toInt());
+      final addedPaid = paid - (old[1] as num).toInt();
+      final route = '/personal/merchants?link=$linkId';
+      if (addedDebt > 0) {
+        return {
+          'title': 'دين جديد',
+          'message': 'سُجّل دين جديد بقيمة ${BusinessMoney.display(addedDebt)} $currency',
+          'route': route,
+          'event_id': 'debt-copy:$hash',
+        };
+      }
+      if (addedPaid > 0) {
+        return {
+          'title': 'تحديث السداد',
+          'message': 'دفعة ${BusinessMoney.display(addedPaid)} $currency',
+          'route': route,
+          'event_id': 'debt-copy:$hash',
+        };
+      }
+    }
+    return null;
+  }
+
+  Future<void> _peerPush({
+    required String linkId,
+    required String opId,
+    required Map<String, Object?> payload,
+    required Map<String, String>? notify,
+    required bool Function() allowed,
+  }) async {
+    if (!_current || !allowed() || !_online()) throw const DirectoryAccessDenied();
+    final auth = await _identity();
+    if (auth == null) throw const DirectoryAccessDenied();
+    final device = await _peerDevice();
+    Future<void> post(String path, Map<String, Object?> body) =>
+        _http.post<Map<String, dynamic>>(
+          '${scope.workspace.server}/peer-relay$path',
+          data: body,
+          cancelToken: _cancel,
+          options: Options(
+            followRedirects: false,
+            headers: {'Authorization': 'Bearer ${auth.accessToken}'},
+          ),
+        );
+    await post('/register', {'device_id': device});
+    await post('/push', {
+      'device_id': device,
+      'id': opId,
+      'link_id': linkId,
+      'kind': 'debt_snapshot',
+      'payload': payload,
+      'notify': ?notify,
+    });
+  }
+
+  static Future<String> _peerDevice() async {
+    final prefs = await SharedPreferences.getInstance();
+    var id = prefs.getString('peer_device_id_v1');
+    if (id == null) {
+      id = const Uuid().v4();
+      await prefs.setString('peer_device_id_v1', id);
+    }
+    return id;
   }
 }

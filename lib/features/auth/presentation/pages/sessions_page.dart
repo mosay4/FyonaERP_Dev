@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../../shared/widgets/connectivity_widgets.dart';
+import '../../../../core/services/connectivity_service.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -244,6 +246,11 @@ class _SessionsPageState extends ConsumerState<SessionsPage> {
   }
 
   Future<void> _logoutSession(SessionModel session) async {
+    if (!ref.read(connectivityServiceProvider).isOnline) {
+      // Same alert as every other online-only service.
+      await showOfflineDialog(context, connectivity: ref.read(connectivityServiceProvider));
+      return;
+    }
     if (session.isPrimary) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -278,6 +285,11 @@ class _SessionsPageState extends ConsumerState<SessionsPage> {
   }
 
   Future<void> _renameSession(SessionModel session) async {
+    if (!ref.read(connectivityServiceProvider).isOnline) {
+      // Same alert as every other online-only service.
+      await showOfflineDialog(context, connectivity: ref.read(connectivityServiceProvider));
+      return;
+    }
     final controller = TextEditingController(
         text: _nicknames[session.id] ?? session.customName ?? '');
     final name = await showDialog<String>(
@@ -326,6 +338,11 @@ class _SessionsPageState extends ConsumerState<SessionsPage> {
   }
 
   Future<void> _logoutAll() async {
+    if (!ref.read(connectivityServiceProvider).isOnline) {
+      // Same alert as every other online-only service.
+      await showOfflineDialog(context, connectivity: ref.read(connectivityServiceProvider));
+      return;
+    }
     final confirm = await showConfirmDialog(context,
       title: l10n.translate('sessionsLogoutAllTitle'),
       message: l10n.translate('sessionsLogoutAllMsg'),

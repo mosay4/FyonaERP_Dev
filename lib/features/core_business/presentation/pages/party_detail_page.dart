@@ -31,7 +31,6 @@ import '../providers/business_ledger_session.dart';
 import '../widgets/debt_widgets.dart';
 import '../widgets/party_tracking.dart';
 import '../providers/business_party_sharing_provider.dart';
-import '../widgets/business_online_gate.dart';
 import '../widgets/local_directory_actions.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 
@@ -1688,9 +1687,9 @@ class _PartyDetailPageState extends ConsumerState<PartyDetailPage> {
               side: 'merchant',
               linkId: '${_link['id']}',
               onPressed: () async {
-                if (!await ensureBusinessOnline(context) || !context.mounted) {
-                  return;
-                }
+                // The conversation opens offline from the device copy; what
+                // is written waits as «sending» until the connection is back.
+                if (!context.mounted) return;
                 context.push('/debts/chat?link=${_link['id']}');
               },
             ),

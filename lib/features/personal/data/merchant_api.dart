@@ -3,15 +3,36 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http_parser/http_parser.dart';
 import '../../../../core/di/providers.dart' show apiClientProvider;
 import '../../../../core/network/api_client.dart';
+import '../../../../shared/providers/current_user_provider.dart';
+import 'peer_store.dart';
+import '../../../../core/services/currency/currency_engine.dart';
 
 final merchantApiProvider = Provider<MerchantApi>((ref) {
-  return MerchantApi(ref.watch(apiClientProvider));
+  final user = ref.watch(currentUserProvider)?.id;
+  final rates = ref.watch(currencyEngineProvider);
+  return MerchantApi(
+    ref.watch(apiClientProvider),
+    store: user == null ? null : PeerStore.of(user),
+    rate: rates.getRate,
+  );
 });
 
 /// Merchant ↔ Personal accounts API («حساباتي مع التجار»).
 class MerchantApi {
   final ApiClient _client;
-  MerchantApi(this._client);
+  /// The device copy (merchant's debts as last delivered, chat history and
+  /// unsent chat): screens read it first and work offline.
+  final PeerStore? _store;
+  final double? Function(String from, String to)? _rate;
+  MerchantApi(
+    this._client, {
+    PeerStore? store,
+    double? Function(String from, String to)? rate,
+  }) : _store = store,
+       _rate = rate;
+
+  Future<Map<String, dynamic>?> _shared(String linkId) async =>
+      await _store?.debtSnapshot(linkId);
 
   ApiClient get client => _client;
 
@@ -53,12 +74,19 @@ class MerchantApi {
       _client.post('/me/merchant-links/$linkId/unlink');
 
   Future<Map<String, dynamic>> partnerDebts(String linkId) async {
+    final shared = await _shared(linkId);
+    if (shared != null) return {'debts': PeerDebtViews.debtRows(shared)};
     final r = await _client.get('/me/merchant-links/$linkId/debts');
     return Map<String, dynamic>.from(_data(r) as Map? ?? {});
   }
 
-  Future<List<Map<String, dynamic>>> partnerInvoices(String linkId) =>
-      _list(_client.get('/me/merchant-links/$linkId/invoices'));
+  Future<List<Map<String, dynamic>>> partnerInvoices(String linkId) async {
+    final shared = await _shared(linkId);
+    if (shared != null) {
+      return PeerDebtViews.operations(shared, '${shared['kind'] ?? 'customer'}');
+    }
+    return _list(_client.get('/me/merchant-links/$linkId/invoices'));
+  }
 
   Future<List<Map<String, dynamic>>> mySettlementRequests(String linkId) =>
       _list(_client.get('/me/merchant-links/$linkId/settlement-requests'));
@@ -202,6 +230,17 @@ class MerchantApi {
     String? dateFrom,
     String? dateTo,
   }) async {
+    final shared = await _shared(linkId);
+    if (shared != null) {
+      return PeerDebtViews.overview(
+        shared,
+        linkId,
+        displayCurrency: currency,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        rate: _rate,
+      );
+    }
     final r = await _client.get(
       '/me/merchant-links/$linkId/debt-overview',
       queryParameters: {
@@ -262,6 +301,12 @@ class MerchantApi {
     String linkId,
     String invoiceId,
   ) async {
+    final shared = await _shared(linkId);
+    if (shared != null) {
+      final ops = PeerDebtViews.operations(shared, '${shared['kind'] ?? 'customer'}');
+      final op = ops.where((o) => o['id'] == invoiceId).firstOrNull;
+      if (op != null) return {...op, 'items': const [], 'payments': const []};
+    }
     final r = await _client.get(
       '/me/merchant-links/$linkId/operations/$invoiceId',
     );
@@ -431,6 +476,85 @@ class MerchantApi {
     bool waitForChanges = false,
     CancelToken? cancelToken,
   }) async {
+    if (!waitForChanges) {
+      try {
+        final fresh = await _chatMessagesOnline(
+          linkId, after: after, before: before, around: around, side: side,
+          limit: limit, cancelToken: cancelToken,
+        );
+        final store = _store;
+        if (store == null) return fresh;
+        // The server forgets read messages; the device keeps the whole
+        // conversation, so pages come from the merged device copy.
+        final merged = await store.mergeChat(linkId, fresh);
+        final pending = [
+          for (final m in await store.chatOutbox())
+            if (m['link_id'] == linkId) {...m, 'status': 'sending'},
+        ];
+        return _chatWindow([...merged, ...pending], after: after, before: before,
+            around: around, limit: limit);
+      } on DioException catch (e) {
+        if (e.type == DioExceptionType.cancel || _store == null) rethrow;
+        if (e.response != null && e.response!.statusCode != null &&
+            e.response!.statusCode! < 500) rethrow;
+        // Offline: the conversation as kept on this device, with what is
+        // still on its way shown as sending.
+        final history = await _store.chatHistory(linkId);
+        final pending = [
+          for (final m in await _store.chatOutbox())
+            if (m['link_id'] == linkId) {...m, 'status': 'sending'},
+        ];
+        final all = [...history, ...pending];
+        return after == null ? all : [
+          for (final m in all)
+            if ('${m['created_at'] ?? ''}'.compareTo(after) > 0 || m['status'] == 'sending') m,
+        ];
+      }
+    }
+    final updates = await _chatMessagesOnline(
+      linkId, after: after, before: before, around: around, side: side,
+      limit: limit, waitForChanges: true, cancelToken: cancelToken,
+    );
+    if (updates.isNotEmpty) await _store?.mergeChat(linkId, updates);
+    return updates;
+  }
+
+  static List<Map<String, dynamic>> _chatWindow(
+    List<Map<String, dynamic>> all, {
+    String? after,
+    String? before,
+    String? around,
+    required int limit,
+  }) {
+    int indexOf(String? id) => id == null
+        ? -1
+        : all.indexWhere((m) => '${m['id']}' == id || '${m['client_id']}' == id);
+    if (after != null) {
+      final i = indexOf(after);
+      return i < 0 ? all : all.sublist(i + 1);
+    }
+    var end = all.length;
+    if (before != null) {
+      final i = indexOf(before);
+      if (i >= 0) end = i;
+    } else if (around != null) {
+      final i = indexOf(around);
+      if (i >= 0) end = (i + limit ~/ 2 + 1).clamp(0, all.length);
+    }
+    final start = (end - limit).clamp(0, end);
+    return all.sublist(start, end);
+  }
+
+  Future<List<Map<String, dynamic>>> _chatMessagesOnline(
+    String linkId, {
+    String? after,
+    String? before,
+    String? around,
+    String? side,
+    int limit = 40,
+    bool waitForChanges = false,
+    CancelToken? cancelToken,
+  }) async {
     final r = await _client.get(
       '/chat/$linkId/${waitForChanges ? 'updates' : 'messages'}',
       queryParameters: {
@@ -470,6 +594,70 @@ class MerchantApi {
     List<Map<String, dynamic>>? media,
     String? clientId,
   }) async {
+    final request = {
+      'link_id': linkId,
+      'kind': kind,
+      if (side != null) 'side': side,
+      if (text != null) 'text': text,
+      if (mediaPath != null) 'media_path': mediaPath,
+      if (fileName != null) 'file_name': fileName,
+      if (replyToId != null) 'reply_to_id': replyToId,
+      if (durationMs != null) 'duration_ms': durationMs,
+      if (media != null) 'media': media,
+      if (invoiceId != null) 'invoice_id': invoiceId,
+      if (clientId != null) 'client_id': clientId,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    try {
+      final result = await _sendChatOnline(linkId, request);
+      if (clientId != null) await _store?.sentChat(clientId);
+      if (result['message'] is Map) {
+        await _store?.mergeChat(linkId, [Map<String, dynamic>.from(result['message'])]);
+      }
+      return result;
+    } on DioException catch (e) {
+      final offline = e.response == null && e.type != DioExceptionType.cancel;
+      if (!offline || clientId == null || _store == null) rethrow;
+      // Saved on the device and shown as sending; it leaves the moment the
+      // connection is back (see sendQueuedChat).
+      await _store.queueChat(request);
+      return {
+        'message': {...request, 'id': clientId, 'status': 'sending', 'mine': true},
+        'queued': true,
+      };
+    }
+  }
+
+  /// Sends what was written offline, oldest first. Called on reconnect.
+  Future<int> sendQueuedChat() async {
+    final store = _store;
+    if (store == null) return 0;
+    var sent = 0;
+    for (final request in await store.chatOutbox()) {
+      try {
+        final result = await _sendChatOnline('${request['link_id']}', request);
+        await store.sentChat('${request['client_id']}');
+        if (result['message'] is Map) {
+          await store.mergeChat('${request['link_id']}', [Map<String, dynamic>.from(result['message'])]);
+        }
+        sent++;
+      } on DioException catch (e) {
+        if (e.response == null) break; // still offline
+        if (e.response!.statusCode! < 500) await store.sentChat('${request['client_id']}');
+      }
+    }
+    return sent;
+  }
+
+  Future<Map<String, dynamic>> _sendChatOnline(
+    String linkId,
+    Map<String, dynamic> request,
+  ) async {
+    final clientId = request['client_id'] as String?;
+    final kind = request['kind'], side = request['side'], text = request['text'];
+    final mediaPath = request['media_path'], fileName = request['file_name'];
+    final replyToId = request['reply_to_id'], durationMs = request['duration_ms'];
+    final media = request['media'], invoiceId = request['invoice_id'];
     final r = await _client.post(
       '/chat/$linkId/messages',
       data: {

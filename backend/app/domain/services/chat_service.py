@@ -359,9 +359,25 @@ async def list_messages(
         for rm in rrows:
             replies[str(rm.id)] = _reply_summary(rm, side, rnumbers)
     await db.flush()
-    return {"messages": [
+    result = {"messages": [
         _msg_dict(m, side, numbers, replies) for m in rows],
         "has_more": has_more}
+    await purge_delivered(db, link.id)
+    return result
+
+
+async def purge_delivered(db: AsyncSession, link_id: UUID) -> None:
+    """Both devices keep the conversation. The server forgets a message once
+    it was read (after a short grace so the sender's device sees the read
+    tick), and anything never delivered after 90 days."""
+    from datetime import timedelta
+    from sqlalchemy import delete, or_
+    now = _now()
+    await db.execute(delete(ChatMessage).where(
+        ChatMessage.link_id == link_id,
+        or_(ChatMessage.read_at < now - timedelta(minutes=10),
+            ChatMessage.created_at < now - timedelta(days=90)),
+    ))
 
 
 async def mark_read(

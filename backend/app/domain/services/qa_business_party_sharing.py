@@ -244,30 +244,34 @@ async def is_share(db, link):
 async def authorized_recipient_read(db, link, *, require_accepted=True):
     # Recheck recipient, active branch and current grant in the SAME read as
     # the snapshot: a revoked or replaced invitation must not disclose data.
+    # The share exists only if the merchant's device-ledger branch created it
+    # (fenced at /business/party-sharing). Here: the same link, an active
+    # branch and owner, the addressed recipient, the expected state.
     row = (await db.execute(text(f"""
-        SELECT s.snapshot, s.published_at
+        SELECT s.snapshot, s.published_at, owner_user.id AS owner_id,
+          owner_user.email AS owner_email, owner_user.organization_id AS owner_org,
+          owner_user.role AS owner_role, owner_user.status AS owner_status
         FROM {_SHARES} s
-        JOIN public.fyona_qa_business_ledger_scope grant_row
-          ON grant_row.organization_id = s.organization_id AND grant_row.branch_id = s.branch_id
-        JOIN public.fyona_qa_directory_scope directory_grant
-          ON directory_grant.organization_id = s.organization_id
-          AND directory_grant.branch_id = s.branch_id AND directory_grant.account_id = grant_row.account_id
         JOIN public.branches b ON b.id = s.branch_id AND b.organization_id = s.organization_id
-        JOIN public.users owner_user ON owner_user.id = grant_row.account_id
-          AND owner_user.organization_id = s.organization_id
-          AND owner_user.role = 'owner' AND owner_user.status = 'active'
-          AND owner_user.email = ANY(CAST(:invited_owners AS text[]))
         JOIN public.merchant_links l ON l.party_id = s.id
            AND l.merchant_org_id = s.organization_id AND l.party_kind = s.kind
-           AND l.invited_by = grant_row.account_id
+        JOIN public.users owner_user ON owner_user.id = l.invited_by
+          AND owner_user.organization_id = s.organization_id
+          AND owner_user.role = 'owner' AND owner_user.status = 'active'
         JOIN public.users recipient ON recipient.id = l.external_user_id AND recipient.status = 'active'
         WHERE l.id = :link AND l.external_user_id = :user
-           AND b.is_default IS FALSE AND b.is_active IS TRUE AND b.is_archived IS FALSE
+           AND b.is_active IS TRUE AND b.is_archived IS FALSE
           AND l.status = :status
     """), {"link": link.id, "user": link.external_user_id,
-           "invited_owners": sorted(qa_directory.INVITES),
            "status": "accepted" if require_accepted else "pending"})).mappings().one_or_none()
-    if row is None:
+    from types import SimpleNamespace
+    from app.core import business_local_mode
+    # Still only for invited (QA) merchants: losing the allowlist discloses
+    # nothing, even for an already accepted share.
+    if row is None or not business_local_mode.enabled_for(SimpleNamespace(
+            id=row["owner_id"], email=row["owner_email"],
+            organization_id=row["owner_org"], role=row["owner_role"],
+            status=row["owner_status"])):
         raise ValueError("الربط غير متاح")
     return row
 

@@ -54,8 +54,10 @@ async def writer(
         raise HTTPException(404, "المشاركة غير متاحة")
     user = await lock_live_user(db, user_id, session_id)
     branch = await db.get(Branch, scope.branch_id, with_for_update={"read": True}, populate_existing=True)
-    if not user or not branch \
-            or not await qa_business_ledger.registered_owner(db, user, branch):
+    from app.core import business_local_mode
+    if not user or not branch or not (
+            await qa_business_ledger.registered_owner(db, user, branch)
+            or await business_local_mode.whole_organization(db, user, branch)):
         raise HTTPException(403, "المشاركة تتطلب الفرع والجهاز المصرّح لهما")
     return UUID(org_id), scope.branch_id, user_id, session_id
 

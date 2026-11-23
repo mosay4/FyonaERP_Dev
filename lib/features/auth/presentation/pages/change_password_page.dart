@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../../shared/widgets/connectivity_widgets.dart';
+import '../../../../core/services/connectivity_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -38,6 +40,11 @@ class _ChangePasswordPageState extends ConsumerState<ChangePasswordPage> {
 
   Future<void> _onSubmit() async {
     setState(() => _error = null);
+    if (!ref.read(connectivityServiceProvider).isOnline) {
+      // Same alert as every other online-only service.
+      await showOfflineDialog(context, connectivity: ref.read(connectivityServiceProvider));
+      return;
+    }
 
     final result = await ref.read(authProvider.notifier).changePassword(
           currentPassword: _currentPasswordController.text,

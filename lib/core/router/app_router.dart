@@ -190,6 +190,7 @@ import '../../features/core_business/presentation/providers/local_commerce_navig
 import '../../features/core_business/presentation/providers/business_party_sharing_provider.dart';
 import '../../features/core_business/presentation/providers/business_cash_relay_provider.dart';
 import '../../features/core_business/presentation/providers/business_sync_provider.dart';
+import '../../features/personal/presentation/providers/peer_relay_provider.dart';
 import '../config/directory_pilot_build.dart';
 
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -2315,14 +2316,14 @@ class _MainShellState extends ConsumerState<MainShell>
                               route: currentRoute,
                               child: EmployeeFeatureGate(
                                 route: currentRoute,
-                                 child: isPersonal ? widget.child
+                                 child: PeerRelayRuntime(child: isPersonal ? widget.child
                                       : EmployeeDeviceFinanceRuntime(
                                           child: BusinessSyncRuntime(
                                             child: BusinessCashRelayRuntime(
                                               child: BusinessPartyShareRuntime(child: widget.child),
                                             ),
                                           ),
-                                        ),
+                                        )),
                               ),
                             ),
                           ),
