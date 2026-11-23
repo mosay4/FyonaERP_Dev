@@ -129,6 +129,8 @@ jobs:
           echo "APK size: $size"
           test "$size" -lt 35000000
       - uses: actions/upload-artifact@v4
+        # The account's artifact quota can be full; the build itself passed.
+        continue-on-error: true
         with:
           name: fyona-android-arm64
           path: build/app/outputs/flutter-apk/app-release.apk
@@ -170,4 +172,8 @@ jobs:
         run: flutter test --no-pub $QA_DEFINES test/business_sync_engine_test.dart test/peer_debt_views_test.dart test/public_exchange_rates_test.dart
       - name: Build Windows
         shell: bash
+        env:
+          # The Firebase C++ SDK declares cmake_minimum_required < 3.5, which
+          # CMake 4 rejects without this policy floor.
+          CMAKE_POLICY_VERSION_MINIMUM: '3.5'
         run: flutter build windows --release $QA_DEFINES

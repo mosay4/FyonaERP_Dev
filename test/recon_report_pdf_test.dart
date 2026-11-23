@@ -308,11 +308,11 @@ void main() {
     test('valid PDFs written to disk for the external layout check', () {
       // Written under .fyona-tmp so the Python stream extractor can verify
       // the visual layout (column order / names / colours) outside the test.
-      Directory('/home/abdulrhman2/.fyona-tmp').createSync(recursive: true);
-      File('/home/abdulrhman2/.fyona-tmp/recon_report_ar.pdf')
-          .writeAsBytesSync(arBytes);
-      File('/home/abdulrhman2/.fyona-tmp/recon_report_inv.pdf')
-          .writeAsBytesSync(invBytes);
+      // (A temp folder: the original hard-coded a developer's home path.)
+      final dir = Directory('${Directory.systemTemp.path}/.fyona-tmp')
+        ..createSync(recursive: true);
+      File('${dir.path}/recon_report_ar.pdf').writeAsBytesSync(arBytes);
+      File('${dir.path}/recon_report_inv.pdf').writeAsBytesSync(invBytes);
       expect(String.fromCharCodes(arBytes.take(5)), '%PDF-');
       expect(String.fromCharCodes(invBytes.take(5)), '%PDF-');
     });
