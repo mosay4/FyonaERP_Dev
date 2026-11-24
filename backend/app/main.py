@@ -322,7 +322,8 @@ app.include_router(health_router, prefix=settings.API_PREFIX, tags=["Health"])
 app.include_router(auth_router, prefix=f"{settings.API_PREFIX}/auth", tags=["Auth"])
 app.include_router(business_router, prefix=f"{settings.API_PREFIX}", tags=["Business"], dependencies=_business_maint)
 app.include_router(branches_router, prefix=f"{settings.API_PREFIX}", tags=["Branches"])
-app.include_router(media_transit_router, prefix=f"{settings.API_PREFIX}",
+app.include_router(media_transit_router,
+                   prefix=f"{settings.API_PREFIX}/business/media-transit",
                    tags=["Business media transit"])
 app.include_router(business_relay_router,
                    prefix=f"{settings.API_PREFIX}/business-relay",

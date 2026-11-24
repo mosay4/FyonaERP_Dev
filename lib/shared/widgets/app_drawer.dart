@@ -34,6 +34,7 @@ import '../../features/personal/presentation/providers/personal_providers.dart';
 import '../../features/employees/presentation/providers/employee_providers.dart';
 import '../../features/employees/presentation/widgets/employee_avatar.dart';
 import '../../core/services/section_scope.dart';
+import '../../features/branches/data/branch_pictures.dart';
 
 class AppDrawer extends ConsumerStatefulWidget {
   final UserModel? user;
@@ -802,6 +803,26 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
   );
 
   Widget _branchCircleImage(
+    Map<String, dynamic>? branch, {
+    double size = 36,
+    bool allMode = false,
+  }) {
+    final fallback = _branchCircleImageFallback(
+      branch,
+      size: size,
+      allMode: allMode,
+    );
+    if (allMode) return fallback;
+    // The picture stored on this device (works offline, after a restart, for
+    // the owner and for employees).
+    return BranchPicture(
+      branchId: branch?['id']?.toString(),
+      size: size,
+      fallback: fallback,
+    );
+  }
+
+  Widget _branchCircleImageFallback(
     Map<String, dynamic>? branch, {
     double size = 36,
     bool allMode = false,

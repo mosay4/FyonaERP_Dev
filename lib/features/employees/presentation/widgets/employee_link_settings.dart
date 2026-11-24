@@ -10,8 +10,10 @@ import '../../data/employee_permissions.dart';
 import '../pages/employee_custom_permissions_page.dart';
 import '../providers/employee_providers.dart';
 import 'employee_avatar.dart';
-import '../../../../core/services/connectivity_service.dart' show connectivityServiceProvider;
+import '../../../../core/services/connectivity_service.dart'
+    show connectivityServiceProvider;
 import '../../../../core/utils/country_phone_data.dart';
+import '../../../../core/utils/mobile_numbering.dart';
 import '../../../../shared/widgets/connectivity_widgets.dart';
 import '../../../subscription/presentation/pages/phone_entry_page.dart'
     show showPhoneCountryPicker, phoneCountryFlag;
@@ -55,6 +57,7 @@ class EmployeeLinkSettings extends ConsumerStatefulWidget {
 
 class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
   final _input = TextEditingController();
+
   /// Search by the 6-digit public code, or by phone with its country code.
   bool _byPhone = false;
   PhoneCountry _country = kPhoneCountries.first;
@@ -97,7 +100,8 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
           ? (_branches.isEmpty ? null : (_selected.toList()..sort()))
           : widget.branchIds,
       ready:
-          _warning == null && !_loading &&
+          _warning == null &&
+          !_loading &&
           !_branchError &&
           (_branches.isEmpty || _selected.isNotEmpty),
     ),
@@ -115,9 +119,13 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
         _selected.clear();
         for (final b in _branches) {
           final id = '${b['id']}';
-          if (initial != null ? initial.contains(id)
+          if (initial != null
+              ? initial.contains(id)
               : BranchScope.branchId != null && !BranchScope.allMode
-                   ? id == BranchScope.branchId : true) { _selected.add(id); }
+              ? id == BranchScope.branchId
+              : true) {
+            _selected.add(id);
+          }
         }
         _loading = false;
         _branchError = false;
@@ -153,10 +161,23 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
   Future<void> _search() async {
     final query = _query();
     if (query.isEmpty || _searching) return;
+    if (_byPhone) {
+      // Exact length and a real operator start for the chosen country.
+      final problem = mobileNumberProblem(_country, _input.text, arabic: _ar);
+      if (problem != null) {
+        showFyonaSnack(context, problem, success: false);
+        return;
+      }
+    }
     if (!_byPhone && query.length != 6) {
-      showFyonaSnack(context,
-          _t('الرقم المميز 6 أرقام بالضبط', 'The public code is exactly 6 digits'),
-          success: false);
+      showFyonaSnack(
+        context,
+        _t(
+          'الرقم المميز 6 أرقام بالضبط',
+          'The public code is exactly 6 digits',
+        ),
+        success: false,
+      );
       return;
     }
     FocusScope.of(context).unfocus();
@@ -164,7 +185,10 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
     // internet-only button.
     final connectivity = ref.read(connectivityServiceProvider);
     if (!connectivity.isOnline) {
-      final retry = await showOfflineDialog(context, connectivity: connectivity);
+      final retry = await showOfflineDialog(
+        context,
+        connectivity: connectivity,
+      );
       if (!retry || !mounted) return;
     }
     setState(() => _searching = true);
@@ -174,10 +198,11 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
       final warning = user['already_employee'] == true
           ? 'هذا الموظف مضاف عندك من قبل، ما ينفع تضيفه مرتين'
           : user['pending_invitation'] == true
-              ? 'عندك طلب توظيف له لسه ما رد. اطلب منه يوافق على الطلب السابق.'
-              : user['existing_employee'] == true &&
-                  user['existing_employee_id'] != widget.employeeId
-                  ? 'عندك ملف لهذا الموظف، افتح الملف الموجود واربطه.' : null;
+          ? 'عندك طلب توظيف له لسه ما رد. اطلب منه يوافق على الطلب السابق.'
+          : user['existing_employee'] == true &&
+                user['existing_employee_id'] != widget.employeeId
+          ? 'عندك ملف لهذا الموظف، افتح الملف الموجود واربطه.'
+          : null;
       if (warning != null) {
         setState(() {
           _warning = warning;
@@ -253,7 +278,10 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
     } catch (e) {
       if (mounted && isConnectionError(e)) {
         setState(() => _searching = false);
-        await showOfflineDialog(context, connectivity: ref.read(connectivityServiceProvider));
+        await showOfflineDialog(
+          context,
+          connectivity: ref.read(connectivityServiceProvider),
+        );
       } else if (mounted) {
         showFyonaSnack(context, EmployeeApi.message(e), success: false);
       }
@@ -275,7 +303,10 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
   }
 
   Widget _modeChip(String ar, String en, bool byPhone) => ChoiceChip(
-    label: Text(_t(ar, en), style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w700)),
+    label: Text(
+      _t(ar, en),
+      style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w700),
+    ),
     selected: _byPhone == byPhone,
     onSelected: (_) => _setMode(byPhone),
     selectedColor: AppColors.primary.withValues(alpha: 0.14),
@@ -325,55 +356,128 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
           ],
         ),
         const SizedBox(height: 8),
-        TextField(
-          controller: _input,
-          keyboardType: TextInputType.number,
-          textInputAction: TextInputAction.search,
-          textDirection: TextDirection.ltr,
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp('[0-9٠-٩۰-۹]')),
-            LengthLimitingTextInputFormatter(_byPhone ? 15 : 6),
-          ],
-          onSubmitted: (_) => _search(),
-          onChanged: (_) {
-            if (_confirmedCode == null && _warning == null) return;
-            setState(() {
-              _warning = null;
-              _confirmedCode = null;
-              _confirmedName = null;
-            });
-            _emit();
-          },
-          decoration: InputDecoration(
-            labelText: _byPhone
-                ? _t('رقم الهاتف', 'Phone number')
-                : _t('الرقم المميز (6 أرقام)', 'Public code (6 digits)'),
-            hintText: _byPhone ? _country.example : null,
-            // The country code sits in front of the number (left side).
-            prefixIcon: !_byPhone
-                ? null
-                : InkWell(
-                    onTap: () async {
-                      final picked = await showPhoneCountryPicker(context, initial: _country.iso);
-                      if (picked != null && mounted) setState(() => _country = picked);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(phoneCountryFlag(_country.iso), style: const TextStyle(fontSize: 18)),
-                          const SizedBox(width: 6),
-                          Text(_country.cc, textDirection: TextDirection.ltr,
-                              style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w700)),
-                          const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
-                        ],
+        // The phone reads left to right: «+967  7xxxxxxxx» — country key
+        // first, then the number.
+        Directionality(
+          textDirection: _byPhone
+              ? TextDirection.ltr
+              : Directionality.of(context),
+          child: TextField(
+            controller: _input,
+            keyboardType: TextInputType.number,
+            textInputAction: TextInputAction.search,
+            textDirection: TextDirection.ltr,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp('[0-9٠-٩۰-۹]')),
+              if (_byPhone)
+                // No leading 0 and never more digits than the country uses.
+                TextInputFormatter.withFunction((old, next) {
+                  final digits = nationalDigits(next.text);
+                  final max = mobilePlanFor(_country).maxLength;
+                  final text = digits.length > max
+                      ? digits.substring(0, max)
+                      : digits;
+                  return TextEditingValue(
+                    text: text,
+                    selection: TextSelection.collapsed(offset: text.length),
+                  );
+                })
+              else
+                LengthLimitingTextInputFormatter(6),
+            ],
+            onSubmitted: (_) => _search(),
+            onChanged: (_) {
+              if (_byPhone) setState(() {}); // live check of the number
+              if (_confirmedCode == null && _warning == null) return;
+              setState(() {
+                _warning = null;
+                _confirmedCode = null;
+                _confirmedName = null;
+              });
+              _emit();
+            },
+            decoration: InputDecoration(
+              labelText: _byPhone
+                  ? _t('رقم الهاتف', 'Phone number')
+                  : _t('الرقم المميز (6 أرقام)', 'Public code (6 digits)'),
+              hintText: _byPhone ? _country.example : null,
+              // A start no operator of the country uses is flagged at once;
+              // the length is checked when searching.
+              errorText: _byPhone && _input.text.isNotEmpty
+                  ? (() {
+                      final problem = mobileNumberProblem(
+                        _country,
+                        _input.text,
+                        arabic: _ar,
+                      );
+                      final digits = nationalDigits(_input.text);
+                      final full = mobilePlanFor(
+                        _country,
+                      ).lengths.contains(digits.length);
+                      final startOk =
+                          !(problem?.contains(_ar ? 'تبدأ' : 'start') ?? false);
+                      return !startOk || (full && problem != null)
+                          ? problem
+                          : null;
+                    })()
+                  : null,
+              errorMaxLines: 2,
+              counterText: _byPhone
+                  ? '${nationalDigits(_input.text).length}/${mobilePlanFor(_country).maxLength}'
+                  : null,
+              // The country code sits in front of the number (left side).
+              prefixIcon: !_byPhone
+                  ? null
+                  : InkWell(
+                      onTap: () async {
+                        final picked = await showPhoneCountryPicker(
+                          context,
+                          initial: _country.iso,
+                        );
+                        if (picked != null && mounted) {
+                          setState(() {
+                            _country = picked;
+                            // Keep only what fits the new country's length.
+                            final max = mobilePlanFor(picked).maxLength;
+                            final digits = nationalDigits(_input.text);
+                            if (digits.length > max) {
+                              _input.text = digits.substring(0, max);
+                            }
+                          });
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              phoneCountryFlag(_country.iso),
+                              style: const TextStyle(fontSize: 18),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _country.cc,
+                              textDirection: TextDirection.ltr,
+                              style: const TextStyle(
+                                fontFamily: 'Cairo',
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              size: 18,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-            filled: true,
-            fillColor: AppColors.surface,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              filled: true,
+              fillColor: AppColors.surface,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 8),
@@ -402,22 +506,36 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
       AnimatedSize(
         duration: const Duration(milliseconds: 240),
         curve: Curves.easeInOut,
-        child: _warning == null ? const SizedBox.shrink() : Container(
-          key: const ValueKey('employee-duplicate-warning'),
-          margin: const EdgeInsets.symmetric(vertical: 12),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.danger.withAlpha(18),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.danger.withAlpha(80)),
-          ),
-          child: Row(children: [
-            const Icon(Icons.warning_amber_rounded, color: AppColors.danger),
-            const SizedBox(width: 10),
-            Expanded(child: Text(_warning!, style: const TextStyle(
-              fontFamily: 'Cairo', color: AppColors.danger))),
-          ]),
-        ),
+        child: _warning == null
+            ? const SizedBox.shrink()
+            : Container(
+                key: const ValueKey('employee-duplicate-warning'),
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.danger.withAlpha(18),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.danger.withAlpha(80)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      color: AppColors.danger,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _warning!,
+                        style: const TextStyle(
+                          fontFamily: 'Cairo',
+                          color: AppColors.danger,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
       ),
       AnimatedSize(
         duration: const Duration(milliseconds: 240),

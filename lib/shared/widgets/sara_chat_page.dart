@@ -56,6 +56,7 @@ import '../../core/utils/server_image_url.dart';
 import 'package:go_router/go_router.dart';
 import '../../features/ai/domain/services/ai_service.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import '../../features/branches/data/branch_pictures.dart';
 
 /// ── Sara adaptive palette ──────────────────────────────────────────
 /// Dark theme keeps the original blacks exactly as they were.
@@ -3307,8 +3308,11 @@ class _UserAvatar extends ConsumerWidget {
           ? null
           : SecureImage(url: url, deviceKey: 'branch_${BranchScope.branchId}', width: size, height: size, fit: BoxFit.cover,
               placeholder: fallback, errorBuilder: (_, _, _) => fallback);
-      return CircleAvatar(radius: size / 2, backgroundColor: AppColors.primary.withAlpha(20),
-          child: picture == null ? fallback : ClipOval(child: picture));
+      return BranchPicture(
+          branchId: BranchScope.branchId,
+          size: size,
+          fallback: CircleAvatar(radius: size / 2, backgroundColor: AppColors.primary.withAlpha(20),
+              child: picture == null ? fallback : ClipOval(child: picture)));
     }
     final photo = ref.watch(sectionProfileProvider).avatar ?? ref.watch(avatarProvider) ?? bytes;
     return Container(

@@ -54,6 +54,7 @@ class _FyonaRefreshState extends State<FyonaRefresh>
     with TickerProviderStateMixin {
   static const _pullExtent = 110.0;
   static const _restingShift = 46.0;
+  static const _minimumShow = Duration(milliseconds: 1100);
 
   /// 0 → 1 while pulling; held at the resting value while refreshing.
   late final AnimationController _pull = AnimationController(
@@ -143,16 +144,26 @@ class _FyonaRefreshState extends State<FyonaRefresh>
       ),
     );
     _wave.repeat();
+    // The motion always plays for a short, pleasant moment, even when the
+    // data is already on the device (never a one-frame flash).
+    final minimum = Future<void>.delayed(_minimumShow);
     try {
       await widget.onRefresh();
     } catch (_) {
       // The screen reports its own errors; the motion just ends.
     } finally {
+      await minimum;
       if (mounted) {
+        // Let the current ripple finish before folding away.
+        final rest = 1 - _wave.value;
+        await Future<void>.delayed(
+          Duration(milliseconds: (rest * 900).round().clamp(0, 900)),
+        );
+        if (!mounted) return;
         _wave.stop();
         await _pull.animateTo(
           0,
-          duration: const Duration(milliseconds: 380),
+          duration: const Duration(milliseconds: 520),
           curve: Curves.easeInOutCubic,
         );
         if (mounted) setState(() => _refreshing = false);

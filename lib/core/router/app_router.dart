@@ -192,6 +192,7 @@ import '../../features/core_business/presentation/providers/business_cash_relay_
 import '../../features/core_business/presentation/providers/business_sync_provider.dart';
 import '../../features/personal/presentation/providers/peer_relay_provider.dart';
 import '../config/directory_pilot_build.dart';
+import '../../features/branches/data/branch_pictures.dart';
 
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
 final _rootNavigatorKey = rootNavigatorKey;
@@ -2107,6 +2108,8 @@ class _MainShellState extends ConsumerState<MainShell>
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
+    // Branch pictures are copied to the device as soon as the lists arrive.
+    if (authState.isAuthenticated) ref.watch(branchPictureSyncProvider);
     ref.listen(branchRevocationProvider, (previous, next) {
       if (previous == next) return;
       ref.invalidate(myInvitationsProvider);

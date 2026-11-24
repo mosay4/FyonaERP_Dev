@@ -21,6 +21,7 @@ import '../../../../shared/widgets/fyona_text_field.dart';
 import '../../data/branch_epoch.dart';
 import '../../../core_business/data/local_directory/directory_database.dart' show BusinessBranchReset;
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../data/branch_pictures.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart'
     show businessLocalLedgerScopeProvider, directoryPilotStoreProvider;
 
@@ -248,15 +249,21 @@ class BranchesPage extends ConsumerWidget {
         errorWidget: (_, _, _) => Center(child: placeholder),
       );
     }
-    return Container(
-      width: size,
-      height: size,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: AppColors.gradientPrimary),
-        borderRadius: BorderRadius.circular(14),
+    // The copy stored on this device first (offline, after a restart).
+    return BranchPicture(
+      branchId: b['id']?.toString(),
+      size: size,
+      radius: 14,
+      fallback: Container(
+        width: size,
+        height: size,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: AppColors.gradientPrimary),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Center(child: avatar),
       ),
-      child: Center(child: avatar),
     );
   }
 

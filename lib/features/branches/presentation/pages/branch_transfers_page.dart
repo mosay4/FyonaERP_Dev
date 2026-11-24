@@ -24,8 +24,15 @@ import '../../../reports/data/business_report_rates.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'branch_inventory_picker_page.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../data/branch_pictures.dart';
 
-typedef _TransferSelection = ({String? org, String? branch, bool all, int epoch, bool device});
+typedef _TransferSelection = ({
+  String? org,
+  String? branch,
+  bool all,
+  int epoch,
+  bool device,
+});
 
 _TransferSelection _selection(WidgetRef ref) => (
   org: BranchScope.organizationId,
@@ -83,7 +90,6 @@ class _BranchTransfersPageState extends ConsumerState<BranchTransfersPage> {
 
   @override
   Widget build(BuildContext context) {
-
     final l10n = AppLocalizations.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
     ref.watch(businessLocalLedgerScopeProvider);
@@ -105,20 +111,24 @@ class _BranchTransfersPageState extends ConsumerState<BranchTransfersPage> {
           ),
         ),
       ),
-      floatingActionButton: !ref.watch(employeeCanProvider('branches.transfer')) || BranchScope.readOnly ? null : FloatingActionButton.extended(
-        key: const ValueKey('transfer_create'),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        onPressed: _pickType,
-        icon: const Icon(Icons.swap_horiz_rounded),
-        label: Text(
-          l10n.translate('branchTransferFromTo'),
-          style: const TextStyle(
-            fontFamily: 'Cairo',
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ),
+      floatingActionButton:
+          !ref.watch(employeeCanProvider('branches.transfer')) ||
+              BranchScope.readOnly
+          ? null
+          : FloatingActionButton.extended(
+              key: const ValueKey('transfer_create'),
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              onPressed: _pickType,
+              icon: const Icon(Icons.swap_horiz_rounded),
+              label: Text(
+                l10n.translate('branchTransferFromTo'),
+                style: const TextStyle(
+                  fontFamily: 'Cairo',
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
       body: Column(
         children: [
           Padding(
@@ -137,44 +147,44 @@ class _BranchTransfersPageState extends ConsumerState<BranchTransfersPage> {
             child: !thisScope
                 ? _error(l10n, l10n.translate('branchNoPermission'))
                 : FutureBuilder<List<Map<String, dynamic>>>(
-              future: _future,
-              builder: (context, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const SizedBox.shrink(); // device read: no loading screen
-                }
-                if (snap.hasError) {
-                   return _error(l10n, _transferError(l10n, snap.error));
-                }
-                final rows = snap.data ?? const [];
-                if (rows.isEmpty) return _empty(l10n);
-                return FyonaRefresh(
-                  onRefresh: () async => _reload(),
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
-                    itemCount: rows.length,
-                    itemBuilder: (context, i) {
-                      final t = rows[i];
-                      return TweenAnimationBuilder<double>(
-                        key: ValueKey('${t['id']}-$i'),
-                        tween: Tween(begin: 0, end: 1),
-                        duration: Duration(
-                          milliseconds: 260 + (i * 35).clamp(0, 240),
+                    future: _future,
+                    builder: (context, snap) {
+                      if (snap.connectionState == ConnectionState.waiting) {
+                        return const SizedBox.shrink(); // device read: no loading screen
+                      }
+                      if (snap.hasError) {
+                        return _error(l10n, _transferError(l10n, snap.error));
+                      }
+                      final rows = snap.data ?? const [];
+                      if (rows.isEmpty) return _empty(l10n);
+                      return FyonaRefresh(
+                        onRefresh: () async => _reload(),
+                        child: ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
+                          itemCount: rows.length,
+                          itemBuilder: (context, i) {
+                            final t = rows[i];
+                            return TweenAnimationBuilder<double>(
+                              key: ValueKey('${t['id']}-$i'),
+                              tween: Tween(begin: 0, end: 1),
+                              duration: Duration(
+                                milliseconds: 260 + (i * 35).clamp(0, 240),
+                              ),
+                              curve: Curves.easeOutCubic,
+                              builder: (context, v, child) => Opacity(
+                                opacity: v,
+                                child: Transform.translate(
+                                  offset: Offset(0, 14 * (1 - v)),
+                                  child: child,
+                                ),
+                              ),
+                              child: _card(context, t, dark),
+                            );
+                          },
                         ),
-                        curve: Curves.easeOutCubic,
-                        builder: (context, v, child) => Opacity(
-                          opacity: v,
-                          child: Transform.translate(
-                            offset: Offset(0, 14 * (1 - v)),
-                            child: child,
-                          ),
-                        ),
-                        child: _card(context, t, dark),
                       );
                     },
                   ),
-                );
-              },
-            ),
           ),
         ],
       ),
@@ -468,53 +478,63 @@ class _BranchTransfersPageState extends ConsumerState<BranchTransfersPage> {
                 ),
               ),
               const SizedBox(height: 14),
-              if (ref.watch(employeeCanProvider('banks.transfer'))) ListTile(
-                key: const ValueKey('transfer_financial'),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                tileColor: AppColors.primary.withAlpha(14),
-                leading: const Icon(
-                  Icons.account_balance_rounded,
-                  color: AppColors.primary,
-                ),
-                title: Text(
-                  l10n.translate('branchFinancial'),
-                  style: const TextStyle(
-                    fontFamily: 'Cairo',
-                    fontWeight: FontWeight.w700,
+              if (ref.watch(employeeCanProvider('banks.transfer')))
+                ListTile(
+                  key: const ValueKey('transfer_financial'),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
+                  tileColor: AppColors.primary.withAlpha(14),
+                  leading: const Icon(
+                    Icons.account_balance_rounded,
+                    color: AppColors.primary,
+                  ),
+                  title: Text(
+                    l10n.translate('branchFinancial'),
+                    style: const TextStyle(
+                      fontFamily: 'Cairo',
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(ctx, 'financial'),
                 ),
-                onTap: () => Navigator.pop(ctx, 'financial'),
-              ),
               const SizedBox(height: 8),
-              if (ref.watch(employeeCanProvider('inventory.transfer'))) ListTile(
-                key: const ValueKey('transfer_inventory'),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                tileColor: AppColors.info.withAlpha(14),
-                leading: const Icon(
-                  Icons.inventory_2_rounded,
-                  color: AppColors.info,
-                ),
-                title: Text(
-                  l10n.translate('branchInventory'),
-                  style: const TextStyle(
-                    fontFamily: 'Cairo',
-                    fontWeight: FontWeight.w700,
+              if (ref.watch(employeeCanProvider('inventory.transfer')))
+                ListTile(
+                  key: const ValueKey('transfer_inventory'),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
+                  tileColor: AppColors.info.withAlpha(14),
+                  leading: const Icon(
+                    Icons.inventory_2_rounded,
+                    color: AppColors.info,
+                  ),
+                  title: Text(
+                    l10n.translate('branchInventory'),
+                    style: const TextStyle(
+                      fontFamily: 'Cairo',
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(ctx, 'inventory'),
                 ),
-                onTap: () => Navigator.pop(ctx, 'inventory'),
-              ),
             ],
           ),
         ),
       ),
     );
-    if (kind == null || !mounted || _selection(ref) != _retainedScope ||
-        BranchScope.readOnly || !ref.read(employeeCanProvider('branches.transfer')) ||
-        !ref.read(employeeCanProvider(kind == 'financial' ? 'banks.transfer' : 'inventory.transfer'))) return;
+    if (kind == null ||
+        !mounted ||
+        _selection(ref) != _retainedScope ||
+        BranchScope.readOnly ||
+        !ref.read(employeeCanProvider('branches.transfer')) ||
+        !ref.read(
+          employeeCanProvider(
+            kind == 'financial' ? 'banks.transfer' : 'inventory.transfer',
+          ),
+        ))
+      return;
     final created = await Navigator.push<bool>(
       context,
       MaterialPageRoute(builder: (_) => _TransferFormPage(kind: kind)),
@@ -579,37 +599,47 @@ class _RouteLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = TextStyle(
-        fontFamily: 'Cairo',
-        fontSize: fontSize,
-        fontWeight: fontWeight,
-        color: color ?? AppColors.textPrimary);
+      fontFamily: 'Cairo',
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color ?? AppColors.textPrimary,
+    );
     // Explicit LTR row: sender is always FIRST on the left and the arrow
     // points to the receiver on the right, unaffected by Arabic bidi mirroring.
     return Directionality(
       textDirection: TextDirection.ltr,
       child: Row(
         mainAxisSize: centered ? MainAxisSize.max : MainAxisSize.min,
-        mainAxisAlignment:
-            centered ? MainAxisAlignment.center : MainAxisAlignment.start,
+        mainAxisAlignment: centered
+            ? MainAxisAlignment.center
+            : MainAxisAlignment.start,
         children: [
           Flexible(
-              child: Text(from,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.left,
-                  style: style)),
+            child: Text(
+              from,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.left,
+              style: style,
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: Icon(Icons.arrow_forward_rounded,
-                size: fontSize + 2,
-                color: color ?? AppColors.textSecondary),
+            child: Icon(
+              Icons.arrow_forward_rounded,
+              size: fontSize + 2,
+              color: color ?? AppColors.textSecondary,
+            ),
           ),
           Flexible(
-              child: Text(to,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.left,
-                  style: style)),
+            child: Text(
+              to,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.left,
+              style: style,
+            ),
+          ),
         ],
       ),
     );
@@ -625,16 +655,22 @@ class _PickerOption {
     this.flag = '',
     this.disabled = false,
     this.header = false,
+    this.branchId,
   });
   final String value;
   final String label;
   final String? subtitle;
   final IconData icon;
   final String flag;
+
   /// Shown faded and not selectable (e.g. an archived branch).
   final bool disabled;
+
   /// A section title row, not an option.
   final bool header;
+
+  /// Shows this branch's picture (from the device) instead of the icon.
+  final String? branchId;
 }
 
 class _Line {
@@ -650,13 +686,16 @@ class _Line {
 }
 
 class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
-
   late final _TransferSelection _retainedScope;
   bool get _mayEdit =>
       _selection(ref) == _retainedScope &&
       !BranchScope.readOnly &&
       ref.read(employeeCanProvider('branches.transfer')) &&
-      ref.read(employeeCanProvider(_financial ? 'banks.transfer' : 'inventory.transfer'));
+      ref.read(
+        employeeCanProvider(
+          _financial ? 'banks.transfer' : 'inventory.transfer',
+        ),
+      );
 
   final _notes = TextEditingController();
   Future<List<_BranchOption>>? _branchesFuture;
@@ -714,7 +753,9 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
     }
     final out = <_BranchOption>[];
     for (final c in companies) {
-      if (BranchScope.organizationId != null && '${c['organization_id']}' != BranchScope.organizationId) continue;
+      if (BranchScope.organizationId != null &&
+          '${c['organization_id']}' != BranchScope.organizationId)
+        continue;
       final orgName = '${c['organization_name'] ?? ''}';
       for (final b in (c['branches'] as List? ?? const [])) {
         if (b is Map) {
@@ -737,7 +778,12 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
       for (final b in out)
         if (seen.add(b.id))
           archived.containsKey(b.id)
-              ? _BranchOption(b.id, b.name.trim().isEmpty ? archived[b.id]! : b.name, b.orgName, archived: true)
+              ? _BranchOption(
+                  b.id,
+                  b.name.trim().isEmpty ? archived[b.id]! : b.name,
+                  b.orgName,
+                  archived: true,
+                )
               : b,
     ];
     for (final entry in archived.entries) {
@@ -783,7 +829,11 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
       setState(() => _fromOptions = data);
     } catch (e) {
       if (mounted && _mayEdit) {
-        showFyonaSnack(context, _transferError(AppLocalizations.of(context), e), success: false);
+        showFyonaSnack(
+          context,
+          _transferError(AppLocalizations.of(context), e),
+          success: false,
+        );
       }
     }
   }
@@ -808,102 +858,118 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
       setState(() => _toOptions = data);
     } catch (e) {
       if (mounted && _mayEdit) {
-        showFyonaSnack(context, _transferError(AppLocalizations.of(context), e), success: false);
+        showFyonaSnack(
+          context,
+          _transferError(AppLocalizations.of(context), e),
+          success: false,
+        );
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-
     final l10n = AppLocalizations.of(context);
     ref.watch(businessLocalLedgerScopeProvider);
     ref.watch(branchEpochProvider);
     ref.watch(employeeCanProvider('branches.transfer'));
-    ref.watch(employeeCanProvider(_financial ? 'banks.transfer' : 'inventory.transfer'));
+    ref.watch(
+      employeeCanProvider(_financial ? 'banks.transfer' : 'inventory.transfer'),
+    );
     return PopScope(
       canPop: !_busy,
       child: Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
         backgroundColor: AppColors.background,
-        surfaceTintColor: Colors.transparent,
-        title: Text(
-          l10n.translate(_financial ? 'branchFinancial' : 'branchInventory'),
-          style: const TextStyle(
-            fontFamily: 'Cairo',
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
+        appBar: AppBar(
+          backgroundColor: AppColors.background,
+          surfaceTintColor: Colors.transparent,
+          title: Text(
+            l10n.translate(_financial ? 'branchFinancial' : 'branchInventory'),
+            style: const TextStyle(
+              fontFamily: 'Cairo',
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          leading: BackButton(
+            key: const ValueKey('transfer_form_back'),
+            onPressed: _busy ? null : () => Navigator.of(context).pop(),
           ),
         ),
-        leading: BackButton(
-          key: const ValueKey('transfer_form_back'),
-          onPressed: _busy ? null : () => Navigator.of(context).pop(),
-        ),
-      ),
-      body: FutureBuilder<List<_BranchOption>>(
-        future: _branchesFuture,
-        builder: (context, snap) {
-          if (!_mayEdit) {
-            return Center(child: Text(l10n.translate('branchNoPermission')));
-          }
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const SizedBox.shrink(); // device read: no loading screen
-          }
-          if (snap.hasError || _branches.isEmpty) {
-            return Center(
-              child: Text(
-                 snap.hasError ? _transferError(l10n, snap.error) : l10n.translate('branchNoPermission'),
-                style: const TextStyle(fontFamily: 'Cairo'),
+        body: FutureBuilder<List<_BranchOption>>(
+          future: _branchesFuture,
+          builder: (context, snap) {
+            if (!_mayEdit) {
+              return Center(child: Text(l10n.translate('branchNoPermission')));
+            }
+            if (snap.connectionState == ConnectionState.waiting) {
+              return const SizedBox.shrink(); // device read: no loading screen
+            }
+            if (snap.hasError || _branches.isEmpty) {
+              return Center(
+                child: Text(
+                  snap.hasError
+                      ? _transferError(l10n, snap.error)
+                      : l10n.translate('branchNoPermission'),
+                  style: const TextStyle(fontFamily: 'Cairo'),
+                ),
+              );
+            }
+            return AbsorbPointer(
+              absorbing: _busy,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 120),
+                children: [
+                  if (_financial)
+                    ..._financialFields(l10n)
+                  else ...[
+                    ..._branchFields(l10n),
+                    const SizedBox(height: 14),
+                    ..._inventoryFields(l10n),
+                  ],
+                  const SizedBox(height: 20),
+                  TextField(
+                    key: const ValueKey('transfer_notes'),
+                    controller: _notes,
+                    enabled: !_busy,
+                    decoration: InputDecoration(
+                      labelText: l10n.translate('branchTransferNotes'),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  FilledButton(
+                    key: const ValueKey('transfer_submit'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: _busy ? null : _submit,
+                    child: _busy && !_retainedScope.device
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            l10n.translate('branchConfirmTransfer'),
+                            style: const TextStyle(
+                              fontFamily: 'Cairo',
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                  ),
+                ],
               ),
             );
-          }
-          return AbsorbPointer(absorbing: _busy, child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 120),
-            children: [
-               if (_financial)
-                ..._financialFields(l10n)
-              else ...[
-                ..._branchFields(l10n),
-                const SizedBox(height: 14),
-                ..._inventoryFields(l10n),
-              ],
-              const SizedBox(height: 20),
-              TextField(key: const ValueKey('transfer_notes'), controller: _notes, enabled: !_busy,
-                decoration: InputDecoration(labelText: l10n.translate('branchTransferNotes'))),
-              const SizedBox(height: 14),
-              FilledButton(
-                key: const ValueKey('transfer_submit'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                onPressed: _busy ? null : _submit,
-                 child: _busy && !_retainedScope.device
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : Text(
-                        l10n.translate('branchConfirmTransfer'),
-                        style: const TextStyle(
-                          fontFamily: 'Cairo',
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-              ),
-            ],
-          ));
-        },
-      ),
+          },
+        ),
       ),
     );
   }
@@ -1048,131 +1114,139 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
             color: AppColors.surface,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(height: 10),
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.black12,
-                    borderRadius: BorderRadius.circular(4),
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 10),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        icon: const Icon(Icons.close_rounded, size: 20),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-                    itemCount: options.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 2),
-                    itemBuilder: (ctx, i) {
-                      final o = options[i];
-                      final active = o.value == selected;
-                      if (o.header) {
-                        return Padding(
-                          padding: const EdgeInsets.fromLTRB(8, 14, 8, 4),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
+                    child: Row(
+                      children: [
+                        Expanded(
                           child: Text(
-                            o.label,
+                            title,
                             style: TextStyle(
                               fontFamily: 'Cairo',
-                              fontSize: 12,
+                              fontSize: 15,
                               fontWeight: FontWeight.w800,
-                              color: AppColors.textSecondary,
+                              color: AppColors.textPrimary,
                             ),
                           ),
-                        );
-                      }
-                      final tile = ListTile(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(13),
                         ),
-                        tileColor: active
-                            ? AppColors.primary.withAlpha(12)
-                            : null,
-                        leading: Container(
-                          width: 38,
-                          height: 38,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withAlpha(14),
-                            borderRadius: BorderRadius.circular(11),
-                          ),
-                          child: o.flag.isNotEmpty
-                              ? Text(
-                                  o.flag,
-                                  style: const TextStyle(fontSize: 19),
-                                )
-                              : Icon(
-                                  o.icon,
-                                  size: 19,
-                                  color: AppColors.primary,
-                                ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(Icons.close_rounded, size: 20),
                         ),
-                        title: Text(
-                          o.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        subtitle: (o.subtitle == null || o.subtitle!.isEmpty)
-                            ? null
-                            : Text(
-                                o.subtitle!,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontFamily: 'Cairo',
-                                  fontSize: 10,
-                                  color: AppColors.textTertiary,
-                                ),
-                              ),
-                        trailing: active
-                            ? const Icon(
-                                Icons.check_circle_rounded,
-                                color: AppColors.primary,
-                                size: 20,
-                              )
-                            : null,
-                        onTap: o.disabled
-                            ? null
-                            : () => Navigator.pop(ctx, o.value),
-                      );
-                      return o.disabled
-                          ? Opacity(opacity: 0.4, child: IgnorePointer(child: tile))
-                          : tile;
-                    },
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                      itemCount: options.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 2),
+                      itemBuilder: (ctx, i) {
+                        final o = options[i];
+                        final active = o.value == selected;
+                        if (o.header) {
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 14, 8, 4),
+                            child: Text(
+                              o.label,
+                              style: TextStyle(
+                                fontFamily: 'Cairo',
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          );
+                        }
+                        final tile = ListTile(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(13),
+                          ),
+                          tileColor: active
+                              ? AppColors.primary.withAlpha(12)
+                              : null,
+                          leading: BranchPicture(
+                            branchId: o.branchId,
+                            size: 38,
+                            radius: 11,
+                            fallback: Container(
+                              width: 38,
+                              height: 38,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withAlpha(14),
+                                borderRadius: BorderRadius.circular(11),
+                              ),
+                              child: o.flag.isNotEmpty
+                                  ? Text(
+                                      o.flag,
+                                      style: const TextStyle(fontSize: 19),
+                                    )
+                                  : Icon(
+                                      o.icon,
+                                      size: 19,
+                                      color: AppColors.primary,
+                                    ),
+                            ),
+                          ),
+                          title: Text(
+                            o.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontFamily: 'Cairo',
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          subtitle: (o.subtitle == null || o.subtitle!.isEmpty)
+                              ? null
+                              : Text(
+                                  o.subtitle!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontFamily: 'Cairo',
+                                    fontSize: 10,
+                                    color: AppColors.textTertiary,
+                                  ),
+                                ),
+                          trailing: active
+                              ? const Icon(
+                                  Icons.check_circle_rounded,
+                                  color: AppColors.primary,
+                                  size: 20,
+                                )
+                              : null,
+                          onTap: o.disabled
+                              ? null
+                              : () => Navigator.pop(ctx, o.value),
+                        );
+                        return o.disabled
+                            ? Opacity(
+                                opacity: 0.4,
+                                child: IgnorePointer(child: tile),
+                              )
+                            : tile;
+                      },
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
           ),
         );
       },
@@ -1195,6 +1269,7 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
             label: b.name,
             subtitle: '',
             icon: Icons.storefront_rounded,
+            branchId: b.id,
           ),
         if (archived.isNotEmpty)
           _PickerOption(
@@ -1211,6 +1286,7 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
             subtitle: '',
             icon: Icons.storefront_rounded,
             disabled: true,
+            branchId: b.id,
           ),
       ],
       selected: sender ? _from?.id : _to?.id,
@@ -1736,9 +1812,11 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
           ),
           IconButton(
             key: ValueKey('transfer_remove_line_$index'),
-            onPressed: _busy ? null : () => setState(() {
-              _lines.removeAt(index).qty.dispose();
-            }),
+            onPressed: _busy
+                ? null
+                : () => setState(() {
+                    _lines.removeAt(index).qty.dispose();
+                  }),
             icon: const Icon(
               Icons.close_rounded,
               size: 18,
@@ -1843,9 +1921,14 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       inputFormatters: [
         if (identical(c, _rate))
-          TextInputFormatter.withFunction((oldValue, newValue) =>
-            RegExp(r'^\d{0,12}(\.\d{0,8})?$').hasMatch(newValue.text.replaceAll(',', ''))
-                ? newValue : oldValue)
+          TextInputFormatter.withFunction(
+            (oldValue, newValue) =>
+                RegExp(
+                  r'^\d{0,12}(\.\d{0,8})?$',
+                ).hasMatch(newValue.text.replaceAll(',', ''))
+                ? newValue
+                : oldValue,
+          )
         else
           AmountInputFormatter(),
       ],
@@ -1880,7 +1963,11 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
   }
 
   static String _plainRate(double rate) {
-    final digits = rate >= 100 ? 2 : rate >= 1 ? 4 : 6;
+    final digits = rate >= 100
+        ? 2
+        : rate >= 1
+        ? 4
+        : 6;
     return rate
         .toStringAsFixed(digits)
         .replaceFirst(RegExp(r'0+$'), '')
@@ -1925,8 +2012,11 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
         } catch (_) {}
         rate = engine.getRate(from, to) ?? await _reportRate(from, to);
       }
-      final same = mounted && _rate.text == initialRate &&
-          _fromAccount?['id'] == sourceAccount && _toAccount?['id'] == destinationAccount;
+      final same =
+          mounted &&
+          _rate.text == initialRate &&
+          _fromAccount?['id'] == sourceAccount &&
+          _toAccount?['id'] == destinationAccount;
       final found = rate;
       if (found != null && found > 0 && same) {
         // The rate saved on this device (also offline), editable.
@@ -1950,8 +2040,8 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
           .unitConversion(
             fromProductId: srcId,
             toProductId: dstId,
-             fromUnitId: fromUnit,
-             fromBranchId: _from?.id,
+            fromUnitId: fromUnit,
+            fromBranchId: _from?.id,
             toBranchId: _to?.id,
           );
       if (!mounted ||
@@ -1986,7 +2076,11 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
       return true;
     } catch (e) {
       if (mounted && _mayEdit) {
-        showFyonaSnack(context, _transferError(AppLocalizations.of(context), e), success: false);
+        showFyonaSnack(
+          context,
+          _transferError(AppLocalizations.of(context), e),
+          success: false,
+        );
       }
       return false;
     }
@@ -1999,7 +2093,8 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
     final l10n = AppLocalizations.of(context);
     final ctrl = TextEditingController(
       text: initial != null && initial > 0
-          ? initial.toStringAsFixed(6).replaceFirst(RegExp(r'\.?0+$'), '') : '',
+          ? initial.toStringAsFixed(6).replaceFirst(RegExp(r'\.?0+$'), '')
+          : '',
     );
     String? error;
     final result = await showDialog<double>(
@@ -2078,9 +2173,16 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
                         decimal: true,
                       ),
                       textAlign: TextAlign.center,
-                      inputFormatters: [TextInputFormatter.withFunction((oldValue, newValue) =>
-                        RegExp(r'^\d{0,12}(\.\d{0,6})?$').hasMatch(newValue.text)
-                            ? newValue : oldValue)],
+                      inputFormatters: [
+                        TextInputFormatter.withFunction(
+                          (oldValue, newValue) =>
+                              RegExp(
+                                r'^\d{0,12}(\.\d{0,6})?$',
+                              ).hasMatch(newValue.text)
+                              ? newValue
+                              : oldValue,
+                        ),
+                      ],
                       style: const TextStyle(
                         fontFamily: 'Cairo',
                         fontSize: 20,
@@ -2236,7 +2338,8 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
   }
 
   String _errorMessage(Object error, AppLocalizations l10n) {
-    if (BranchTransferDeviceScope.matches(error)) return l10n.translate('branchTransferDeviceScope');
+    if (BranchTransferDeviceScope.matches(error))
+      return l10n.translate('branchTransferDeviceScope');
     if (error is DioException) {
       final data = error.response?.data;
       if (data is Map) {
@@ -2268,24 +2371,34 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           l10n.translate('payNegTitle'),
-          style: const TextStyle(fontFamily: 'Cairo', fontSize: 16, height: 1.5),
+          style: const TextStyle(
+            fontFamily: 'Cairo',
+            fontSize: 16,
+            height: 1.5,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, 'always'),
-            child: Text(l10n.translate('payNegAlways'),
-                style: const TextStyle(fontFamily: 'Cairo')),
+            child: Text(
+              l10n.translate('payNegAlways'),
+              style: const TextStyle(fontFamily: 'Cairo'),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, 'once'),
-            child: Text(l10n.translate('payNegOnce'),
-                style: const TextStyle(fontFamily: 'Cairo')),
+            child: Text(
+              l10n.translate('payNegOnce'),
+              style: const TextStyle(fontFamily: 'Cairo'),
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, 'cancel'),
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            child: Text(l10n.translate('payNegCancel'),
-                style: const TextStyle(fontFamily: 'Cairo')),
+            child: Text(
+              l10n.translate('payNegCancel'),
+              style: const TextStyle(fontFamily: 'Cairo'),
+            ),
           ),
         ],
       ),
@@ -2330,19 +2443,29 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
             fontWeight: FontWeight.w800,
           ),
         ),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          _RouteLabel(
-            from: _from!.name,
-            to: _to!.name,
-            centered: true,
-            fontSize: 12,
-            color: AppColors.textPrimary,
-          ),
-          const SizedBox(height: 4),
-          Text(l10n.translate(_financial ? 'branchFinancial' : 'branchInventory'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _RouteLabel(
+              from: _from!.name,
+              to: _to!.name,
+              centered: true,
+              fontSize: 12,
+              color: AppColors.textPrimary,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              l10n.translate(
+                _financial ? 'branchFinancial' : 'branchInventory',
+              ),
               style: const TextStyle(
-                  fontFamily: 'Cairo', fontSize: 12, color: Colors.grey)),
-        ]),
+                fontFamily: 'Cairo',
+                fontSize: 12,
+                color: Colors.grey,
+              ),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -2378,8 +2501,7 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
         if (_fromAccount == null || _toAccount == null || amount <= 0) {
           throw Exception(l10n.translate('branchSelectAccount'));
         }
-        final available =
-            double.tryParse('${_fromAccount!['balance'] ?? ''}');
+        final available = double.tryParse('${_fromAccount!['balance'] ?? ''}');
         // Beyond the balance: the app's own overdraft question (once /
         // always / don't), asked only when it is actually needed.
         var allowNegative = ref.read(bizPaymentPrefProvider).allowNegative;
@@ -2401,8 +2523,14 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
               allowNegative: negative,
               notes: _notes.text,
               commandId: _command([
-                _from!.id, _to!.id, _fromAccount!['id'], _toAccount!['id'],
-                amount, rate, negative, _notes.text,
+                _from!.id,
+                _to!.id,
+                _fromAccount!['id'],
+                _toAccount!['id'],
+                amount,
+                rate,
+                negative,
+                _notes.text,
               ]),
             );
         try {
@@ -2488,7 +2616,6 @@ class _TransferDetailPage extends ConsumerStatefulWidget {
 }
 
 class _TransferDetailPageState extends ConsumerState<_TransferDetailPage> {
-
   late final _TransferSelection _retainedScope;
   bool get _sameSelection => _selection(ref) == _retainedScope;
   bool _reversing = false;
@@ -2525,113 +2652,126 @@ class _TransferDetailPageState extends ConsumerState<_TransferDetailPage> {
       body: !_sameSelection
           ? Center(child: Text(l10n.translate('branchNoPermission')))
           : FutureBuilder<Map<String, dynamic>>(
-        future: _future,
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const SizedBox.shrink(); // device read: no loading screen
-          }
-          if (snap.hasError) {
-            return Center(
-              child: Text(
-                 _transferError(l10n, snap.error),
-                style: const TextStyle(fontFamily: 'Cairo'),
-              ),
-            );
-          }
-          final t = snap.data ?? {};
-          final items = (t['items'] as List? ?? const []).whereType<Map>();
-          final canReverse = t['can_reverse'] == true;
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
-            children: [
-              _hero(t),
-              const SizedBox(height: 14),
-              _row(
-                l10n.translate('branchOperationNumber'),
-                shortDocumentNumber(t['number'], uuidPrefix: 'TRF'),
-              ),
-              _row(
-                l10n.translate('branchFrom'),
-                _routeFrom(t),
-              ),
-              _row(l10n.translate('branchTo'), _routeTo(t)),
-              _row(
-                l10n.translate('branchBy'),
-                _actorText(l10n, t),
-              ),
-              if (t['kind'] == 'financial') ...[
-                _row(
-                  l10n.translate('branchAmount'),
-                  '${_fmt(t['amount'])} ${currencyLabel('${t['currency'] ?? ''}')}',
-                ),
-                // Only a transfer between two different currencies has a rate.
-                if (t['exchange_rate'] != null &&
-                    '${t['exchange_rate']}'.trim().isNotEmpty &&
-                    '${t['exchange_rate']}' != 'null' &&
-                    '${t['currency'] ?? ''}' != '${t['to_currency'] ?? ''}')
-                  _row(
-                    l10n.translate('branchExchangeRate'),
-                    '${t['exchange_rate']}',
-                  ),
-                _row(
-                  l10n.translate('branchExpectedAmount'),
-                  '${_fmt(t['received_amount'])} ${currencyLabel('${t['to_currency'] ?? ''}')}',
-                ),
-              ] else ...[
-                _row(
-                  l10n.translate('branchItemCount'),
-                  l10n.translate(
-                    'branchProductCount',
-                    params: {'count': '${items.length}'},
-                  ),
-                ),
-                _row(
-                  l10n.translate('branchTotalCost'),
-                  _inventoryTotalText(t, items),
-                ),
-              ],
-              if ((t['notes'] ?? '').toString().isNotEmpty)
-                _row(l10n.translate('branchTransferNotes'), '${t['notes']}'),
-              const SizedBox(height: 12),
-              if (items.isNotEmpty) ...[
-                Text(
-                  l10n.translate('branchInventory'),
-                  style: TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                for (final it in items) _inventoryItemCard(l10n, it),
-              ],
-              const SizedBox(height: 16),
-              if (canReverse && !BranchScope.readOnly && ref.watch(employeeCanProvider('branches.transfer')) && ref.watch(employeeCanProvider(t['kind'] == 'financial' ? 'banks.transfer' : 'inventory.transfer')))
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.danger,
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+              future: _future,
+              builder: (context, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const SizedBox.shrink(); // device read: no loading screen
+                }
+                if (snap.hasError) {
+                  return Center(
+                    child: Text(
+                      _transferError(l10n, snap.error),
+                      style: const TextStyle(fontFamily: 'Cairo'),
                     ),
-                  ),
-                  key: const ValueKey('transfer_reverse'),
-                   onPressed: _reversing ? null : () => _reverse('${t['kind']}'),
-                  icon: const Icon(Icons.undo_rounded, color: Colors.white),
-                  label: Text(
-                    l10n.translate('branchReverseAction'),
-                    style: const TextStyle(
-                      fontFamily: 'Cairo',
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
+                  );
+                }
+                final t = snap.data ?? {};
+                final items = (t['items'] as List? ?? const [])
+                    .whereType<Map>();
+                final canReverse = t['can_reverse'] == true;
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
+                  children: [
+                    _hero(t),
+                    const SizedBox(height: 14),
+                    _row(
+                      l10n.translate('branchOperationNumber'),
+                      shortDocumentNumber(t['number'], uuidPrefix: 'TRF'),
                     ),
-                  ),
-                ),
-            ],
-          );
-        },
-      ),
+                    _row(l10n.translate('branchFrom'), _routeFrom(t)),
+                    _row(l10n.translate('branchTo'), _routeTo(t)),
+                    _row(l10n.translate('branchBy'), _actorText(l10n, t)),
+                    if (t['kind'] == 'financial') ...[
+                      _row(
+                        l10n.translate('branchAmount'),
+                        '${_fmt(t['amount'])} ${currencyLabel('${t['currency'] ?? ''}')}',
+                      ),
+                      // Only a transfer between two different currencies has a rate.
+                      if (t['exchange_rate'] != null &&
+                          '${t['exchange_rate']}'.trim().isNotEmpty &&
+                          '${t['exchange_rate']}' != 'null' &&
+                          '${t['currency'] ?? ''}' !=
+                              '${t['to_currency'] ?? ''}')
+                        _row(
+                          l10n.translate('branchExchangeRate'),
+                          '${t['exchange_rate']}',
+                        ),
+                      _row(
+                        l10n.translate('branchExpectedAmount'),
+                        '${_fmt(t['received_amount'])} ${currencyLabel('${t['to_currency'] ?? ''}')}',
+                      ),
+                    ] else ...[
+                      _row(
+                        l10n.translate('branchItemCount'),
+                        l10n.translate(
+                          'branchProductCount',
+                          params: {'count': '${items.length}'},
+                        ),
+                      ),
+                      _row(
+                        l10n.translate('branchTotalCost'),
+                        _inventoryTotalText(t, items),
+                      ),
+                    ],
+                    if ((t['notes'] ?? '').toString().isNotEmpty)
+                      _row(
+                        l10n.translate('branchTransferNotes'),
+                        '${t['notes']}',
+                      ),
+                    const SizedBox(height: 12),
+                    if (items.isNotEmpty) ...[
+                      Text(
+                        l10n.translate('branchInventory'),
+                        style: TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      for (final it in items) _inventoryItemCard(l10n, it),
+                    ],
+                    const SizedBox(height: 16),
+                    if (canReverse &&
+                        !BranchScope.readOnly &&
+                        ref.watch(employeeCanProvider('branches.transfer')) &&
+                        ref.watch(
+                          employeeCanProvider(
+                            t['kind'] == 'financial'
+                                ? 'banks.transfer'
+                                : 'inventory.transfer',
+                          ),
+                        ))
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.danger,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        key: const ValueKey('transfer_reverse'),
+                        onPressed: _reversing
+                            ? null
+                            : () => _reverse('${t['kind']}'),
+                        icon: const Icon(
+                          Icons.undo_rounded,
+                          color: Colors.white,
+                        ),
+                        label: Text(
+                          l10n.translate('branchReverseAction'),
+                          style: const TextStyle(
+                            fontFamily: 'Cairo',
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
     );
   }
 
@@ -3042,10 +3182,15 @@ class _TransferDetailPageState extends ConsumerState<_TransferDetailPage> {
   );
 
   Future<void> _reverse(String kind) async {
-    bool allowed() => _sameSelection &&
+    bool allowed() =>
+        _sameSelection &&
         !BranchScope.readOnly &&
         ref.read(employeeCanProvider('branches.transfer')) &&
-        ref.read(employeeCanProvider(kind == 'financial' ? 'banks.transfer' : 'inventory.transfer'));
+        ref.read(
+          employeeCanProvider(
+            kind == 'financial' ? 'banks.transfer' : 'inventory.transfer',
+          ),
+        );
     if (_reversing || !allowed()) return;
     final l10n = AppLocalizations.of(context);
     setState(() => _reversing = true);
@@ -3090,7 +3235,9 @@ class _TransferDetailPageState extends ConsumerState<_TransferDetailPage> {
     }
     setState(() => _reversing = true);
     try {
-      await ref.read(branchApiProvider).reverseTransfer(widget.id, commandId: _reversalCommand);
+      await ref
+          .read(branchApiProvider)
+          .reverseTransfer(widget.id, commandId: _reversalCommand);
       if (!mounted || !allowed()) return;
       showFyonaSnack(context, l10n.translate('branchReversed'), success: true);
       setState(() {
