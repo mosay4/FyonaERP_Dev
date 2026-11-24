@@ -422,7 +422,9 @@ def main():
             raise ValueError("Malformed AI provider key")
         env["DEEPSEEK_API_KEY"] = value
         env["SARA_API_KEY"] = value
-        env["NO_PROXY"] += ",api.deepseek.com"
+        # The lab may only reach localhost; the egress gateway on localhost
+        # (fyona-qa-sara-egress) opens the allow-listed hosts and nothing else.
+        env["HTTPS_PROXY"] = "http://127.0.0.1:18990"
     # Voice messages are turned into text on this server (Whisper, offline
     # model folder; no download at run time).
     stt_model = Path("/opt/fyona-directory-qa/sara-stt/model-small")
