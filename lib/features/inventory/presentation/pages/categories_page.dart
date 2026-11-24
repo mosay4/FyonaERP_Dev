@@ -59,14 +59,6 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
   Future<void> _add() async {
     if (!_active || _adding) return;
     final l10n = AppLocalizations.of(context);
-    if (_source is LocalInventoryApi) {
-      showFyonaSnack(
-        context,
-        l10n.translate('invSharedCategoryReadOnly'),
-        success: false,
-      );
-      return;
-    }
     _adding = true;
     final ctrl = TextEditingController();
     final ok = await showDialog<bool>(
@@ -164,8 +156,6 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                if (source is LocalInventoryApi)
-                  Text(l10n.translate('invBranchCatalog')),
                 for (final c in _items)
                   Container(
                     margin: const EdgeInsets.only(bottom: 8),
@@ -222,9 +212,7 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
                           padding: const EdgeInsets.symmetric(horizontal: 32),
                           child: Text(
                             l10n.translate(
-                              source is LocalInventoryApi
-                                  ? 'invNoTransferredCategories'
-                                  : 'invNoCategoriesHint',
+                              'invNoCategoriesHint',
                             ),
                             textAlign: TextAlign.center,
                             style: const TextStyle(

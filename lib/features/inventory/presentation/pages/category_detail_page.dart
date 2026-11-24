@@ -60,10 +60,7 @@ class _CategoryDetailPageState extends ConsumerState<CategoryDetailPage> {
 
   bool _allowSharedEdit() {
     if (!_active) return false;
-    if (_source is! LocalInventoryApi) return true;
-    showFyonaSnack(context, AppLocalizations.of(context).translate('invSharedCategoryReadOnly'),
-      success: false);
-    return false;
+    return true;
   }
 
   /// Multi-remove selection mode (removal only unsets the category).
@@ -494,9 +491,6 @@ class _CategoryDetailPageState extends ConsumerState<CategoryDetailPage> {
                                     fontFamily: 'Cairo',
                                     fontSize: 17,
                                      fontWeight: FontWeight.w800)),
-                            if (c['shared_snapshot'] == true)
-                              Text(l10n.translate('invSharedCategoryReadOnly'),
-                                textAlign: TextAlign.center),
                             const SizedBox(height: 10),
                             Row(
                               mainAxisAlignment:

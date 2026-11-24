@@ -12,6 +12,8 @@ import '../../../employees/presentation/providers/employee_providers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/network/dio_provider.dart';
 import '../../../../core/services/currency/currency_engine.dart';
+import '../../../../core/services/currency/business_currency_scope.dart';
+import '../../../../shared/providers/current_user_provider.dart';
 import '../../data/business_bank_models.dart';
 import '../../data/business_banks_api.dart';
 import 'local_business_banking.dart';
@@ -284,6 +286,36 @@ class BusinessBanksNotifier extends StateNotifier<BusinessBanksState> {
       walletCurrency: code,
       walletTotal: totalIn(state.accounts, code),
     );
+  }
+
+  /// The branch's cash: one «كاش» account per enabled currency, kept on the
+  /// device like every other account. Only missing ones are created; a
+  /// currency the user removed is no longer enabled and is not recreated.
+  Future<void> ensureLocalCash(Iterable<String> currencies) async {
+    final local = _local;
+    if (local == null || !isCurrent) return;
+    final rows = await local.accounts();
+    final existing = {
+      for (final a in rows)
+        if ('${a['bank_name'] ?? ''}' == 'كاش' || isBizCashAccount('${a['bank_name'] ?? ''}'))
+          '${a['currency'] ?? ''}'.toUpperCase(),
+    };
+    for (final code in {for (final c in currencies) c.trim().toUpperCase()}) {
+      if (code.isEmpty || existing.contains(code) || !isCurrent) continue;
+      try {
+        await addAccount(
+          bankName: 'كاش',
+          accountName: 'حساب الكاش',
+          accountNumber: 'CASH',
+          currency: code,
+          // One command per branch and currency: two devices (or a retry)
+          // never create a second cash account for the same currency.
+          commandId: const Uuid().v5(Uuid.NAMESPACE_URL, 'fyona-cash:${local.scope.branchId}:$code'),
+        );
+      } catch (_) {
+        // Recreated on the next visit; the banks list never breaks for it.
+      }
+    }
   }
 
   Future<void> addAccount({
@@ -585,3 +617,22 @@ final businessBanksProvider =
             ref.read(localBusinessBankingProvider) == null,
       );
     });
+
+
+/// Opening a device-ledger branch makes sure its cash exists (one «كاش» per
+/// enabled currency), without visiting the banks screen first.
+final localCashWarmupProvider = FutureProvider.autoDispose<void>((ref) async {
+  ref.watch(branchEpochProvider);
+  if (ref.watch(localBusinessBankingProvider) == null ||
+      BranchScope.readOnly ||
+      ref.watch(employeeWorkspaceCompanyProvider) != null ||
+      !ref.watch(employeeCanProvider('banks.add_delete'))) {
+    return;
+  }
+  final notifier = ref.read(businessBanksProvider.notifier);
+  final enabled = await loadBizEnabledCurrencies(ref.read(currentUserIdProvider).trim());
+  try {
+    await notifier.ensureLocalCash(enabled);
+    await notifier.load();
+  } catch (_) {}
+});

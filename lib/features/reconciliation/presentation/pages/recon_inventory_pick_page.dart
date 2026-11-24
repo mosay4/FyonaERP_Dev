@@ -371,8 +371,7 @@ class _ReconInventoryPickPageState
     // (name shown in the squares below)
     if (_categories.isEmpty) {
       return Center(
-        child: Text(l10n.translate(_source.isDeviceLedger
-            ? 'invNoTransferredCategories' : 'reconNoCategories'),
+        child: Text(l10n.translate('reconNoCategories'),
             style: const TextStyle(fontFamily: 'Cairo')),
       );
     }

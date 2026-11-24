@@ -100,7 +100,15 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
       // Business cash rows for every enabled Business currency (fresh
       // currencies only — never resurrects a removed one).
       try {
-        if (!source.isLocal &&
+        if (source.isLocal &&
+            !BranchScope.readOnly &&
+            ref.read(employeeWorkspaceCompanyProvider) == null &&
+            ref.read(employeeCanProvider('banks.add_delete'))) {
+          // Device ledger: the branch's own cash, created here on the phone.
+          final enabled = await loadBizEnabledCurrencies(ref.read(currentUserIdProvider).trim());
+          if (!mounted || !source.isCurrent) return;
+          await source.ensureLocalCash(enabled);
+        } else if (!source.isLocal &&
             !BranchScope.readOnly &&
             ref.read(employeeWorkspaceCompanyProvider) == null &&
             ref.read(employeeCanProvider('banks.add_delete'))) {

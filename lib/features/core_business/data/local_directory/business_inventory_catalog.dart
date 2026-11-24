@@ -74,7 +74,6 @@ extension BusinessInventoryCatalog on BusinessLedger {
             'image': _deviceInventoryImage(row['image']),
             'is_active': row['active'] == 1,
             'products_count': row['products_count'],
-            'shared_snapshot': true,
           },
       ],
     );
@@ -124,6 +123,80 @@ extension BusinessInventoryCatalog on BusinessLedger {
     );
   }
 
+  /// Categories belong to this branch's own inventory, like its products.
+  Future<Map<String, Object?>> createCommerceCategory(
+    BusinessLedgerAccess access, {
+    required String commandId,
+    required String name,
+    bool Function()? allowed,
+  }) {
+    final branch = _branch(access, BusinessLedgerAction.manageProducts);
+    final clean = name.trim();
+    if (clean.isEmpty || clean.length > 120) throw const DirectoryAccessDenied();
+    return _commit(branch, commandId, ['branch_category_create', clean], (txn, _) async {
+      await _ensureCatalogue(txn, branch);
+      await txn.insert(_commerceCategories, {
+        'branch_id': branch, 'id': commandId, 'name': clean, 'image': null, 'active': 1,
+      });
+      return {'id': commandId, 'name': clean, 'is_active': true, 'products_count': 0};
+    }, allowed: allowed);
+  }
+
+  Future<Map<String, Object?>> renameCommerceCategory(
+    BusinessLedgerAccess access, {
+    required String commandId,
+    required String id,
+    required String name,
+    bool Function()? allowed,
+  }) {
+    final branch = _branch(access, BusinessLedgerAction.manageProducts);
+    final clean = name.trim();
+    if (clean.isEmpty || clean.length > 120) throw const DirectoryAccessDenied();
+    return _commit(branch, commandId, ['branch_category_rename', id, clean], (txn, _) async {
+      await _commerceCategory(txn, branch, id);
+      await txn.update(_commerceCategories, {'name': clean},
+          where: 'branch_id = ? AND id = ?', whereArgs: [branch, id]);
+      return {'id': id, 'name': clean};
+    }, allowed: allowed);
+  }
+
+  /// The products stay; they just become uncategorized.
+  Future<Map<String, Object?>> deleteCommerceCategory(
+    BusinessLedgerAccess access, {
+    required String commandId,
+    required String id,
+    bool Function()? allowed,
+  }) {
+    final branch = _branch(access, BusinessLedgerAction.manageProducts);
+    return _commit(branch, commandId, ['branch_category_delete', id], (txn, _) async {
+      await _commerceCategory(txn, branch, id);
+      await txn.delete(_commerceCategoryLinks,
+          where: 'branch_id = ? AND category_id = ?', whereArgs: [branch, id]);
+      await txn.delete(_commerceCategories,
+          where: 'branch_id = ? AND id = ?', whereArgs: [branch, id]);
+      return {'id': id, 'deleted': true};
+    }, allowed: allowed);
+  }
+
+  /// This branch's own expiry setting (never another branch's).
+  Future<Map<String, Object?>> setWarehouseExpiry(
+    BusinessLedgerAccess access, {
+    required String commandId,
+    required bool enabled,
+    required int warnDays,
+    bool Function()? allowed,
+  }) {
+    final branch = _branch(access, BusinessLedgerAction.manageProducts);
+    if (warnDays < 1 || warnDays > 365) throw const DirectoryAccessDenied();
+    return _commit(branch, commandId, ['branch_expiry', enabled, warnDays], (txn, _) async {
+      await _ensureCatalogue(txn, branch);
+      await txn.update(_commerceCatalogue,
+          {'expiry_enabled': enabled ? 1 : 0, 'expiry_warn_days': warnDays},
+          where: 'branch_id = ?', whereArgs: [branch]);
+      return {'enabled': enabled, 'warn_days': warnDays};
+    }, allowed: allowed);
+  }
+
   Future<BusinessWarehouseExpiry?> warehouseExpiry(
     BusinessLedgerAccess access,
   ) {
@@ -148,6 +221,12 @@ Future<BusinessWarehouseExpiry?> _warehouseExpiry(
           warnDays: row['expiry_warn_days'] as int,
         );
 }
+
+Future<void> _ensureCatalogue(DatabaseExecutor db, String branch) => db.insert(
+  _commerceCatalogue,
+  {'branch_id': branch, 'expiry_enabled': null, 'expiry_warn_days': null},
+  conflictAlgorithm: ConflictAlgorithm.ignore,
+);
 
 Future<bool> _hasInventoryCatalogue(DatabaseExecutor db, String branch) async =>
     (await db.query(

@@ -321,10 +321,6 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
       return;
     }
     if (!_active) return;
-    if (cats.isEmpty && _source is LocalInventoryApi) {
-      showFyonaSnack(context, l10n.translate('invNoTransferredCategories'), success: false);
-      return;
-    }
     final picked = await showBusinessSelectionSheet<Map<String, dynamic>>(
       context: context,
       title: l10n.translate('invCategory'),

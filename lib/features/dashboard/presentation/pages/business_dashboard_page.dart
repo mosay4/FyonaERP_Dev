@@ -11,6 +11,7 @@ import '../providers/business_dashboard_providers.dart';
 import 'widgets/business_services_grid.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
 import '../../../business_banks/presentation/providers/local_business_banking.dart';
+import '../../../business_banks/presentation/providers/business_banks_providers.dart' show localCashWarmupProvider;
 import '../../../reports/data/business_report_rates.dart';
 
 /// Business section home: bank cards + promo banners, mirroring the personal
@@ -27,6 +28,7 @@ class BusinessDashboardPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(businessReportRateWarmupProvider);
+    ref.watch(localCashWarmupProvider);
     final balances = ref.watch(employeeCanProvider('banks.balances'));
     final local = ref.watch(localBusinessBankingProvider);
     final accountsAsync = balances ? ref.watch(businessAccountsProvider) : null;

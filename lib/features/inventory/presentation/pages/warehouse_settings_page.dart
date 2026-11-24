@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/responsive/r_api.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../shared/widgets/styled_snack.dart';
 import '../../../branches/data/branch_scope.dart';
 import '../../../core_business/data/local_commerce/local_commerce_api.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
@@ -40,15 +39,6 @@ class _WarehouseSettingsPageState extends ConsumerState<WarehouseSettingsPage> {
 
   Future<void> _saveExpiry(bool enabled, int days) async {
     if (!_active || _savingExpiry) return;
-    final l10n = AppLocalizations.of(context);
-    if (_source is LocalInventoryApi) {
-      showFyonaSnack(
-        context,
-        l10n.translate('invSharedWarehouseReadOnly'),
-        success: false,
-      );
-      return;
-    }
     setState(() => _savingExpiry = true);
     try {
       final n = ref.read(warehouseSettingsProvider.notifier);
@@ -58,6 +48,10 @@ class _WarehouseSettingsPageState extends ConsumerState<WarehouseSettingsPage> {
         expiryEnabled: enabled,
         warnDays: days,
       );
+      // A device branch keeps its own setting in its ledger.
+      if (_source is LocalInventoryApi && mounted) {
+        ref.invalidate(deviceWarehouseExpiryProvider);
+      }
     } catch (_) {
       // This is a connected preference mirrored to the server's push job.
     } finally {
@@ -75,7 +69,6 @@ class _WarehouseSettingsPageState extends ConsumerState<WarehouseSettingsPage> {
         same &&
         !BranchScope.readOnly &&
         ref.watch(employeeCanProvider('inventory.edit'));
-    final local = _source is LocalInventoryApi;
     Widget tile(
       String key,
       bool value,
@@ -155,9 +148,6 @@ class _WarehouseSettingsPageState extends ConsumerState<WarehouseSettingsPage> {
                   !_savingExpiry
                       ? (v) => _saveExpiry(v, s.expiryWarnDays)
                       : null,
-                  subtitle: local
-                      ? l10n.translate('invSharedWarehouseReadOnly')
-                      : null,
                 ),
                 if (s.expiry)
                   ListTile(
@@ -185,13 +175,6 @@ class _WarehouseSettingsPageState extends ConsumerState<WarehouseSettingsPage> {
                           onPressed: !canEdit || _savingExpiry
                               ? null
                               : () async {
-                                  if (local) {
-                                    await _saveExpiry(
-                                      s.expiry,
-                                      s.expiryWarnDays,
-                                    );
-                                    return;
-                                  }
                                   final c = TextEditingController(
                                     text: '${s.expiryWarnDays}',
                                   );

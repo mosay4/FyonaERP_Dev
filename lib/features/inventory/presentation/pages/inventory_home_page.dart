@@ -728,10 +728,6 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
   Future<void> _addCategory() async {
     final l10n = AppLocalizations.of(context);
     final api = ref.read(inventoryApiProvider);
-    if (api is LocalInventoryApi) {
-      showFyonaSnack(context, l10n.translate('invSharedCategoryReadOnly'), success: false);
-      return;
-    }
     final ctrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
@@ -802,7 +798,7 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
           child: Align(
             alignment: AlignmentDirectional.centerStart,
             child: Text(
-               l10n.translate(api is LocalInventoryApi ? 'invBranchCatalog' : 'invTapCategoryHint'),
+               l10n.translate('invTapCategoryHint'),
               style: TextStyle(
                 fontFamily: 'Cairo',
                 fontSize: 12,
@@ -829,8 +825,7 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
               onRefresh: () async =>
                   ref.invalidate(inventoryCategoriesProvider),
               child: cats.isEmpty
-                   ? _noCategoriesBody(context, l10n, message: api is LocalInventoryApi
-                       ? l10n.translate('invNoTransferredCategories') : null)
+                   ? _noCategoriesBody(context, l10n)
                   : GridView.builder(
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                       gridDelegate:

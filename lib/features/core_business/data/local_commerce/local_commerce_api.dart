@@ -707,6 +707,36 @@ final class LocalCommerceBridge {
     _operationsChanged?.call();
   }
 
+  Future<Map<String, dynamic>> createCategory(String name) =>
+      _catalogWrite(['inventory', 'inventory.add'], (ledger, grant, allowed) =>
+          ledger.createCommerceCategory(grant, commandId: const Uuid().v4(), name: name, allowed: allowed));
+
+  Future<Map<String, dynamic>> renameCategory(String id, String name) =>
+      _catalogWrite(['inventory', 'inventory.edit'], (ledger, grant, allowed) =>
+          ledger.renameCommerceCategory(grant, commandId: const Uuid().v4(), id: id, name: name, allowed: allowed));
+
+  Future<Map<String, dynamic>> deleteCategory(String id) =>
+      _catalogWrite(['inventory', 'inventory.delete'], (ledger, grant, allowed) =>
+          ledger.deleteCommerceCategory(grant, commandId: const Uuid().v4(), id: id, allowed: allowed));
+
+  Future<Map<String, dynamic>> setWarehouseExpiry(bool enabled, int warnDays) =>
+      _catalogWrite(['inventory', 'inventory.edit'], (ledger, grant, allowed) =>
+          ledger.setWarehouseExpiry(grant, commandId: const Uuid().v4(), enabled: enabled,
+              warnDays: warnDays, allowed: allowed));
+
+  Future<Map<String, dynamic>> _catalogWrite(
+    List<String> permissions,
+    Future<Map<String, Object?>> Function(BusinessLedger, BusinessLedgerAccess, bool Function()) write,
+  ) async {
+    final result = await _run(
+      {BusinessLedgerAction.manageProducts}, permissions,
+      (ledger, grant) => write(ledger, grant, () => _current(permissions)),
+    );
+    _require(permissions);
+    _operationsChanged?.call();
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<BusinessWarehouseExpiry?> warehouseExpiry() => _read(
     {BusinessLedgerAction.readInventory}, ['inventory'],
     (ledger, grant) => ledger.warehouseExpiry(grant),
@@ -1276,16 +1306,16 @@ final class LocalInventoryApi extends InventoryApi {
   @override
   Future<List<Map<String, dynamic>>> categories() => _bridge.categories();
 
+  // Categories and settings are this branch's own (its own inventory).
   @override
-  Future<Map<String, dynamic>> createCategory(String name) =>
-      _rejectSharedWrite('inventory.add');
+  Future<Map<String, dynamic>> createCategory(String name) => _bridge.createCategory(name);
 
   @override
   Future<Map<String, dynamic>> updateCategory(String id, String name) =>
-      _rejectSharedWrite('inventory.edit');
+      _bridge.renameCategory(id, name);
 
   @override
-  Future<void> deleteCategory(String id) => _rejectSharedWrite('inventory.delete');
+  Future<void> deleteCategory(String id) async => _bridge.deleteCategory(id);
 
   Future<void> classifyProducts(
     List<String> products, {required String commandId, String? categoryId, String? removingFrom}
@@ -1297,7 +1327,7 @@ final class LocalInventoryApi extends InventoryApi {
   @override
   Future<void> setWarehouseSettings({
     required bool expiryEnabled, required int warnDays,
-  }) => _rejectSharedWrite('inventory.edit');
+  }) async => _bridge.setWarehouseExpiry(expiryEnabled, warnDays);
 
   @override
   Future<Map<String, dynamic>> productUnits(String id) =>
