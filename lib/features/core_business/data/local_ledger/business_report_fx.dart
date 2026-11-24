@@ -31,6 +31,10 @@ final class BusinessReportFx {
     int? operationUs,
     BusinessRate? frozen,
   }) {
+    // The whole app names the Aden rial «YER» (shown as «ريال يمني جديد»,
+    // and the currency engine values it as YER_NEW): reports do the same.
+    if (from == 'YER') from = 'YER_NEW';
+    if (to == 'YER') to = 'YER_NEW';
     if (amount == BigInt.zero || from == to) return amount;
     if (frozen != null) {
       if (frozen.from == from && frozen.to == to) {
@@ -45,8 +49,6 @@ final class BusinessReportFx {
         );
       }
     }
-    // A bare legacy YER code does not identify the note version. In
-    // particular, never alias a legacy balance to Aden or Sana'a.
     final rate =
         _at(from, to, operationUs) ?? _at(to, from, operationUs)?.inverse;
     if (rate != null) return rate.apply(amount);

@@ -134,7 +134,10 @@ void main() {
         old.convert(BigInt.from(500), 'YER_OLD', 'YER_NEW'),
         BigInt.from(1500),
       );
-      expect(old.convert(BigInt.from(500), 'YER', 'USD'), isNull);
+      // «YER» is the app's name for the Aden rial (YER_NEW) everywhere.
+      expect(old.convert(BigInt.from(500), 'YER', 'USD'),
+          old.convert(BigInt.from(500), 'YER_NEW', 'USD'));
+      expect(old.convert(BigInt.from(500), 'YER_OLD', 'YER'), BigInt.from(1500));
       expect(old.convert(BigInt.from(100), 'USD', 'CAD'), BigInt.from(130));
       expect(
         old.convert(

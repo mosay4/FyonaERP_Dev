@@ -353,19 +353,27 @@ class ReconReportPdf {
       final title = '${_s(s['name'])}'
           '${_s(s['currency']).isNotEmpty ? ' (${_s(s['currency'])})' : (!multi && _s(s['unit']).isNotEmpty ? ' (${_s(s['unit'])})' : '')}';
 
-      pw.Widget arrowPair(String before, String after, {double size = 12}) =>
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.center,
-            children: [
-              label(before, b: true, size: size, color: _burgundy,
-                  align: pw.TextAlign.center),
-              pw.SizedBox(width: 6),
-              _arrow(isAr),
-              pw.SizedBox(width: 6),
-              label(after, b: true, size: size, color: _burgundy,
-                  align: pw.TextAlign.center),
-            ],
-          );
+      // The row is laid out left-to-right; Arabic reads right-to-left, so
+      // «before» sits on the right and the left-pointing arrow leads to
+      // «after»: 0 ← 60,000 reads «from 0 to 60,000».
+      pw.Widget arrowPair(String before, String after, {double size = 12}) {
+        final first = label(before, b: true, size: size, color: _burgundy,
+            align: pw.TextAlign.center);
+        final second = label(after, b: true, size: size, color: _burgundy,
+            align: pw.TextAlign.center);
+        return pw.Directionality(
+          textDirection: pw.TextDirection.ltr,
+          child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.center,
+          children: [
+            isAr ? second : first,
+            pw.SizedBox(width: 6),
+            _arrow(isAr),
+            pw.SizedBox(width: 6),
+            isAr ? first : second,
+          ],
+        ));
+      }
 
       if (multi) {
         return pw.Container(
