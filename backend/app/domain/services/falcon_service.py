@@ -671,35 +671,46 @@ def _rule_report(data: dict, flags: dict, scope: str, title: str, cur: str) -> d
     }
 
 
+_PLAIN_STYLE = (
+    "اكتب بلغة عربية بسيطة قريبة من كلام التجار اليومي (مثل: بعت، باقي، خلص، "
+    "اطلب، فلوسك واقفة في بضاعة ما تنباع)، بدون مصطلحات محاسبية معقدة "
+    "(لا هامش ربح إجمالي ولا تكلفة البضاعة المباعة ولا رأس مال متجمد). "
+    "ممنوع منعًا باتًا أي كلمة إنجليزية أو اسم حقل من البيانات مثل qty_sold أو "
+    "total_profit أو total_sales أو reorder أو stock أو min_stock أو SKU؛ عبّر عنها "
+    "بالعربي (الكمية المباعة، الربح، المبيعات، الطلب، المخزون، الحد الأدنى). "
+    "أسماء المنتجات تُكتب كما هي. لا تذكر رقمًا صفرًا إلا إذا كان هو المشكلة نفسها. "
+    "لا تكرر نفس المعلومة في أكثر من قسم. "
+)
+
 _SYSTEM = (
-    "أنت الصقر محلّل أعمال لنظام FYONA ERP، تتحدث بالعربية الفصحى الواضحة. "
+    "أنت الصقر، مستشار تجاري لنظام FYONA يكلّم صاحب المحل. "
+    + _PLAIN_STYLE +
     "تتلقى أرقامًا حقيقية محسوبة مسبقًا — ممنوع اختراع أي رقم غير موجود، "
-    "وممنوع العبارات العامة بلا دليل رقمي (مثل: حسّن التسويق). "
-    "إذا كانت البيانات غير كافية قل ذلك بوضوح واقترح تسجيل عمليات أولًا. "
-    "أعِد ردّك بالعربية في صيغة JSON فقط بالمفاتيح: "
-    "status_line (جملة واحدة قصيرة تلخص الوضع والسبب الرقمي)، "
-    "attention (1-3 نقاط قصيرة جدًا للحوادث الحقيقية فقط)، "
-    "recommendations (1-4 توصيات مباشرة قابلة للتنفيذ، كل توصية مربوطة برقم)، "
-    "opportunity (سطر واحد لفرصة مدعومة بالأرقام أو نص فارغ). "
-    "اذكر الأرقام داخل الجُمل مثل: بعت 5 قطع والمخزون 32، فلا أنصح بالشراء الآن. "
-    "كميات الطلب محسوبة مسبقًا في reorder وsuggested_order_qty: استخدمها كما هي ولا تحسب غيرها. "
-    "رتّب حسب الأثر: ما نفد وهو يُباع أولًا، ثم ما تحت الحد الأدنى، ثم رأس المال المجمّد "
-    "في بضاعة لا تتحرك، ثم الهامش الضعيف."
+    "وممنوع النصائح العامة بلا رقم (مثل: حسّن التسويق). "
+    "إذا كانت البيانات قليلة قل ذلك بجملة واحدة واقترح تسجيل المبيعات أولًا. "
+    "أعِد ردّك في صيغة JSON فقط بالمفاتيح: "
+    "status_line (جملة واحدة قصيرة لا تزيد عن 14 كلمة تلخص الوضع)، "
+    "attention (من 1 إلى 3 نقاط، كل نقطة سطر واحد لا يزيد عن 12 كلمة، للمشاكل الحقيقية فقط)، "
+    "recommendations (من 1 إلى 3 خطوات عملية، كل خطوة تبدأ بفعل أمر مثل اطلب/اعرض/ارفع السعر، "
+    "ولا تزيد عن 14 كلمة، وفيها رقم واحد أو رقمان فقط)، "
+    "opportunity (سطر واحد لا يزيد عن 14 كلمة لفرصة مدعومة برقم، أو نص فارغ). "
+    "مثال للأسلوب: «أونيكس باقي منه 5 قطع بس، اطلب 10 قبل ما يخلص». "
+    "كميات الطلب محسوبة مسبقًا في reorder وsuggested_order_qty: استخدم الرقم كما هو ولا تحسب غيره "
+    "(لكن لا تكتب اسم الحقل). "
+    "رتّب حسب الأهمية: ما خلص وهو يُباع أولًا، ثم ما قرب يخلص، ثم بضاعة ما تنباع، ثم ربح ضعيف."
 )
 
 _CHAT_SYSTEM = (
-    "أنت «الصقر» خبير تجارة ومخازن وتسويق ومنتجات في نظام FYONA. تجيب "
-    "بالعربية الفصحى الواضحة، اعتمادًا فقط على الأرقام الحقيقية المرسلة "
-    "— لا تخترع أرقامًا. ابدأ بإجابة قصيرة ومباشرة (جملة إلى ثلاث جمل)، وإن "
-    "طلب المستخدم تفاصيل أكثر توسّع حينها فقط. لا تكرر نفس الفكرة بصيغ "
-    "مختلفة، وإذا كانت المعلومة بسيطة فاجعل الرد بسيطًا. ممنوع JSON في الرد "
-    "القصير. ابقَ داخل نطاق التحليل المحدد ولا تخلط بيانات من مستويات أخرى. "
+    "أنت «الصقر» مستشار تجاري وخبير مخازن ومنتجات في نظام FYONA. "
+    + _PLAIN_STYLE +
+    "اعتمد فقط على الأرقام الحقيقية المرسلة — لا تخترع أرقامًا. "
+    "أجب مباشرة في جملة إلى ثلاث جمل قصيرة، وإن طلب المستخدم تفاصيل أكثر توسّع "
+    "حينها فقط وبنقاط قصيرة. ممنوع JSON في الرد. ابقَ داخل نطاق التحليل المحدد. "
     "إذا كان السؤال خارج اختصاصك (أي شيء لا يخص التجارة أو المخزون أو "
-    "التسويق أو المنتجات أو الأرباح أو الكميات، مثل برمجة أو أخبار أو معلومات "
-    "عامة)، اعتذر بلطف باختصار واشرح أنك مختص بمتجر المستخدم وبضاعته وأرباحه، "
-    "واطلب منه سؤالًا ضمن هذا الاختصاص واقترح مثالًا. "
-    "عند سؤال الطلب والكميات استخدم order_qty من reorder وsuggested_order_qty كما هي "
-    "(نفس أرقام التقرير)، واذكر تكلفتها order_cost إن وجدت."
+    "التسويق أو المنتجات أو الأرباح أو الكميات)، اعتذر بلطف باختصار واشرح أنك "
+    "مختص بمحله وبضاعته وأرباحه، واقترح سؤالًا مثالًا. "
+    "عند سؤال الطلب والكميات استخدم كمية الطلب المحسوبة في reorder وsuggested_order_qty "
+    "كما هي، واذكر تكلفتها إن وجدت (بدون ذكر أسماء الحقول)."
 )
 
 _SPECIALTY_FALLBACK = (
@@ -1062,9 +1073,13 @@ async def analyze(
         # Always show exact branch evidence, including when AI omits a branch.
         report['status_line'] = _branch_fallback(data, lang) + '\n\n' + report['status_line']
     for field in ('status_line', 'opportunity', 'product_type'):
-        report[field] = normalize_ai_text(report[field])
+        report[field] = normalize_ai_text(plain_arabic(report[field], lang))
     for field in ('attention', 'recommendations'):
-        report[field] = [normalize_ai_text(line) for line in report[field]]
+        report[field] = [
+            line for line in (
+                normalize_ai_text(plain_arabic(line, lang)) for line in report[field]
+            ) if line
+        ][:3]
     report['type_guide'] = {key: normalize_ai_text(value) for key, value in report['type_guide'].items()}
     return report
 
@@ -1081,7 +1096,38 @@ _BRANCH_RESPONSE_RULE = (
 
 
 def _language_rule(lang):
-    return '\nWrite all user-facing text in English.' if lang == 'en' else '\nاكتب النص الظاهر للمستخدم بالعربية الفصحى.'
+    return ('\nWrite all user-facing text in plain, simple English (no field names like qty_sold).'
+            if lang == 'en' else
+            '\nاكتب النص الظاهر للمستخدم بعربية بسيطة يفهمها كل تاجر، بدون أي كلمة إنجليزية.')
+
+
+# Data field names the model sometimes copies into the text, in plain words.
+_FIELD_WORDS = {
+    'qty_sold': 'الكمية المباعة', 'quantity_sold': 'الكمية المباعة',
+    'total_profit': 'الربح', 'total_sales': 'المبيعات', 'total_cogs': 'تكلفة المبيعات',
+    'inventory_value': 'قيمة المخزون', 'suggested_order_qty': 'كمية الطلب',
+    'order_qty': 'كمية الطلب', 'order_cost': 'تكلفة الطلب', 'min_stock': 'الحد الأدنى',
+    'low_stock': 'قرب يخلص', 'out_of_stock': 'خلص', 'top_profit': 'الأكثر ربحًا',
+    'products_count': 'عدد المنتجات', 'unit_cost': 'تكلفة القطعة',
+    'reorder': 'الطلب', 'stock': 'المخزون', 'profit': 'الربح', 'sales': 'المبيعات',
+    'margin': 'الربح', 'stagnant': 'راكد', 'cogs': 'تكلفة المبيعات',
+}
+_FIELD_RE = re.compile(
+    r'(?<![A-Za-z0-9])(' + '|'.join(sorted(map(re.escape, _FIELD_WORDS), key=len, reverse=True)) + r')(?![A-Za-z0-9])',
+    re.IGNORECASE,
+)
+
+
+def plain_arabic(text: str, lang: str = 'ar') -> str:
+    """Answers never show data field names (qty_sold, reorder…)."""
+    text = str(text or '')
+    if lang == 'en':
+        return re.sub(r'(?<![A-Za-z0-9])([a-z]+)_([a-z0-9_]+)(?![A-Za-z0-9])',
+                      lambda m: m.group(0).replace('_', ' '), text)
+    text = _FIELD_RE.sub(lambda m: _FIELD_WORDS[m.group(1).lower()], text)
+    # Any other snake_case identifier is a field name: drop it.
+    text = re.sub(r'(?<![A-Za-z0-9])[a-z]+(?:_[a-z0-9]+)+(?![A-Za-z0-9])', '', text)
+    return re.sub(r'[ \t]{2,}', ' ', text).strip()
 
 
 def normalize_ai_text(text: str) -> str:
@@ -1151,10 +1197,15 @@ def _parse(text: str) -> dict:
         if isinstance(v, str) and v.strip():
             return [v.strip()]
         return []
+    attention = aslist(data.get("attention"))[:3]
+    seen = set(attention)
+    recommendations = [
+        x for x in aslist(data.get("recommendations")) if x not in seen
+    ][:3]
     return {
         "status_line": str(data.get("status_line") or "").strip(),
-        "attention": aslist(data.get("attention"))[:3],
-        "recommendations": aslist(data.get("recommendations"))[:4],
+        "attention": attention,
+        "recommendations": recommendations,
         "opportunity": str(data.get("opportunity") or "").strip(),
     }
 
@@ -1248,7 +1299,7 @@ async def chat(
             temperature=0.4, max_tokens=r.max_tokens,
             extra_body={"effort": r.effort},
         )
-        answer = _as_plain((resp.choices[0].message.content or ""))
+        answer = plain_arabic(_as_plain((resp.choices[0].message.content or "")), lang)
         summaries = data.get('branch_summaries') or []
         if any(row['branch_name'] not in answer for row in summaries):
             answer = _branch_fallback(data, lang)

@@ -3305,7 +3305,7 @@ class _UserAvatar extends ConsumerWidget {
               fit: BoxFit.cover, errorBuilder: (_, _, _) => fallback)
           : url == null
           ? null
-          : SecureImage(url: url, width: size, height: size, fit: BoxFit.cover,
+          : SecureImage(url: url, deviceKey: 'branch_${BranchScope.branchId}', width: size, height: size, fit: BoxFit.cover,
               placeholder: fallback, errorBuilder: (_, _, _) => fallback);
       return CircleAvatar(radius: size / 2, backgroundColor: AppColors.primary.withAlpha(20),
           child: picture == null ? fallback : ClipOval(child: picture));

@@ -29,6 +29,11 @@ class SecureImage extends ConsumerStatefulWidget {
   final Widget? placeholder;
   final Widget Function(BuildContext, Object, StackTrace?)? errorBuilder;
 
+  /// A stable name for this picture on the device (e.g. `branch_<id>`): the
+  /// last copy is shown at once — offline, after a restart, whatever the
+  /// address — and refreshed quietly when the network answers.
+  final String? deviceKey;
+
   const SecureImage({
     super.key,
     this.url,
@@ -38,6 +43,7 @@ class SecureImage extends ConsumerStatefulWidget {
     this.alignment = Alignment.center,
     this.placeholder,
     this.errorBuilder,
+    this.deviceKey,
   });
 
   @override
@@ -144,7 +150,9 @@ class _SecureImageState extends ConsumerState<SecureImage> {
   @override
   void didUpdateWidget(covariant SecureImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url) _load();
+    if (oldWidget.url != widget.url || oldWidget.deviceKey != widget.deviceKey) {
+      _load();
+    }
   }
 
   /// Returns the auth-protected URL to fetch, or null when the source is a
@@ -161,7 +169,95 @@ class _SecureImageState extends ConsumerState<SecureImage> {
     return null;
   }
 
+  static Future<File?> _deviceFile(String key) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final safe = key.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+      return File('${dir.path}/device_pictures/$safe.img');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static final Map<String, Uint8List> _deviceCache = {};
+  static final Set<String> _refreshed = {};
+
   Future<void> _load() async {
+    final key = widget.deviceKey;
+    if (key != null) {
+      final secure = _secureUrl();
+      final raw = widget.url?.trim() ?? '';
+      final url = secure ??
+          (raw.startsWith('http://') || raw.startsWith('https://') ? raw : null);
+      // 1) The device copy, at once (memory, then file).
+      var shown = _deviceCache[key];
+      if (shown == null) {
+        try {
+          final file = await _deviceFile(key);
+          if (file != null && await file.exists()) {
+            final bytes = await file.readAsBytes();
+            if (bytes.isNotEmpty) shown = _deviceCache[key] = bytes;
+          }
+        } catch (_) {}
+      }
+      if (!mounted || widget.deviceKey != key) return;
+      if (shown != null) {
+        setState(() {
+          _bytes = shown;
+          _error = null;
+          _loading = false;
+        });
+      } else {
+        setState(() => _loading = true);
+      }
+      // 2) Refresh quietly from the network (once per address per launch);
+      //    keep the copy on failure.
+      if (url == null) {
+        if (shown == null && mounted) {
+          setState(() {
+            _loading = false;
+            _error = Exception('no picture');
+          });
+        }
+        return;
+      }
+      if (shown != null && !_refreshed.add('$key|$url')) return;
+      try {
+        // The app's client (with the session) only for the FYONA server.
+        final dio = secure != null ? ref.read(dioProvider) : Dio();
+        final resp = await dio.get<List<int>>(
+          url,
+          options: Options(responseType: ResponseType.bytes),
+        );
+        final data = resp.data;
+        if (data != null && data.isNotEmpty) {
+          final bytes = Uint8List.fromList(data);
+          _deviceCache[key] = bytes;
+          final file = await _deviceFile(key);
+          if (file != null) {
+            await file.parent.create(recursive: true);
+            await file.writeAsBytes(bytes, flush: true);
+          }
+          if (mounted && widget.deviceKey == key) {
+            setState(() {
+              _bytes = bytes;
+              _error = null;
+              _loading = false;
+            });
+          }
+          return;
+        }
+      } catch (_) {}
+      if (shown == null && mounted && widget.deviceKey == key) {
+        // No device copy yet: fall back to the address-based mirrors.
+        await _loadByUrl();
+      }
+      return;
+    }
+    await _loadByUrl();
+  }
+
+  Future<void> _loadByUrl() async {
     final secureUrl = _secureUrl();
     if (secureUrl == null) {
       setState(() {
@@ -316,6 +412,22 @@ class _SecureImageState extends ConsumerState<SecureImage> {
   @override
   Widget build(BuildContext context) {
     final url = widget.url;
+    if (widget.deviceKey != null) {
+      // The device copy first: shown offline, after a restart, at once.
+      final bytes = _bytes;
+      if (bytes != null) {
+        return Image.memory(
+          bytes,
+          gaplessPlayback: true,
+          width: widget.width,
+          height: widget.height,
+          fit: widget.fit,
+          alignment: widget.alignment,
+          errorBuilder: _err,
+        );
+      }
+      if (_loading) return _placeholder(context);
+    }
     if (url == null || url.isEmpty) return _err(context, Exception('empty'), null);
 
     final secureUrl = _secureUrl();

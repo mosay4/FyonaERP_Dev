@@ -81,10 +81,15 @@ class SaleInvoiceViewPage extends ConsumerWidget {
       ),
       body: SafeArea(
         child: FutureBuilder(
-          future: ref.read(salesApiProvider).getInvoice(invoiceId),
+          // The last copy shows at once on every rebuild (no loading flash).
+          initialData: _saleViewCache[invoiceId],
+          future: ref.read(salesApiProvider).getInvoice(invoiceId).then((value) {
+            if (value.isNotEmpty) _saleViewCache[invoiceId] = value;
+            return value;
+          }),
           builder: (context, snap) {
-            if (snap.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
+            if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
+              return const SizedBox.shrink(); // device read: no loading screen
             }
             if (!snap.hasData || snap.data!.isEmpty) {
               return Center(
@@ -379,3 +384,6 @@ class _PaymentLine extends StatelessWidget {
   static String _fmtRate(double v) =>
       v == v.roundToDouble() ? v.round().toString() : v.toStringAsFixed(4);
 }
+
+
+final Map<String, Map<String, dynamic>> _saleViewCache = {};

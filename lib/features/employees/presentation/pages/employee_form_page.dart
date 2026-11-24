@@ -26,7 +26,7 @@ class EmployeeFormPage extends ConsumerWidget {
         .watch(employeesProvider)
         .when(
           loading: () =>
-              const Scaffold(body: Center(child: CircularProgressIndicator())),
+              const Scaffold(body: SizedBox.shrink()),
           error: (e, _) =>
               Scaffold(body: Center(child: Text(EmployeeApi.message(e)))),
           data: (rows) {

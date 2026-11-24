@@ -120,6 +120,7 @@ final class BranchLocalTransfers {
     String? permission,
     List<String> branches = const [],
     bool changed = false,
+    String? actingAs,
   }) async {
     final scope = _scope();
     if (scope == null) throw const DirectoryAccessDenied();
@@ -146,11 +147,20 @@ final class BranchLocalTransfers {
     }
     // The owner's verified branches (see _peers) are this access's transfer
     // list; an employee's session keeps exactly the signed one.
+    // The owner may move money/stock between two OTHER branches from
+    // wherever they are: the operation is recorded by the sending branch
+    // (all branches of the organization live in this device's ledger).
+    final acting = !scope.member &&
+            actingAs != null &&
+            actingAs != scope.branchId &&
+            peers.containsKey(actingAs)
+        ? actingAs
+        : scope.branchId;
     final directory = scope.member
         ? scope
         : DirectoryAccess(
             workspace: scope.workspace,
-            branchId: scope.branchId,
+            branchId: acting,
             readable: DirectoryPartyKind.values
                 .where(scope.canRead)
                 .toSet(),
@@ -175,7 +185,11 @@ final class BranchLocalTransfers {
     try {
       final result = await _store().withLedger(
         access,
-        () => valid() ? _scope() : null,
+        () => !valid()
+            ? null
+            : acting == scope.branchId
+            ? _scope()
+            : directory,
         (ledger) => run(ledger, access, valid, peers),
       );
       if (!valid()) throw const DirectoryAccessDenied();
@@ -208,7 +222,8 @@ final class BranchLocalTransfers {
           includeZero: includeZero,
           canReadCost: _can('inventory_cost'),
         ),
-      'categories': const [],
+      if (_can('inventory.transfer'))
+        'categories': await ledger.transferCategoryOptions(access, branchId),
     },
     branches: [branchId],
   );
@@ -297,6 +312,7 @@ final class BranchLocalTransfers {
     branches: [fromBranchId, toBranchId],
     permission: 'banks.transfer',
     changed: true,
+    actingAs: fromBranchId,
   );
 
   static int _scaled(Object? amount, int places) {
@@ -347,6 +363,7 @@ final class BranchLocalTransfers {
     branches: [fromBranchId, toBranchId],
     permission: 'inventory.transfer',
     changed: true,
+    actingAs: fromBranchId,
   );
 
   Future<List<Map<String, Object?>>> transfers({

@@ -849,10 +849,12 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
                 color: AppColors.primary,
               ),
             )
-          : image != null
+          : image != null || branch?['id'] != null
           ? SecureImage(
-              // Keeps the last copy on the device: the picture stays offline.
+              // Keeps the last copy on the device: the picture stays offline
+              // (even when this device saved no address for it).
               url: image,
+              deviceKey: 'branch_${branch?['id']}',
               fit: BoxFit.cover,
               width: size,
               height: size,

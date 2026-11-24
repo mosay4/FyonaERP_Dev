@@ -9,7 +9,7 @@ import '../../../inventory/presentation/providers/warehouse_settings.dart';
 import '../../../purchases/presentation/pages/barcode_scan_page.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 
-enum _InventoryView { all, individual, categories }
+enum _InventoryView { individual, categories }
 
 double _number(dynamic value, {double fallback = 0}) {
   final parsed = value is num ? value.toDouble() : double.tryParse('$value');
@@ -95,7 +95,8 @@ class _BranchInventoryPickerPageState
     extends ConsumerState<BranchInventoryPickerPage> {
   final _search = TextEditingController();
   final Map<String, _PickSelection> _selected = {};
-  _InventoryView _view = _InventoryView.all;
+  // «منتجات فردية» (every product, one by one) is the default view.
+  _InventoryView _view = _InventoryView.individual;
   String? _categoryFilter;
   String _query = '';
   String? _errorProduct;
@@ -188,11 +189,15 @@ class _BranchInventoryPickerPageState
         });
       }
     }
+    // The categories filter follows the warehouse «التصانيف» setting and
+    // the sending branch actually having categories.
+    if (!ref.watch(warehouseSettingsProvider).categories) categories.clear();
     final categoryIds = categories.map((c) => '${c['id']}').toSet();
     final visible = products.where((p) {
       final id = '${p['category_id'] ?? ''}';
-      if (_view == _InventoryView.all) return true;
-      if (_view == _InventoryView.individual) return id.isEmpty;
+      // Individual products: ALL products, each on its own (also the ones
+      // inside a category).
+      if (_view != _InventoryView.categories) return true;
       return _categoryFilter != null && id == _categoryFilter;
     }).toList();
     final selectedCategory = categoryIds.contains(_categoryFilter)
@@ -319,10 +324,6 @@ class _BranchInventoryPickerPageState
                   child: Row(
                     children: [
                       _filter(
-                        l10n.translate('inventoryAll'),
-                        _InventoryView.all,
-                      ),
-                      _filter(
                         l10n.translate('inventoryIndividual'),
                         _InventoryView.individual,
                       ),
@@ -377,17 +378,18 @@ class _BranchInventoryPickerPageState
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               sliver: SliverGrid(
-                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 250,
+                // Two category squares per row, like the inventory screen.
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
                   mainAxisExtent:
-                      160 +
+                      124 +
                       (MediaQuery.textScalerOf(context).scale(12) - 12).clamp(
                             0,
                             32,
                           ) *
-                          3,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
+                          5,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
                 ),
                 delegate: SliverChildBuilderDelegate(
                   (context, index) => _categoryCard(categories[index]),
@@ -465,37 +467,39 @@ class _BranchInventoryPickerPageState
       padding: EdgeInsets.zero,
       child: InkWell(
         key: ValueKey('inventory-category-$id'),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         onTap: () => setState(() => _categoryFilter = id),
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: AppColors.surface,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppColors.border),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: SizedBox(
-                  width: 64,
-                  height: 64,
-                  child: image.trim().isNotEmpty
-                      ? BusinessProductImage(url: image, width: 64, height: 64)
-                      : Container(
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withAlpha(12),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(
-                            Icons.category_rounded,
-                            size: 28,
-                            color: AppColors.primary,
-                          ),
-                        ),
+              Container(
+                width: 52,
+                height: 52,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceVariant.withAlpha(90),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
                 ),
+                child: image.trim().isNotEmpty
+                    ? BusinessProductImage(
+                        url: image,
+                        width: 52,
+                        height: 52,
+                        fit: BoxFit.cover,
+                      )
+                    : Icon(
+                        Icons.category_outlined,
+                        size: 24,
+                        color: AppColors.primary,
+                      ),
               ),
               const SizedBox(height: 8),
               Text(

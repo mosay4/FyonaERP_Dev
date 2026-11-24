@@ -139,7 +139,7 @@ class _BranchTransfersPageState extends ConsumerState<BranchTransfersPage> {
               future: _future,
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const SizedBox.shrink(); // device read: no loading screen
                 }
                 if (snap.hasError) {
                    return _error(l10n, _transferError(l10n, snap.error));
@@ -847,7 +847,7 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
             return Center(child: Text(l10n.translate('branchNoPermission')));
           }
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const SizedBox.shrink(); // device read: no loading screen
           }
           if (snap.hasError || _branches.isEmpty) {
             return Center(
@@ -2527,7 +2527,7 @@ class _TransferDetailPageState extends ConsumerState<_TransferDetailPage> {
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const SizedBox.shrink(); // device read: no loading screen
           }
           if (snap.hasError) {
             return Center(

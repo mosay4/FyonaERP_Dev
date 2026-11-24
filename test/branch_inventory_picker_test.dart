@@ -4,6 +4,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/localization/app_localizations.dart';
 import 'package:fyona_flutter/features/branches/presentation/pages/branch_inventory_picker_page.dart';
 import 'package:fyona_flutter/features/core_business/presentation/widgets/business_number_field.dart';
+import 'package:fyona_flutter/features/inventory/presentation/providers/warehouse_settings.dart';
+
+/// The warehouse «التصانيف» setting switched on (the categories filter
+/// follows it).
+class _CategoriesOn extends WarehouseSettingsNotifier {
+  _CategoriesOn() {
+    state = const WarehouseSettings(categories: true);
+  }
+  @override
+  Future<void> load() async {}
+}
+
+final _categoriesOn = [
+  warehouseSettingsProvider.overrideWith((_) => _CategoriesOn()),
+];
 
 void main() {
   testWidgets(
@@ -208,6 +223,7 @@ void main() {
     ];
     await tester.pumpWidget(
       ProviderScope(
+        overrides: _categoriesOn,
         child: MaterialApp(
           locale: const Locale('ar'),
           supportedLocales: AppLocalizations.supportedLocales,
@@ -224,9 +240,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('زبادي'), findsOneWidget);
     expect(find.text('زيت'), findsOneWidget);
-    // The filter bar has exactly three TEXT filters, not category boxes.
+    // Two TEXT filters: «منتجات فردية» (every product, also the ones in a
+    // category) and «التصانيف»; no «جميع المنتجات».
     expect(find.text('خضروات'), findsNothing);
-    expect(find.byKey(const ValueKey('inventory-filter-all')), findsOneWidget);
+    expect(find.byKey(const ValueKey('inventory-filter-all')), findsNothing);
     expect(
       find.byKey(const ValueKey('inventory-filter-individual')),
       findsOneWidget,
@@ -238,7 +255,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('inventory-filter-individual')));
     await tester.pumpAndSettle();
     expect(find.text('زيت'), findsOneWidget);
-    expect(find.text('زبادي'), findsNothing);
+    expect(find.text('زبادي'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('inventory-filter-categories')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('inventory-category-c1')), findsOneWidget);
@@ -260,6 +277,7 @@ void main() {
       await tester.runAsync(() => AppLocalizations.preload('ar'));
       await tester.pumpWidget(
         ProviderScope(
+          overrides: _categoriesOn,
           child: MaterialApp(
             locale: const Locale('ar'),
             supportedLocales: AppLocalizations.supportedLocales,

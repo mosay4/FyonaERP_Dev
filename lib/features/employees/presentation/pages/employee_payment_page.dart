@@ -237,7 +237,7 @@ class _EmployeePaymentPageState extends ConsumerState<EmployeePaymentPage> {
         ),
       ),
       body: accountsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const SizedBox.shrink(), // no loading screen
         error: (e, _) => Center(
           child: Padding(
             padding: const EdgeInsets.all(24),

@@ -29,7 +29,13 @@ class BranchesPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context);
-    final async = ref.watch(branchesProvider);
+    final live = ref.watch(branchesProvider);
+    // The branches saved on this device show at once; the server copy
+    // replaces them quietly when it arrives (no loading screen).
+    final saved = ref.watch(savedBranchListProvider).valueOrNull;
+    final async = live.hasValue || saved == null || saved.isEmpty
+        ? live
+        : AsyncValue<List<Map<String, dynamic>>>.data(saved);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -66,8 +72,9 @@ class BranchesPage extends ConsumerWidget {
               ),
             ),
       body: async.when(
-        skipLoadingOnRefresh: false,
-        loading: () => const Center(child: CircularProgressIndicator()),
+        skipLoadingOnRefresh: true,
+        skipLoadingOnReload: true,
+        loading: () => const SizedBox.shrink(),
         error: (e, _) => Center(
           child: Text(
             _branchError(context, e),

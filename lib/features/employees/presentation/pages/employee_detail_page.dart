@@ -131,7 +131,7 @@ class EmployeeDetailPage extends ConsumerWidget {
         ],
       ),
       body: async.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const SizedBox.shrink(), // device read: no loading screen
         error: (e, _) => Center(
           child: Text(
             EmployeeApi.message(e),

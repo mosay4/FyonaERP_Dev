@@ -620,9 +620,28 @@ class _FalconPageState extends ConsumerState<FalconPage>
 
   // ── helpers ──
   List<String> _ls(String k) => ((_report[k] as List?) ?? const [])
-      .map((e) => e.toString())
+      .map((e) => _plainLine(e.toString()))
       .where((e) => e.trim().isNotEmpty)
+      .take(3)
       .toList();
+
+  /// Arabic text never shows data field names (qty_sold, reorder…) even
+  /// from an older server answer.
+  String _plainLine(String text) {
+    if (_locale == 'en') return text.replaceAll('_', ' ');
+    var out = text;
+    _falconFieldWords.forEach((key, word) {
+      out = out.replaceAllMapped(
+        RegExp('(?<![A-Za-z0-9])$key(?![A-Za-z0-9])', caseSensitive: false),
+        (_) => word,
+      );
+    });
+    out = out.replaceAll(
+      RegExp(r'(?<![A-Za-z0-9])[a-z]+(?:_[a-z0-9]+)+(?![A-Za-z0-9])'),
+      '',
+    );
+    return out.replaceAll(RegExp(r'[ \t]{2,}'), ' ').trim();
+  }
 
   String get _cur =>
       ((_report['stats'] is Map
@@ -1143,15 +1162,15 @@ class _FalconPageState extends ConsumerState<FalconPage>
                           fontSize: 17,
                           fontWeight: FontWeight.w800,
                           color: color)),
+                  const SizedBox(height: 6),
+                  _statusMeter(_report['status']?.toString(), color),
                   if ((_report['status_line'] ?? '').toString().isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Text((_report['status_line'] ?? '').toString(),
-                          style: TextStyle(
-                              fontFamily: 'Cairo',
-                              fontSize: 12.5,
-                              height: 1.7,
-                              color: AppColors.textPrimary)),
+                      padding: const EdgeInsets.only(top: 8),
+                      child: _richLine(
+                          _plainLine((_report['status_line'] ?? '').toString()),
+                          color,
+                          size: 13),
                     ),
                 ],
               ),
@@ -1162,15 +1181,61 @@ class _FalconPageState extends ConsumerState<FalconPage>
     );
   }
 
+  /// Four steps: weak → watch → good → excellent (filled up to the status).
+  Widget _statusMeter(String? status, Color color) {
+    const order = ['weak', 'watch', 'good', 'excellent'];
+    final level = order.indexOf(status ?? 'watch').clamp(0, 3);
+    return Row(children: [
+      for (var i = 0; i < 4; i++) ...[
+        Expanded(
+          child: AnimatedContainer(
+            duration: Duration(milliseconds: 300 + i * 120),
+            height: 6,
+            decoration: BoxDecoration(
+              color: i <= level ? color : color.withAlpha(30),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        ),
+        if (i < 3) const SizedBox(width: 4),
+      ],
+    ]);
+  }
+
+  /// A line whose numbers stand out (bold, in the card's color).
+  Widget _richLine(String line, Color color, {double size = 13}) {
+    final base = TextStyle(
+        fontFamily: 'Cairo',
+        fontSize: size,
+        height: 1.6,
+        color: AppColors.textPrimary);
+    final spans = <TextSpan>[];
+    var last = 0;
+    for (final m in RegExp(r'[0-9][0-9,.٫]*%?').allMatches(line)) {
+      if (m.start > last) spans.add(TextSpan(text: line.substring(last, m.start)));
+      spans.add(TextSpan(
+          text: m.group(0),
+          style: TextStyle(fontWeight: FontWeight.w800, color: color)));
+      last = m.end;
+    }
+    if (last < line.length) spans.add(TextSpan(text: line.substring(last)));
+    return Text.rich(TextSpan(style: base, children: spans));
+  }
+
   Widget _keyNumbersCard(
       BuildContext context, AppLocalizations l10n, Map<String, dynamic> stats) {
     double numOf(dynamic v) =>
         (v is num) ? v.toDouble() : (double.tryParse('$v') ?? 0);
+    final profit = numOf(stats['total_profit']);
     final tiles = [
-      (l10n.translate('falconKSales'), numOf(stats['total_sales'])),
-      (l10n.translate('falconKProfit'), numOf(stats['total_profit'])),
-      (l10n.translate('falconKInventory'), numOf(stats['inventory_value'])),
-      (l10n.translate('falconKCogs'), numOf(stats['total_cogs'])),
+      (l10n.translate('falconKSales'), numOf(stats['total_sales']),
+          Icons.point_of_sale_rounded, AppColors.primary),
+      (l10n.translate('falconKProfit'), profit, Icons.trending_up_rounded,
+          profit < 0 ? AppColors.danger : AppColors.success),
+      (l10n.translate('falconKInventory'), numOf(stats['inventory_value']),
+          Icons.inventory_2_rounded, AppColors.warning),
+      (l10n.translate('falconKCogs'), numOf(stats['total_cogs']),
+          Icons.shopping_bag_rounded, AppColors.textSecondary),
     ];
     return _Reveal(
       key: const ValueKey('numbers'),
@@ -1202,12 +1267,24 @@ class _FalconPageState extends ConsumerState<FalconPage>
                 for (final t in tiles)
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 4),
+                        horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: AppColors.surfaceVariant.withAlpha(60),
+                      color: t.$4.withAlpha(14),
                       borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: t.$4.withAlpha(40)),
                     ),
-                    child: Column(
+                    child: Row(children: [
+                     Container(
+                       width: 30,
+                       height: 30,
+                       decoration: BoxDecoration(
+                         color: t.$4.withAlpha(30),
+                         shape: BoxShape.circle,
+                       ),
+                       child: Icon(t.$3, size: 16, color: t.$4),
+                     ),
+                     const SizedBox(width: 8),
+                     Expanded(child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.center,
                       mainAxisSize: MainAxisSize.min,
@@ -1237,7 +1314,8 @@ class _FalconPageState extends ConsumerState<FalconPage>
                           ),
                         ),
                       ],
-                    ),
+                    )),
+                    ]),
                   ),
               ],
             ),
@@ -1377,13 +1455,26 @@ class _FalconPageState extends ConsumerState<FalconPage>
           color: AppColors.surface,
           border: Border.all(color: color.withAlpha(70)),
           borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+                color: color.withAlpha(18),
+                blurRadius: 12,
+                offset: const Offset(0, 3)),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              Icon(icon, size: 16, color: color),
-              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: color.withAlpha(26),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 16, color: color),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(title,
                     maxLines: 1,
@@ -1396,25 +1487,31 @@ class _FalconPageState extends ConsumerState<FalconPage>
               ),
             ]),
             const SizedBox(height: 6),
-            for (final line in lines)
+            const SizedBox(height: 4),
+            for (var i = 0; i < lines.length; i++)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
+                padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 7),
-                      child: Icon(Icons.circle, size: 5, color: color),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(line,
+                    Container(
+                      width: 20,
+                      height: 20,
+                      margin: const EdgeInsets.only(top: 2),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: color.withAlpha(28),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text('${i + 1}',
                           style: TextStyle(
                               fontFamily: 'Cairo',
-                              fontSize: 13,
-                              height: 1.5,
-                              color: AppColors.textPrimary)),
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                              color: color)),
                     ),
+                    const SizedBox(width: 8),
+                    Expanded(child: _richLine(_plainLine(lines[i]), color)),
                   ],
                 ),
               ),
@@ -2251,3 +2348,20 @@ class _SendFlamePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _SendFlamePainter old) => true;
 }
+
+
+/// Data field names an older server answer may still contain, in plain words.
+const _falconFieldWords = <String, String>{
+  'qty_sold': 'الكمية المباعة',
+  'quantity_sold': 'الكمية المباعة',
+  'total_profit': 'الربح',
+  'total_sales': 'المبيعات',
+  'total_cogs': 'تكلفة المبيعات',
+  'inventory_value': 'قيمة المخزون',
+  'suggested_order_qty': 'كمية الطلب',
+  'order_qty': 'كمية الطلب',
+  'order_cost': 'تكلفة الطلب',
+  'min_stock': 'الحد الأدنى',
+  'low_stock': 'قرب يخلص',
+  'reorder': 'الطلب',
+};

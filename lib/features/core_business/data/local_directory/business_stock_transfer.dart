@@ -472,6 +472,39 @@ extension BusinessStockTransfer on BusinessLedger {
     });
   }
 
+  /// The sending branch's categories (name, picture, product count) for
+  /// browsing its stock by category in the transfer picker.
+  Future<List<Map<String, Object?>>> transferCategoryOptions(
+    BusinessLedgerAccess access,
+    String branch,
+  ) async {
+    _branch(access, BusinessLedgerAction.transfer);
+    return _directory._read((db) async {
+      await _requireLocalBranch(db, branch, authorized: access.directory);
+      return [
+        for (final row in await db.rawQuery(
+          '''
+          SELECT c.id, c.name, c.image, COUNT(p.id) AS products_count
+          FROM $_commerceCategories c LEFT JOIN $_commerceCategoryLinks x
+            ON x.branch_id = c.branch_id AND x.category_id = c.id
+          LEFT JOIN $_commerceProducts p ON p.branch_id = x.branch_id
+            AND p.id = x.id AND p.deleted_us IS NULL AND p.is_active = 1
+            AND p.is_service = 0
+          WHERE c.branch_id = ? AND c.active = 1
+          GROUP BY c.id ORDER BY c.name, c.id
+          ''',
+          [branch],
+        ))
+          {
+            'id': row['id'],
+            'name': row['name'],
+            'image': _deviceInventoryImage(row['image']),
+            'products_count': row['products_count'],
+          },
+      ];
+    });
+  }
+
   Future<Map<String, Object?>> _transferProductCard(
     DatabaseExecutor db,
     String branch,
@@ -490,8 +523,16 @@ extension BusinessStockTransfer on BusinessLedger {
       where: 'branch_id = ? AND product_id = ?',
       whereArgs: [branch, row['id']],
     );
+    final category = await db.query(
+      _commerceCategoryLinks,
+      columns: ['category_id'],
+      where: 'branch_id = ? AND id = ?',
+      whereArgs: [branch, row['id']],
+      limit: 1,
+    );
     return {
       'id': row['id'],
+      'category_id': category.singleOrNull?['category_id'],
       'name': row['name'],
       'name_ar': row['name_ar'],
       'barcode': row['barcode'],

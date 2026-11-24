@@ -52,10 +52,15 @@ class PurchaseInvoiceViewPage extends ConsumerWidget {
         centerTitle: true,
       ),
       body: FutureBuilder(
-        future: ref.read(purchaseApiProvider).getInvoice(invoiceId),
+        // The last copy shows at once on every rebuild (no loading flash).
+          initialData: _purchaseViewCache[invoiceId],
+          future: ref.read(purchaseApiProvider).getInvoice(invoiceId).then((value) {
+            if (value.isNotEmpty) _purchaseViewCache[invoiceId] = value;
+            return value;
+          }),
         builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+          if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
+            return const SizedBox.shrink(); // device read: no loading screen
           }
           if (!snap.hasData || snap.data!.isEmpty) {
             return Center(
@@ -238,3 +243,6 @@ class _Card extends StatelessWidget {
     );
   }
 }
+
+
+final Map<String, Map<String, dynamic>> _purchaseViewCache = {};

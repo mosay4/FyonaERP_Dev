@@ -43,17 +43,29 @@ Future<void> _plansToCache(List<SubscriptionPlan> plans) async {
 /// flashes the hard-coded fallback prices that differ from the admin's real
 /// prices. Only when NO cache has ever been saved does it fall back to the
 /// server's own default list (guaranteeing the plans screen always renders).
+final _livePlansProvider = StateProvider<List<SubscriptionPlan>?>((_) => null);
+
 final subscriptionPlansProvider = FutureProvider<List<SubscriptionPlan>>((ref) async {
   final service = ref.watch(subscriptionServiceProvider);
-  try {
-    final plans = await service.getPlans();
-    if (plans.isNotEmpty) unawaited(_plansToCache(plans));
-    return plans;
-  } catch (_) {
-    final cached = await _plansFromCache();
-    if (cached.isNotEmpty) return cached;
-    rethrow;
+  final live = ref.watch(_livePlansProvider);
+  if (live != null) return live;
+  // The saved prices show at once; the server's list replaces them quietly
+  // (no loading screen). Without any saved copy the first list is awaited.
+  final cached = await _plansFromCache();
+  if (cached.isNotEmpty) {
+    unawaited(() async {
+      try {
+        final plans = await service.getPlans();
+        if (plans.isEmpty) return;
+        await _plansToCache(plans);
+        ref.read(_livePlansProvider.notifier).state = plans;
+      } catch (_) {}
+    }());
+    return cached;
   }
+  final plans = await service.getPlans();
+  if (plans.isNotEmpty) unawaited(_plansToCache(plans));
+  return plans;
 });
 
 final subscriptionPlanDetailProvider = FutureProvider.family<SubscriptionPlan?, int>((ref, id) async {

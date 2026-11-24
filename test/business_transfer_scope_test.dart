@@ -260,4 +260,67 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await settle();
   }, skip: !DirectoryPilotBuild.signupEnabled);
+
+  testWidgets('the owner moves stock between two other branches', (
+    tester,
+  ) async {
+    final c = _id();
+    final third = DirectoryAccess(
+      workspace: workspace,
+      branchId: c,
+      readable: {},
+      writable: {},
+      financialCutover: true,
+      transferBranches: {a: 'الفرع الأول', b: 'الفرع الثاني'},
+    );
+    await BranchScope.save(
+      token: 'fixture',
+      branchId: c,
+      branchName: 'الفرع الثالث',
+      allMode: false,
+      organizationId: workspace.organizationId,
+    );
+    final dio = Dio(BaseOptions(baseUrl: workspace.server));
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (request, handler) {
+          requests++;
+          handler.reject(
+            DioException.connectionError(
+              requestOptions: request,
+              reason: 'offline',
+            ),
+          );
+        },
+      ),
+    );
+    addTearDown(() => dio.close(force: true));
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(ApiClient(dio: dio)),
+        businessLocalLedgerScopeProvider.overrideWithValue(third),
+        directoryPilotStoreProvider.overrideWithValue(store),
+        employeeCanProvider.overrideWith((_, _) => true),
+      ],
+    );
+    addTearDown(container.dispose);
+    final api = container.read(branchApiProvider);
+    final moved = await tester.runAsync(
+      () => api.inventoryTransfer(
+        fromBranchId: a,
+        toBranchId: b,
+        items: [
+          {'from_product_id': productId, 'quantity': '2'},
+        ],
+      ),
+    );
+    expect(moved, isNotNull);
+    expect(requests, 0);
+    final after = await tester.runAsync(
+      () => api.transferOptions(a, includeZero: true),
+    );
+    expect((after!['products'] as List).single['available'], 3);
+    container.dispose();
+    await tester.pump(const Duration(seconds: 30));
+  }, skip: !DirectoryPilotBuild.signupEnabled);
 }

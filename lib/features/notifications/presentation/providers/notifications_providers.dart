@@ -75,23 +75,53 @@ Future<List<NotificationItem>> _withDeviceNotices(
   }
 }
 
+/// The last list the server returned this session (null until it answers).
+final _notificationsLiveProvider =
+    StateProvider<List<NotificationItem>?>((_) => null);
+
+String _notificationsKey(List<NotificationItem> items) =>
+    items.map((n) => '${n.id}:${n.isRead}').join('|');
+
 final notificationListProvider = FutureProvider<List<NotificationItem>>((ref) async {
   final service = ref.watch(notificationServiceProvider);
+  final live = ref.watch(_notificationsLiveProvider);
+  Future<List<NotificationItem>> fetch() async =>
+      (await service.getAll()).cast<NotificationItem>();
+  // Opens at once from what the device saved; the server copy replaces it
+  // quietly when it arrives (no loading screen).
+  // The device mirror (kept current by every server answer and by «mark
+  // read»), else the last server answer of this session.
+  List<NotificationItem> saved = const [];
   try {
-    final result = await service.getAll();
-    return await _withDeviceNotices(ref, result.cast<NotificationItem>());
-  } catch (_) {
-    // Offline-first guarantee: ANY failure (connectivity, transient 5xx,
-    // cache-row parse hiccup) falls back to the local mirror if one exists,
-    // else an empty list. The page then shows "no notifications yet" instead
-    // of a full-screen server error.
+    saved = (await service.getCached()).cast<NotificationItem>();
+  } catch (_) {}
+  if (saved.isEmpty) saved = live ?? const [];
+  if (saved.isEmpty && live == null) {
+    // Nothing on the device yet: the first list comes from the server.
     try {
-      final cached = await service.getCached();
-      return await _withDeviceNotices(ref, cached.cast<NotificationItem>());
+      final first = await fetch();
+      return await _withDeviceNotices(ref, first);
     } catch (_) {
       return _withDeviceNotices(ref, <NotificationItem>[]);
     }
   }
+  {
+    // Every refresh asks the server in the background; the list only
+    // changes when the server's answer differs (no refresh loop).
+    unawaited(() async {
+      try {
+        final fresh = await fetch();
+        final notifier = ref.read(_notificationsLiveProvider.notifier);
+        if (notifier.state == null ||
+            _notificationsKey(notifier.state!) != _notificationsKey(fresh)) {
+          notifier.state = fresh;
+        }
+      } catch (_) {
+        // Offline: the saved list stays.
+      }
+    }());
+  }
+  return _withDeviceNotices(ref, saved);
 });
 
 /// Last background warming of the notifications mirror (throttles the
