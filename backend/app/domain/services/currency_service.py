@@ -527,7 +527,21 @@ class CentralFXEngine:
         Returns (rates, source_label). source_label is None when every provider
         failed and the hardcoded fallback was used.
         """
-        providers = [(self._fetch_exchangerate_api, "exchangerate-api.com")]
+        # Same public sources, in the same order, as the app's own fetch
+        # (PublicExchangeRates): when one is down the next answers.
+        providers = [
+            (self._fetch_exchangerate_api, "exchangerate-api.com"),
+            (lambda: self._fetch_public_table(
+                "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json",
+                "fawaz"), "currency-api"),
+            (lambda: self._fetch_public_table(
+                "https://latest.currency-api.pages.dev/v1/currencies/usd.min.json",
+                "fawaz"), "currency-api"),
+            (lambda: self._fetch_public_table(
+                "https://www.floatrates.com/daily/usd.json", "floatrates"), "floatrates"),
+            (lambda: self._fetch_public_table(
+                "https://api.frankfurter.dev/v1/latest?base=USD", "frankfurter"), "frankfurter"),
+        ]
         for fetcher, name in providers:
             try:
                 rates = await fetcher()
@@ -572,6 +586,41 @@ class CentralFXEngine:
                         return validated if validated else None
         except Exception as e:
             logger.warning("exchangerate_api_error", error=str(e))
+        return None
+
+    async def _fetch_public_table(self, url: str, shape: str) -> Optional[Dict[str, float]]:
+        """A free, keyless USD table. Needs at least 30 currencies and EUR."""
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                resp = await client.get(url)
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            raw: Dict[str, object] = {}
+            if shape == "fawaz":
+                raw = {k.upper(): v for k, v in (data.get("usd") or {}).items()}
+            elif shape == "floatrates":
+                raw = {str(v.get("code", k)).upper(): v.get("rate")
+                       for k, v in data.items() if isinstance(v, dict)}
+            elif shape == "frankfurter":
+                raw = dict(data.get("rates") or {})
+            raw["USD"] = 1
+            validated = {}
+            for k, v in raw.items():
+                if isinstance(v, str):
+                    try:
+                        v = float(v)
+                    except ValueError:
+                        continue
+                if k.startswith("YER") or not isinstance(v, (int, float)) or isinstance(v, bool):
+                    continue
+                if self._validate_rate(v, k):
+                    validated[k] = float(v)
+            if len(validated) < 30 or not validated.get("EUR"):
+                return None
+            return validated
+        except Exception as e:
+            logger.warning("public_rate_source_error", source=shape, error=str(e))
         return None
 
     async def _fetch_egcurrency(self) -> Optional[Dict[str, float]]:
