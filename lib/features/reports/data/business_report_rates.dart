@@ -6,8 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/di/providers.dart' show apiClientProvider;
 import '../../../core/config/directory_pilot_build.dart';
-import '../../../core/network/api_client.dart' show serverBaseUrlProvider;
+import '../../../core/network/api_client.dart'
+    show ApiClient, serverBaseUrlProvider;
 import '../../../core/services/connectivity_service.dart';
+import '../../../core/services/currency/currency_engine.dart'
+    show rateSnapshotRevisionProvider;
 import '../../../core/services/currency/public_exchange_rates.dart';
 import '../../../shared/providers/current_user_provider.dart';
 import '../../core_business/data/local_directory/directory_pilot.dart';
@@ -44,6 +47,11 @@ final businessReportRatesProvider = Provider<BusinessReportRates?>((ref) {
     }
   }
   if (workspace == null) return null;
+  // The report also values amounts with the app's saved exchange rates:
+  // when those arrive, open reports re-read.
+  ref.listen(rateSnapshotRevisionProvider, (_, _) {
+    ref.read(businessReportRateRevisionProvider.notifier).state++;
+  });
   final store = BusinessReportRates(
     workspace,
     onChanged: () =>
@@ -64,19 +72,7 @@ final businessReportRateWarmupProvider = Provider.autoDispose<void>((ref) {
   var online = connectivity.isOnline;
   Future<void> refresh() async {
     if (!active || !connectivity.isOnline) return;
-    await store.refresh(() async {
-      // The device's own multi-source fetch first; the server is a fallback.
-      final public = await PublicExchangeRates().fetch();
-      if (public != null) return public;
-      final response = await ref
-          .read(apiClientProvider)
-          .get(
-            '/personal/exchange-rates',
-            queryParameters: {'force_refresh': false},
-          );
-      final body = response.data;
-      return body is Map ? body['data'] as Map? : null;
-    });
+    await refreshBusinessReportRates(ref.read(apiClientProvider), store);
   }
 
   final subscription = connectivity.onConnectivityChanged.listen((next) {
@@ -102,6 +98,41 @@ final businessReportRateWarmupProvider = Provider.autoDispose<void>((ref) {
     timer.cancel();
   });
 });
+
+/// Fetch the rates the reports value amounts with. The device's own
+/// multi-source fetch first; the server fills whatever part it could not get
+/// (e.g. the Yemeni market when that site is slow), so one missing source
+/// never leaves a report half in another currency.
+Future<void> refreshBusinessReportRates(
+  ApiClient api,
+  BusinessReportRates store,
+) async {
+  Map? public;
+  try {
+    public = await PublicExchangeRates().fetch();
+  } catch (_) {}
+  if (public != null) await store.refresh(() async => public);
+  bool usable(Object? source) =>
+      source is String &&
+      !const {'unavailable', 'fallback', 'hardcoded', 'unknown', ''}
+          .contains(source.trim().toLowerCase());
+  final meta = public?['meta'];
+  final yemen = public?['yemen'];
+  final complete = public != null &&
+      meta is Map &&
+      usable(meta['global_source']) &&
+      yemen is Map &&
+      usable(yemen['source']);
+  if (complete) return;
+  await store.refresh(() async {
+    final response = await api.get(
+      '/personal/exchange-rates',
+      queryParameters: {'force_refresh': false},
+    );
+    final body = response.data;
+    return body is Map ? body['data'] as Map? : null;
+  });
+}
 
 final class BusinessReportRates {
   BusinessReportRates(String workspace, {void Function()? onChanged})

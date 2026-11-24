@@ -494,6 +494,7 @@ class BranchesPage extends ConsumerWidget {
         await ref.read(branchApiProvider).uploadImage(id, result.image!);
       }
       ref.invalidate(branchesProvider);
+      ref.invalidate(savedBranchListProvider);
       ref.invalidate(branchAccessProvider);
       if (context.mounted) {
         showFyonaSnack(context, l10n.translate('branchCreated'), success: true);
@@ -530,6 +531,7 @@ class BranchesPage extends ConsumerWidget {
             .uploadImage('${b['id']}', result.image!);
       }
       ref.invalidate(branchesProvider);
+      ref.invalidate(savedBranchListProvider);
       ref.invalidate(branchAccessProvider);
       if (BranchScope.branchId == '${b['id']}') {
         await BranchScope.save(
@@ -690,6 +692,7 @@ class BranchesPage extends ConsumerWidget {
         Future<void>.delayed(const Duration(milliseconds: 1100)),
       ]);
       ref.invalidate(branchesProvider);
+      ref.invalidate(savedBranchListProvider);
       ref.invalidate(branchAccessProvider);
       ref.read(branchEpochProvider.notifier).state++;
       if (!context.mounted) return;
@@ -771,6 +774,7 @@ class BranchesPage extends ConsumerWidget {
         ref.read(branchEpochProvider.notifier).state++;
       }
       ref.invalidate(branchesProvider);
+      ref.invalidate(savedBranchListProvider);
       ref.invalidate(branchAccessProvider);
       if (context.mounted) {
         showFyonaSnack(
@@ -798,6 +802,7 @@ class BranchesPage extends ConsumerWidget {
       ref.read(branchEpochProvider.notifier).state++;
     }
     ref.invalidate(branchesProvider);
+      ref.invalidate(savedBranchListProvider);
     ref.invalidate(branchAccessProvider);
     if (wasCurrent && context.mounted) context.go('/dashboard');
   }
@@ -811,6 +816,7 @@ class BranchesPage extends ConsumerWidget {
     try {
       await ref.read(branchApiProvider).reactivate('${b['id']}');
       ref.invalidate(branchesProvider);
+      ref.invalidate(savedBranchListProvider);
       ref.invalidate(branchAccessProvider);
       if (context.mounted) {
         showFyonaSnack(

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -523,7 +524,7 @@ class _TxTile extends StatelessWidget {
     final branchName = (tx['branch_name'] ?? '').toString();
     final party = (tx['party'] ?? '').toString();
     final account = (tx['account'] ?? '').toString();
-    final reference = (tx['reference'] ?? '').toString();
+    final reference = shortDocumentNumber(tx['reference']);
     final notes = (tx['notes'] ?? '').toString();
 
     String when = '';

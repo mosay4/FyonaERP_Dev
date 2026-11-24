@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
 import '../widgets/business_number_field.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1980,7 +1981,7 @@ class _PartyDetailPageState extends ConsumerState<PartyDetailPage> {
   ) {
     final balance = _asNum(o['balance']);
     final cur = (o['currency'] ?? '').toString();
-    final no = (o['invoice_number'] ?? '').toString();
+    final no = shortDocumentNumber(o['invoice_number']);
     final date = (o['date'] ?? '').toString();
     return InkWell(
       onTap: () {
@@ -2098,7 +2099,7 @@ class _PartyDetailPageState extends ConsumerState<PartyDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '#${o['invoice_number']}',
+              '#${shortDocumentNumber(o['invoice_number'])}',
               style: const TextStyle(
                 fontFamily: 'Cairo',
                 fontSize: 16,

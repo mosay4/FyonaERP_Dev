@@ -86,6 +86,29 @@ TESTS / TOOLS
    chat_media_store.dart (background download on arrival, sender keeps its
    upload; view/play/open/save read the device copy).
 
+13) Round 5 (24-11-2026, owner's field list):
+   - Business grant is per organization (directory_pilot: grant-v1-<ws>),
+     so a branch created/first opened offline opens its ledger (was: reports
+     «غير مصرح», buttons → Personal, banks frozen, no cash). Router falls
+     back to the account's saved Business status for such a branch.
+   - Report/transfer rates: engine merges server data when the device fetch
+     misses a part; reports re-read on engine updates; currency pick
+     refreshes. QA server returns real rates only if the egress gateway
+     allows open.er-api.com + www.2dec.net (needs owner OK).
+   - Category photo offline (setCommerceCategoryImage); category picker
+     hides products already in it; pickers show product photos.
+   - Drawer + Sara show branch photos (incl. offline local:// picture).
+   - Transfers: owner peers = signed list ∪ device branch list (offline-born
+     branches), owner sees all org transfers (read only outside the two
+     branches); details: actor (command result), qty/cost/price/total,
+     rate only between two currencies; prefilled saved rate, never silent 1.
+   - Short document numbers on screen/PDF: core/utils/document_number.dart
+     (stored numbers unchanged — unique across offline devices).
+   - Sara: server matches phone routes by shape ({id} vs {product_id}) —
+     38 routes were hidden; catalog drops/maps dead routes (/products →
+     /inventory); buttons open record screens with the device target.
+   - Profile currency customization saves against the live cash slots.
+
 OPEN ITEMS (need owner decision or next round)
 1) 10 known failing tests remain (tools/ci/known_failures.txt), both
    deliberate product changes by the previous developer — owner decision:

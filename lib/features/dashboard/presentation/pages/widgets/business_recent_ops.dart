@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -108,7 +109,7 @@ class _RecentTxTile extends ConsumerWidget {
 
     final kind = _kindLabel((tx['kind'] ?? '').toString(), l10n);
     final party = (tx['party'] ?? '').toString();
-    final reference = (tx['reference'] ?? '').toString();
+    final reference = shortDocumentNumber(tx['reference']);
     final branchName = (tx['branch_name'] ?? '').toString();
     final branchLabel = BranchScope.allMode && branchName.isNotEmpty
         ? l10n.translate('branchOfTransaction', params: {'name': branchName})

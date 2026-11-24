@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_database.dart';
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_scope.dart';
+import 'package:fyona_flutter/features/core_business/data/local_ledger/business_money.dart';
 import 'package:uuid/uuid.dart';
 
 import 'support/directory_test_keys.dart';
@@ -286,6 +287,7 @@ void main() {
         BusinessStockTransferLine(fromProduct: water, quantityMicro: 2000000),
       ],
       notes: 'تحويل مخزون',
+      actor: {'name': 'قاسم', 'role': 'owner'},
     );
     final line = (moved['lines'] as List).single as Map;
     final allocations = (line['allocations'] as List).whereType<Map>().toList();
@@ -296,6 +298,33 @@ void main() {
     expect(detail['status'], 'done');
     expect(detail['can_reverse'], isTrue);
     expect((detail['items'] as List), hasLength(1));
+    // What the details screen shows: who, how many, cost and price.
+    expect(detail['actor_name'], 'قاسم');
+    expect(detail['actor_role'], 'owner');
+    expect(detail['exchange_rate'], isNull);
+    final shown = (detail['items'] as List).single as Map;
+    expect(shown['from_quantity'], 2.0);
+    expect(shown['unit_cost'], 50.0);
+    expect(shown['total_cost'], 100.0);
+    expect(shown['currency'], 'SAR');
+    expect(shown['from_product_name'], 'مياه');
+    expect(shown['to_product_name'], 'مياه');
+    expect((shown['sale_price'] as num) > 0, isTrue);
+    expect(detail['total_cost'], 100.0);
+    // The owner sees it from a third branch too (read only there).
+    final accessC = BusinessLedgerAccess(scope(c), all);
+    final everywhere = await db.ledger.branchTransfers(accessC, everyBranch: true);
+    final listed = everywhere.singleWhere((row) => row['id'] == command);
+    expect(listed['can_reverse'], isFalse);
+    expect(listed['items'], hasLength(1));
+    expect(await db.ledger.branchTransfers(accessC), isEmpty);
+    final elsewhere = await db.ledger.branchTransferDetail(
+      accessC,
+      command,
+      everyBranch: true,
+    );
+    expect(elsewhere['from_branch'], a);
+    expect(elsewhere['can_reverse'], isFalse);
 
     // The destination batch kept the source cost, currency and expiry.
     final received = await lotsOf(accessB, water);
@@ -425,5 +454,50 @@ void main() {
       ),
       throwsA(isA<BusinessLedgerError>()),
     );
+  });
+
+  test('the details carry the rate only between two currencies', () async {
+    final from = await account(accessA, opening: 100000);
+    final usd = _id();
+    await db.ledger.createAccount(
+      accessB,
+      commandId: usd,
+      bankName: 'Cash',
+      accountName: 'Dollars',
+      accountNumber: '2',
+      currency: 'USD',
+      openingMinor: 0,
+    );
+    final same = await account(accessB);
+    final command = _id();
+    await db.ledger.transferBetweenBranches(
+      accessA,
+      commandId: command,
+      fromBranch: a,
+      toBranch: b,
+      fromAccountId: from,
+      toAccountId: usd,
+      amountMinor: 37500,
+      rate: BusinessRate('SAR', 'USD', '0.2667'),
+      actor: {'name': 'قاسم', 'role': 'owner'},
+    );
+    final detail = await db.ledger.branchTransferDetail(accessA, command);
+    expect(detail['exchange_rate'], '0.2667');
+    expect(detail['to_currency'], 'USD');
+    expect(detail['actor_name'], 'قاسم');
+    final plain = _id();
+    await db.ledger.transferBetweenBranches(
+      accessA,
+      commandId: plain,
+      fromBranch: a,
+      toBranch: b,
+      fromAccountId: from,
+      toAccountId: same,
+      amountMinor: 1000,
+    );
+    final sameDetail = await db.ledger.branchTransferDetail(accessA, plain);
+    expect(sameDetail['exchange_rate'], isNull);
+    // Written before the author was recorded: no name, never a crash.
+    expect(sameDetail['actor_name'], isNull);
   });
 }

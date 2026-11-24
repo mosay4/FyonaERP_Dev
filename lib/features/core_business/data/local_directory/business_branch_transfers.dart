@@ -125,6 +125,7 @@ extension BusinessBranchTransfers on BusinessLedger {
     BusinessRate? rate,
     String? notes,
     bool Function()? allowed,
+    Map<String, Object?>? actor,
   }) async {
     final acting = _branch(access, BusinessLedgerAction.transfer);
     if (!_validBranchPair(acting, fromBranch, toBranch)) {
@@ -227,6 +228,8 @@ extension BusinessBranchTransfers on BusinessLedger {
           'from_currency': from,
           'to_currency': to,
           'notes': note,
+          'rate': from == to ? null : rate?.decimal,
+          'actor': ?actor,
         };
       },
       allowed: allowed,
@@ -409,21 +412,39 @@ extension BusinessBranchTransfers on BusinessLedger {
     BusinessLedgerAccess access, {
     String? kind,
     Set<String>? peers,
+    bool everyBranch = false,
   }) async {
-    final acting = _branch(access, BusinessLedgerAction.transfer);
+    final current = _branch(access, BusinessLedgerAction.transfer);
     return _directory._read((db) async {
-      final rows = await db.query(
-        _branchTransfers,
-        where:
-            'branch_id = ? AND reversal_of IS NULL'
-            '${kind == null ? '' : ' AND kind = ?'}',
-        whereArgs: [acting, if (kind != null) kind],
-        orderBy: 'created_us DESC, id',
-        limit: 100,
-      );
+      // The owner sees the organization's transfers from any branch: each
+      // transfer once, from its sending side. Others see their branch's.
+      final rows = everyBranch
+          ? await db.query(
+              _branchTransfers,
+              where:
+                  "side = 'out' AND reversal_of IS NULL"
+                  '${kind == null ? '' : ' AND kind = ?'}',
+              whereArgs: [if (kind != null) kind],
+              orderBy: 'created_us DESC, id',
+              limit: 200,
+            )
+          : await db.query(
+              _branchTransfers,
+              where:
+                  'branch_id = ? AND reversal_of IS NULL'
+                  '${kind == null ? '' : ' AND kind = ?'}',
+              whereArgs: [current, if (kind != null) kind],
+              orderBy: 'created_us DESC, id',
+              limit: 100,
+            );
       final out = <Map<String, Object?>>[];
       for (final row in rows) {
-        if (peers != null && !peers.contains(row['peer_branch'])) continue;
+        final acting = row['branch_id'] as String;
+        if (peers != null &&
+            (!peers.contains(row['peer_branch']) ||
+                (everyBranch && !peers.contains(acting)))) {
+          continue;
+        }
         final peer = await _transferRow(
           db,
           row['peer_branch'] as String,
@@ -436,7 +457,8 @@ extension BusinessBranchTransfers on BusinessLedger {
           'number': mine['id'],
           'kind': mine['kind'],
           'status': mine['status'],
-          'can_reverse': mine['status'] == 'done',
+          'can_reverse': mine['status'] == 'done' &&
+              (acting == current || mine['peer_branch'] == current),
           'notes': mine['notes'],
           'from_branch': isOut ? acting : mine['peer_branch'],
           'to_branch': isOut ? mine['peer_branch'] : acting,
@@ -467,8 +489,17 @@ extension BusinessBranchTransfers on BusinessLedger {
           'created_us': mine['created_us'],
           'created_at': _transferDate(mine),
           'reversal_of_id': mine['reversal_of'],
-          'actor_name': null,
-          'actor_role': null,
+          if (mine['kind'] == 'inventory')
+            'items': [
+              for (final _ in await db.query(
+                _branchTransferLines,
+                columns: ['item_index'],
+                where: 'branch_id = ? AND transfer_id = ?',
+                whereArgs: [acting, mine['id']],
+              ))
+                const <String, Object?>{},
+            ],
+          ...await _transferExtras(db, acting, mine, peer),
         });
       }
       return out;
@@ -518,10 +549,26 @@ extension BusinessBranchTransfers on BusinessLedger {
     BusinessLedgerAccess access,
     String id, {
     Set<String>? peers,
+    bool everyBranch = false,
   }) async {
-    final acting = _branch(access, BusinessLedgerAction.transfer);
+    final current = _branch(access, BusinessLedgerAction.transfer);
     return _directory._read((db) async {
-      final mine = await _transferRow(db, acting, id);
+      var acting = current;
+      var mine = await _transferRow(db, acting, id);
+      if (mine.isEmpty && everyBranch) {
+        // Another branch's transfer, opened by the owner from this branch.
+        final sender = (await db.query(
+          _branchTransfers,
+          where: "id = ? AND side = 'out'",
+          whereArgs: [id],
+          limit: 1,
+        )).singleOrNull;
+        if (sender != null &&
+            (peers == null || peers.contains(sender['branch_id']))) {
+          acting = sender['branch_id'] as String;
+          mine = Map<String, Object?>.from(sender);
+        }
+      }
       if (mine.isEmpty ||
           (peers != null && !peers.contains(mine['peer_branch']))) {
         throw const BusinessLedgerError(BusinessLedgerProblem.invalidTransfer);
@@ -533,43 +580,101 @@ extension BusinessBranchTransfers on BusinessLedger {
         whereArgs: [acting, id],
         orderBy: 'item_index',
       );
+      final isOut = mine['side'] == 'out';
+      final source = isOut ? acting : mine['peer_branch'] as String;
+      final target = isOut ? mine['peer_branch'] as String : acting;
+      Future<Map<String, Object?>?> productOf(String branch, Object? id) async =>
+          (await db.query(
+            _commerceProducts,
+            columns: ['name', 'image', 'price_minor'],
+            where: 'branch_id = ? AND id = ?',
+            whereArgs: [branch, id],
+            limit: 1,
+          )).singleOrNull;
       final items = <Map<String, Object?>>[];
+      var totalCost4 = BigInt.zero;
+      final currencies = <String>{};
       for (final row in rows) {
-        final product = await db.query(
-          _commerceProducts,
-          columns: ['name', 'image'],
-          where: 'branch_id = ? AND id = ?',
-          whereArgs: [acting, row['product_id']],
-          limit: 1,
-        );
-        final unit = row['unit_id'] == null
+        // The issue (source) line describes what left; the receipt line names
+        // the product it became at the destination.
+        final issue = row['kind'] == 'issue'
+            ? row
+            : (await db.query(
+                _branchTransferLines,
+                where: 'branch_id = ? AND transfer_id = ? AND item_index = ?',
+                whereArgs: [source, id, row['item_index']],
+              )).singleOrNull ?? row;
+        final receipt = row['kind'] == 'receipt'
+            ? row
+            : (await db.query(
+                _branchTransferLines,
+                where: 'branch_id = ? AND transfer_id = ? AND item_index = ?',
+                whereArgs: [target, id, row['item_index']],
+              )).singleOrNull;
+        // Issue lines are kept in the source branch.
+        final issueBranch = issue['kind'] == 'issue' ? source : acting;
+        final product = await productOf(issueBranch, issue['product_id']);
+        final targetProduct = receipt == null
+            ? null
+            : await productOf(target, receipt['product_id']);
+        final unit = issue['unit_id'] == null
             ? null
             : (await db.query(
                 _commerceUnits,
                 columns: ['name', 'factor_4'],
                 where: 'branch_id = ? AND id = ?',
-                whereArgs: [acting, row['unit_id']],
+                whereArgs: [issueBranch, issue['unit_id']],
                 limit: 1,
               )).singleOrNull;
+        final factor4 = unit?['factor_4'] as int? ?? 10000;
+        final baseMicro = issue['quantity_micro'] as int;
+        final allocations =
+            (jsonDecode(issue['allocations'] as String) as List).whereType<Map>();
+        var cost4 = BigInt.zero; // base-unit micro × unit cost (4 places)
+        var costed = 0;
+        final lineCurrencies = <String>{};
+        for (final slice in allocations) {
+          final micro = (slice['issue_micro'] ?? slice['quantity_micro']) as int? ?? 0;
+          final unitCost = slice['unit_cost_4'] as int?;
+          final currency = slice['currency'] as String?;
+          if (unitCost == null || currency == null) continue;
+          cost4 += BigInt.from(micro) * BigInt.from(unitCost);
+          costed += micro;
+          lineCurrencies.add(currency);
+        }
+        currencies.addAll(lineCurrencies);
+        totalCost4 += cost4;
+        double money(BigInt microTimesCost4) =>
+            microTimesCost4.toDouble() / 1000000.0 / 10000.0;
         items.add({
-          'product_id': row['product_id'],
-          'from_product_name': product.singleOrNull?['name'],
-          'from_product_image': product.singleOrNull?['image'],
-          'quantity': (row['quantity_micro'] as int) / 1000000.0,
+          'product_id': issue['product_id'],
+          'from_product_name': product?['name'],
+          'from_product_image': product?['image'],
+          'to_product_name': targetProduct?['name'],
+          // Shown in the unit it was sent in; prices are per base unit (the
+          // screen multiplies them by the unit factor).
+          'from_quantity': baseMicro / 1000000.0 / (factor4 / 10000.0),
+          'quantity': baseMicro / 1000000.0 / (factor4 / 10000.0),
           'unit_name': unit?['name'],
-          'conversion_factor': unit == null
-              ? 1.0
-              : (unit['factor_4'] as int) / 10000.0,
-          'allocations': jsonDecode(row['allocations'] as String),
+          'conversion_factor': factor4 / 10000.0,
+          'unit_cost': costed == 0 ? null : money(cost4) / (costed / 1000000.0),
+          'sale_price': ((product?['price_minor'] as int?) ?? 0) / 100.0,
+          'total_cost': money(cost4),
+          'currency': lineCurrencies.length == 1
+              ? lineCurrencies.single
+              : lineCurrencies.isEmpty
+              ? null
+              : 'MIXED',
+          'allocations': allocations.toList(),
         });
       }
-      final isOut = mine['side'] == 'out';
       return {
         'id': id,
         'number': id,
         'kind': mine['kind'],
         'status': mine['status'],
-        'can_reverse': mine['status'] == 'done',
+        'can_reverse': mine['status'] == 'done' &&
+            (acting == current || mine['peer_branch'] == current),
         'notes': mine['notes'],
         'from_branch': isOut ? acting : mine['peer_branch'],
         'to_branch': isOut ? mine['peer_branch'] : acting,
@@ -598,10 +703,14 @@ extension BusinessBranchTransfers on BusinessLedger {
         ),
         'to_currency': isOut ? peer['currency'] : mine['currency'],
         'items': items,
+        if (mine['kind'] == 'inventory') ...{
+          'total_cost': totalCost4.toDouble() / 1000000.0 / 10000.0,
+          if (currencies.isNotEmpty)
+            'currency': currencies.length == 1 ? currencies.single : 'MIXED',
+        },
         'created_at': _transferDate(mine),
         'reversal_of_id': mine['reversal_of'],
-        'actor_name': null,
-        'actor_role': null,
+        ...await _transferExtras(db, acting, mine, peer),
       };
     });
   }
@@ -632,6 +741,58 @@ extension BusinessBranchTransfers on BusinessLedger {
       ],
     );
   }
+}
+
+/// Who made the transfer and, for money between two currencies, the rate.
+/// Both are read from the command's own saved result (synced with it).
+Future<Map<String, Object?>> _transferExtras(
+  DatabaseExecutor db,
+  String acting,
+  Map<String, Object?> mine,
+  Map<String, Object?> peer,
+) async {
+  final command = (await db.query(
+    BusinessLedger._commands,
+    columns: ['result'],
+    where: 'branch_id = ? AND id = ?',
+    whereArgs: [acting, mine['id']],
+    limit: 1,
+  )).singleOrNull;
+  Map? result;
+  try {
+    final decoded = command == null
+        ? null
+        : jsonDecode(command['result'] as String);
+    if (decoded is Map) result = decoded;
+  } on FormatException {
+    result = null;
+  }
+  final actor = result?['actor'];
+  final isOut = mine['side'] == 'out';
+  final from = isOut ? mine['currency'] : peer['currency'];
+  final to = isOut ? peer['currency'] : mine['currency'];
+  String? rate;
+  if (mine['kind'] == 'financial' && from != null && to != null && from != to) {
+    rate = result?['rate'] as String?;
+    if (rate != null && rate.contains('.')) {
+      rate = rate
+          .replaceFirst(RegExp(r'0+$'), '')
+          .replaceFirst(RegExp(r'\.$'), '');
+    }
+    final sent = ((isOut ? mine : peer)['amount_minor'] as int?)?.abs();
+    final got = ((isOut ? peer : mine)['amount_minor'] as int?)?.abs();
+    if (rate == null && sent != null && got != null && sent > 0) {
+      rate = (got / sent)
+          .toStringAsFixed(6)
+          .replaceFirst(RegExp(r'0+$'), '')
+          .replaceFirst(RegExp(r'\.$'), '');
+    }
+  }
+  return {
+    'actor_name': actor is Map ? actor['name'] : null,
+    'actor_role': actor is Map ? actor['role'] : null,
+    'exchange_rate': rate,
+  };
 }
 
 String? _transferMoney(Object? minor) =>

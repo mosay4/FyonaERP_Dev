@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
@@ -293,7 +294,7 @@ class _PartyDebtsPageState extends ConsumerState<PartyDebtsPage>
     await context.push(
       '/debts/operation?kind=${widget.partyKind}'
       '&id=${widget.partyId}&inv=${op['id']}'
-      '&name=${Uri.encodeComponent('${op['number'] ?? ''}')}',
+      '&name=${Uri.encodeComponent(shortDocumentNumber(op['number']))}',
     );
     if (mounted) _load();
   }
@@ -1080,7 +1081,7 @@ class _PartySectionPageState extends ConsumerState<PartySectionPage>
     await context.push(
       '/debts/operation'
       '?kind=${widget.partyKind}&id=${widget.partyId}&inv=${op['id']}'
-      '&name=${Uri.encodeComponent('${op['number'] ?? ''}')}',
+      '&name=${Uri.encodeComponent(shortDocumentNumber(op['number']))}',
     );
     if (mounted) _load();
   }

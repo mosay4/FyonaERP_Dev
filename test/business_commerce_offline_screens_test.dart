@@ -64,6 +64,9 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:fyona_flutter/features/reports/data/reports_api.dart';
+import 'package:fyona_flutter/features/business_banks/presentation/providers/local_business_banking.dart';
+import 'package:fyona_flutter/features/business_banks/presentation/providers/business_banks_providers.dart';
 import 'support/directory_test_keys.dart';
 
 const _enabled =
@@ -1214,6 +1217,38 @@ void main() {
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.runAsync(lab.dispose);
       }
+    },
+    skip: !_enabled,
+  );
+
+  test(
+    'a branch born offline opens its ledger with the account grant',
+    () async {
+      final lab = _Round();
+      await lab.setup();
+      addTearDown(lab.dispose);
+      // The owner worked online in the main branch once.
+      await _select(ledger: true);
+      await lab.rememberAccess();
+      final c = lab.container;
+      // A branch created offline: never had a live answer of its own.
+      await _select(ledger: true, branch: _sibling, claimedBranch: _branch);
+      c.read(branchEpochProvider.notifier).state++;
+      expect(c.read(businessLocalLedgerScopeProvider)?.branchId, _sibling);
+      final home = await c.read(businessReportsApiProvider).home(null, null, _currency);
+      expect(home, isA<Map<String, dynamic>>());
+      final banks = c.read(businessBanksProvider.notifier);
+      await banks.ensureLocalCash([_currency]);
+      final local = c.read(localBusinessBankingProvider)!;
+      final accounts = await local.accounts();
+      expect(accounts.where((a) => a['bank_name'] == 'كاش' && a['currency'] == _currency), hasLength(1));
+      // Branch currency customization (profile) saves on the device.
+      final before = await local.cashCurrencies();
+      await local.saveCashCurrencies(before, {...before, 'SAR', 'USD'}, const Uuid().v4());
+      expect(await local.cashCurrencies(), {_currency, 'SAR', 'USD'});
+      await local.saveCashCurrencies(
+        await local.cashCurrencies(), {_currency, 'SAR'}, const Uuid().v4());
+      expect(await local.cashCurrencies(), {_currency, 'SAR'});
     },
     skip: !_enabled,
   );

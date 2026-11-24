@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/localization/app_localizations.dart';
@@ -363,7 +364,7 @@ class _InvoiceTile extends StatelessWidget {
               color: AppColors.primary,
               size: 20),
         ),
-        title: Text((inv['invoice_number'] ?? '').toString(),
+        title: Text(shortDocumentNumber(inv['invoice_number']),
             style: TextStyle(
                 fontFamily: 'Cairo',
                 fontSize: R.fontSize(context, 14),
@@ -417,7 +418,7 @@ class _ReturnTile extends StatelessWidget {
               color: AppColors.primary,
               size: 20),
         ),
-        title: Text((ret['return_number'] ?? '').toString(),
+        title: Text(shortDocumentNumber(ret['return_number']),
             style: TextStyle(
                 fontFamily: 'Cairo',
                 fontSize: R.fontSize(context, 14),

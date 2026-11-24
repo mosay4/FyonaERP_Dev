@@ -9,6 +9,7 @@ import '../../core/router/route_names.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart' hide TextDirection;
 import 'package:flutter/services.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/utils/date_formatter.dart';
@@ -1314,7 +1315,7 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
             _addAssistantMessage(l10n.translate('saraOpeningSection'));
             _inputCtrl.clear();
           });
-          if (context.mounted) context.push(pendingRoute);
+          if (context.mounted) openSaraRoute(context, pendingRoute);
           return;
         }
       }
@@ -3294,11 +3295,21 @@ class _UserAvatar extends ConsumerWidget {
       if (BranchScope.allMode) return Icon(Icons.hub_rounded, size: size, color: AppColors.primary);
       final branch = ref.watch(branchesProvider).valueOrNull
           ?.where((b) => '${b['id']}' == BranchScope.branchId).firstOrNull;
-      final url = serverImageUrl('${branch?['image'] ?? ''}');
+      final raw = '${branch?['image'] ?? ''}'.trim();
+      final fallback = Icon(Icons.store_rounded, size: size * .6, color: AppColors.primary);
+      // A picture saved on this device (offline) or the uploaded one, kept in
+      // the image cache so it also shows without internet.
+      final url = raw.startsWith('local://') ? null : serverImageUrl(raw);
+      final Widget? picture = raw.startsWith('local://')
+          ? Image.file(File(raw.substring('local://'.length)), width: size, height: size,
+              fit: BoxFit.cover, errorBuilder: (_, _, _) => fallback)
+          : url == null
+          ? null
+          : CachedNetworkImage(imageUrl: url, width: size, height: size, fit: BoxFit.cover,
+              memCacheWidth: 192, fadeInDuration: Duration.zero,
+              placeholder: (_, _) => fallback, errorWidget: (_, _, _) => fallback);
       return CircleAvatar(radius: size / 2, backgroundColor: AppColors.primary.withAlpha(20),
-          child: url == null ? Icon(Icons.store_rounded, size: size * .6, color: AppColors.primary)
-              : ClipOval(child: Image.network(url, width: size, height: size, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Icon(Icons.store_rounded, size: size * .6))));
+          child: picture == null ? fallback : ClipOval(child: picture));
     }
     final photo = ref.watch(sectionProfileProvider).avatar ?? ref.watch(avatarProvider) ?? bytes;
     return Container(
@@ -4165,7 +4176,7 @@ class _AssistantBubble extends StatelessWidget {
                           GestureDetector(
                             onTap: () {
                               if (routeLink != null) {
-                                context.push(routeLink!);
+                                openSaraRoute(context, routeLink!);
                               }
                             },
                             child: Container(

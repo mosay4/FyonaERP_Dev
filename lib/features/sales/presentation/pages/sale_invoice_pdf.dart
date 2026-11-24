@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -104,7 +105,7 @@ Future<Uint8List> buildSaleInvoicePdf(Map<String, dynamic> inv,
             children: [
               pw.Text('فاتورة بيع',
                   style: pw.TextStyle(font: bold, fontSize: 20)),
-              pw.Text((inv['invoice_number'] ?? '').toString(),
+              pw.Text(shortDocumentNumber(inv['invoice_number']),
                   style: pw.TextStyle(font: bold, fontSize: 14)),
             ],
           ),

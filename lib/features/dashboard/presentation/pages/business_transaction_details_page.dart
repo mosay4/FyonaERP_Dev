@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/localization/app_localizations.dart';
@@ -151,7 +152,7 @@ class _BusinessTransactionDetailsPageState
     final kind = _kindLabel((t['kind'] ?? '').toString(), l10n);
     final party = (t['party'] ?? '').toString();
     final account = (t['account'] ?? '').toString();
-    final reference = (t['reference'] ?? '').toString();
+    final reference = shortDocumentNumber(t['reference']);
     final notes = (t['notes'] ?? '').toString();
     final status = (t['status'] ?? '').toString();
     final invoiceId = (t['invoice_id'] ?? '').toString();

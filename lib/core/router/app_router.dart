@@ -463,8 +463,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               }
               snapshot = verified;
             }
-            if (verified == null && path == RouteNames.dashboard) {
-              snapshot = await ref.read(businessNavigationStatusProvider.future);
+            if (verified == null &&
+                (snapshot == null || path == RouteNames.dashboard)) {
+              // A branch never opened online (or created offline) has no
+              // branch copy yet: the account's saved Business status covers
+              // every branch of the organization.
+              final saved =
+                  await ref.read(businessNavigationStatusProvider.future);
+              if (saved != null &&
+                  snapshot == null &&
+                  hasSectionAccess(saved, 'business')) {
+                await store.remember(directoryAccess, saved);
+              }
+              snapshot = path == RouteNames.dashboard ? saved : saved ?? snapshot;
             }
             if (!sameDirectoryScope(directoryAccess, ref.read(directoryPilotAccessProvider))) {
               return '/account-entry';

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/localization/app_localizations.dart';
@@ -380,7 +381,7 @@ class _ReturnTile extends StatelessWidget {
             ),
           ),
           title: Text(
-            (ret['return_number'] ?? '').toString(),
+            shortDocumentNumber(ret['return_number']),
             style: TextStyle(
               fontFamily: 'Cairo',
               fontSize: R.fontSize(context, 14),

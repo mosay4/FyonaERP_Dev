@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/utils/currency_formatter.dart' as cf;
+import 'package:fyona_flutter/core/utils/document_number.dart';
 
 /// Friendly, localized message for a failed request — NEVER the raw
 /// DioException/stack text in the UI. The technical detail stays in logs.
@@ -219,7 +220,7 @@ class DebtOperationTile extends StatelessWidget {
       this.titlePrefix});
   @override
   Widget build(BuildContext c) {
-    final number = '${operation['number'] ?? ''}';
+    final number = shortDocumentNumber(operation['number']);
     final title = (titlePrefix == null || titlePrefix!.isEmpty)
         ? number
         : '$titlePrefix $number';

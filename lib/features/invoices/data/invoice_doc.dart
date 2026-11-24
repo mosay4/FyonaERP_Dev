@@ -1,5 +1,6 @@
 import '../../../core/utils/currency_formatter.dart' as cf;
 import 'invoice_design_models.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 
 /// A single normalized invoice representation consumed by BOTH the on-screen
 /// preview and the PDF/share/print builders, so every method shows exactly the
@@ -119,7 +120,7 @@ class InvoiceDoc {
     final isPurchaseType =
         type == 'purchase' || type == 'purchase_return';
     return InvoiceDoc(
-      number: _s(inv['invoice_number']),
+      number: shortDocumentNumber(inv['invoice_number']),
       type: type,
       dateRaw: dateRaw,
       date: DateTime.tryParse(dateRaw),

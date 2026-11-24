@@ -151,7 +151,8 @@ final Provider<BranchApi> branchApiProvider = Provider<BranchApi>((ref) {
   );
   final server = ref.watch(serverBaseUrlProvider);
   final storage = ref.read(secureStorageProvider);
-  return BranchApi(
+  late final BranchApi api;
+  return api = BranchApi(
     ref.watch(apiClientProvider),
     account: account?.$1,
     homeOrganization: account?.$2,
@@ -169,6 +170,22 @@ final Provider<BranchApi> branchApiProvider = Provider<BranchApi>((ref) {
         store: () => ref.read(directoryPilotStoreProvider),
         allowed: () => !BranchScope.readOnly,
         can: (permission) => ref.read(employeeCanProvider(permission)),
+        // The owner moves stock/money between any of the organization's
+        // branches on this device, including ones created offline.
+        ownerBranches: api.deviceBranchNames,
+        actor: () {
+          final user = ref.read(currentUserProvider);
+          // From the device scope: never a network read during a transfer.
+          final member =
+              ref.read(businessLocalLedgerScopeProvider)?.member == true;
+          return {
+            'id': user?.id,
+            'name': (user?.fullName ?? '').trim().isEmpty
+                ? null
+                : user!.fullName!.trim(),
+            'role': member ? 'employee' : 'owner',
+          };
+        },
         changed: () {
           ref.read(businessBankRevisionProvider.notifier).state++;
           ref.read(businessOperationsRevisionProvider.notifier).state++;
@@ -279,6 +296,39 @@ class BranchApi {
       }
       rethrow;
     }
+  }
+
+  /// The saved branch list (with the branches born here), never the network.
+  Future<List<Map<String, dynamic>>> savedList() async => _withPending(
+    await _cachedJson('${_branchListCacheKey}_all') ??
+        await _cachedJson(_branchListCacheKey) ??
+        const <Map<String, dynamic>>[],
+  );
+
+  /// The organization's branches as this device knows them, without the
+  /// network: the saved branch list (with the ones born here) and the saved
+  /// access list. Archived and deleted branches are left out.
+  Future<Map<String, String>> deviceBranchNames() async {
+    final out = <String, String>{};
+    final org = _homeOrganization;
+    for (final company in await cachedAccess() ?? const <Map<String, dynamic>>[]) {
+      if ('${company['organization_id']}' != org || company['role'] == 'member') continue;
+      for (final row in selectableBranches(company)) {
+        out['${row['id']}'] = '${row['name'] ?? ''}';
+      }
+    }
+    final saved = await _cachedJson('${_branchListCacheKey}_all') ??
+        await _cachedJson(_branchListCacheKey) ??
+        const <Map<String, dynamic>>[];
+    for (final row in await _withPending(saved)) {
+      final id = '${row['id']}';
+      if (row['is_archived'] == true) {
+        out.remove(id);
+        continue;
+      }
+      out[id] = '${row['name'] ?? out[id] ?? ''}';
+    }
+    return out;
   }
 
   Future<String> _localImagePath(String id) async {
@@ -1151,6 +1201,13 @@ final branchesProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>(
     return ref.watch(branchApiProvider).list(archived: true);
   },
 );
+
+/// Branch rows (names, pictures) from this device only: for the drawer and
+/// other places that must never wait on, or trigger, a request.
+final savedBranchListProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>(
+      (ref) => ref.watch(branchApiProvider).savedList(),
+    );
 
 /// Global branch generation: bumping it recreates every provider inside the
 /// Business shell (nested ProviderScope key), so switching branches disposes

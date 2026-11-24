@@ -11,6 +11,7 @@ import '../../../../shared/widgets/styled_snack.dart';
 import '../../../core_business/data/local_commerce/local_commerce_api.dart';
 import '../../../purchases/presentation/pages/barcode_scan_page.dart';
 import '../../data/inventory_api.dart';
+import 'business_product_image.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 
 /// One product chosen in the fast picker, with its resolved unit (if any).
@@ -39,6 +40,7 @@ Future<List<PickedProduct>?> showProductMultiPicker(
   bool showQtyStepper = true,
   bool checkStock = true,
   bool Function(WidgetRef)? allowed,
+  Set<String> excludeIds = const {},
 }) {
   return showModalBottomSheet<List<PickedProduct>>(
     context: context,
@@ -52,6 +54,7 @@ Future<List<PickedProduct>?> showProductMultiPicker(
         showBarcode: showBarcode,
         showQtyStepper: showQtyStepper,
         checkStock: checkStock,
+        excludeIds: excludeIds,
       );
       if (allowed == null) return sheet;
       return Consumer(builder: (context, ref, _) {
@@ -71,8 +74,11 @@ class _MultiPickerSheet extends StatefulWidget {
   final bool showBarcode;
   final bool showQtyStepper;
   final bool checkStock;
+  /// Products already where they are going (e.g. in this category).
+  final Set<String> excludeIds;
   const _MultiPickerSheet(
       {required this.api,
+      this.excludeIds = const {},
       required this.title,
       this.initialBarcode,
       this.showBarcode = true,
@@ -118,8 +124,15 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
   Future<void> _search(String q) async {
     setState(() => _loading = true);
     try {
-      final raw = await widget.api.listProducts(search: q, perPage: 30);
-      if (mounted) setState(() => _results = raw);
+      final raw = await widget.api.listProducts(
+        search: q,
+        perPage: (30 + widget.excludeIds.length).clamp(30, 200),
+      );
+      final shown = [
+        for (final p in raw)
+          if (!widget.excludeIds.contains('${p['id']}')) p,
+      ];
+      if (mounted) setState(() => _results = shown);
     } catch (_) {
       if (mounted) setState(() => _results = []);
     }
@@ -314,17 +327,9 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
                             selected: sel,
                             selectedTileColor:
                                 AppColors.primary.withAlpha(26),
-                            leading: CircleAvatar(
-                              radius: 14,
-                              backgroundColor: sel
-                                  ? AppColors.primary
-                                  : AppColors.surfaceVariant.withAlpha(120),
-                              child: Icon(
-                                  sel ? Icons.check : Icons.inventory_2_outlined,
-                                  size: 16,
-                                  color: sel
-                                      ? Colors.white
-                                      : AppColors.textSecondary),
+                            leading: _ProductThumb(
+                              image: (p['image'] ?? '').toString(),
+                              selected: sel,
                             ),
                             title: Text((p['name'] ?? '').toString(),
                                 style: const TextStyle(
@@ -447,4 +452,59 @@ String _fmt(double v) =>
 double _num(dynamic v) {
   if (v is num) return v.toDouble();
   return double.tryParse('$v') ?? 0;
+}
+
+
+/// The product's own picture (from the device catalogue or the server),
+/// with a check mark over it once selected.
+class _ProductThumb extends StatelessWidget {
+  const _ProductThumb({required this.image, required this.selected});
+  final String image;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = Icon(
+      selected ? Icons.check : Icons.inventory_2_outlined,
+      size: 16,
+      color: selected ? Colors.white : AppColors.textSecondary,
+    );
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (image.isNotEmpty)
+              BusinessProductImage(
+                url: image,
+                width: 40,
+                height: 40,
+                fit: BoxFit.cover,
+                placeholder: ColoredBox(
+                  color: AppColors.surfaceVariant.withAlpha(120),
+                  child: Center(child: icon),
+                ),
+              )
+            else
+              ColoredBox(
+                color: selected
+                    ? AppColors.primary
+                    : AppColors.surfaceVariant.withAlpha(120),
+                child: Center(child: icon),
+              ),
+            if (selected && image.isNotEmpty)
+              ColoredBox(
+                color: AppColors.primary.withAlpha(150),
+                child: const Center(
+                  child: Icon(Icons.check, size: 18, color: Colors.white),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }

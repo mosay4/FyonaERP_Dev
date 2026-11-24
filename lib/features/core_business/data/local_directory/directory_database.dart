@@ -10,6 +10,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:synchronized/synchronized.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../../core/utils/document_number.dart';
 import '../local_ledger/business_money.dart';
 import '../local_ledger/business_report_fx.dart';
 import 'directory_party.dart';

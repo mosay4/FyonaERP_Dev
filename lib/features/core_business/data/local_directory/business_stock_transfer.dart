@@ -72,6 +72,7 @@ extension BusinessStockTransfer on BusinessLedger {
     required List<BusinessStockTransferLine> items,
     String? notes,
     bool Function()? allowed,
+    Map<String, Object?>? actor,
   }) async {
     final acting = _branch(access, BusinessLedgerAction.transfer);
     if (!_validBranchPair(acting, fromBranch, toBranch)) {
@@ -247,6 +248,7 @@ extension BusinessStockTransfer on BusinessLedger {
           'to_branch': toBranch,
           'notes': note,
           'lines': lines,
+          'actor': ?actor,
         };
       },
       allowed: allowed,

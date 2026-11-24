@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import '../../../core_business/presentation/widgets/business_number_field.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -569,7 +570,7 @@ class _ReturnCreatePageState extends ConsumerState<ReturnCreatePage> {
                   icon: Icons.receipt_long_outlined,
                   text: _invoice == null
                       ? l10n.translate('retChooseInvoice')
-                      : '${_invoice!['invoice_number']} • '
+                      : '${shortDocumentNumber(_invoice!['invoice_number'])} • '
                           '${parseMoney(_invoice!['total'])} $_currency',
                   placeholder: _invoice == null,
                   onTap: _pickInvoice,

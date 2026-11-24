@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -264,7 +265,7 @@ class _InvoiceResultTile extends StatelessWidget {
             ),
           ),
           title: Text(
-            (invoice['invoice_number'] ?? '').toString(),
+            shortDocumentNumber(invoice['invoice_number']),
             style: TextStyle(
               fontFamily: 'Cairo',
               fontSize: R.fontSize(context, 14),

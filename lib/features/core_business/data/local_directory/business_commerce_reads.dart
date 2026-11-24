@@ -187,8 +187,8 @@ extension BusinessCommerceReads on BusinessLedger {
       for (final row in rows) {
         final total = _commerceDecimal(row, 'total_minor', 100)!;
         if (query.isNotEmpty &&
-            !'${row['number']}'.toLowerCase().contains(query) &&
-            !'${row['invoice_number']}'.toLowerCase().contains(query) &&
+            !_numberMatches(row['number'], query) &&
+            !_numberMatches(row['invoice_number'], query) &&
             !'${row['party_name'] ?? ''}'.toLowerCase().contains(query) &&
             !'$total'.contains(query)) {
           continue;
@@ -680,7 +680,7 @@ extension BusinessCommerceReads on BusinessLedger {
       final documents = <Map<String, dynamic>>[
         for (final row in rows)
           if (query.isEmpty ||
-              '${row['number']}'.toLowerCase().contains(query) ||
+              _numberMatches(row['number'], query) ||
               (!returnableOnly &&
                   '${row['party_name'] ?? ''}'.toLowerCase().contains(query)))
             {
@@ -789,3 +789,8 @@ Map<String, dynamic> _commerceInvoiceLine(
     'profit': _commerceDecimal(row, 'profit_minor', 100),
   },
 };
+
+/// A number matches its full stored form or the short form people see.
+bool _numberMatches(Object? number, String query) =>
+    '$number'.toLowerCase().contains(query) ||
+    shortDocumentNumber(number).toLowerCase().contains(query);

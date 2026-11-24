@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:fyona_flutter/core/router/route_names.dart';
 import 'package:fyona_flutter/features/ai/domain/agent/sara_screen_catalog.dart';
+import 'package:fyona_flutter/features/core_business/presentation/providers/local_commerce_navigation.dart';
 
 /// Supported action types that Sara can execute.
 enum SaraActionType {
@@ -78,6 +79,28 @@ const _routeMap = <String, String>{
   'الاشتراك': RouteNames.subscription, 'Subscription': RouteNames.subscription, 'subscription': RouteNames.subscription,
   'الإشعارات': RouteNames.notifications, 'Notifications': RouteNames.notifications, 'notification': RouteNames.notifications,
 };
+
+/// Opens a screen Sara offered. A screen of one record (a product, an
+/// invoice...) on a branch whose data is on this phone opens with the same
+/// device target the app's own lists use; a bare link would be refused by the
+/// router and land on the home screen.
+void openSaraRoute(BuildContext context, String link) {
+  final live = SaraScreenCatalog.liveRoute(link.trim());
+  final uri = Uri.tryParse(live);
+  if (uri != null && commerceDocumentRoutes.containsKey(uri.path)) {
+    final query = uri.queryParameters;
+    final id = query[uri.path == RouteNames.returnsAdd ? 'invoice' : 'id'];
+    final kind = query['kind'] ?? query['type'] ?? query['source'];
+    if (id != null && id.isNotEmpty) {
+      openCommerceRecord<void>(context, uri.path, id, kind: kind);
+      return;
+    }
+    // No record named: open the screen that lists them.
+    context.push(commerceDocumentRoutes[uri.path]!);
+    return;
+  }
+  context.push(live);
+}
 
 /// Dispatches actions from Sara AI agent to the Flutter app.
 class SaraActionDispatcher {
@@ -162,7 +185,7 @@ class SaraActionDispatcher {
     // Explicit catalog route from the assistant: open it directly (covers
     // every section, including screens added in newer app builds).
     if (directRoute.startsWith('/') && !directRoute.contains(':')) {
-      if (context.mounted) context.push(directRoute);
+      if (context.mounted) openSaraRoute(context, directRoute);
       return;
     }
 
@@ -287,6 +310,12 @@ class SaraActionDispatcher {
   static String? resolveRouteFromActions(List<SaraAction> actions) {
     for (final action in actions) {
       if (action.type == SaraActionType.openScreen) {
+        // The route Sara chose from the live catalog wins over guessing from
+        // the button's title (a title like «البنوك» exists in both sections).
+        final route = (action.params['route'] as String? ?? '').trim();
+        if (route.startsWith('/') && !route.contains(':')) {
+          return SaraScreenCatalog.liveRoute(route);
+        }
         final screen = (action.params['screen'] as String? ?? '').trim();
         if (screen.isNotEmpty) return resolveRoute(screen);
       }

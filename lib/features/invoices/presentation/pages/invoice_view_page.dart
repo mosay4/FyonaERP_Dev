@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:printing/printing.dart';
@@ -224,7 +225,7 @@ class _InvoiceViewPageState extends ConsumerState<InvoiceViewPage> {
         ),
         title: Text(
             '${l10n.translate(_isPurchase ? 'bizPurchaseInvoice' : 'bizSaleInvoice')}'
-            '${_inv != null ? ' • ${_inv!['invoice_number']}' : ''}',
+            '${_inv != null ? ' • ${shortDocumentNumber(_inv!['invoice_number'])}' : ''}',
             style: TextStyle(
                 fontFamily: 'Cairo',
                 fontSize: R.fontSize(context, 15),

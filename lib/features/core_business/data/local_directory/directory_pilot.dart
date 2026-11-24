@@ -235,6 +235,11 @@ final class DirectoryPilotStore {
   String _grantKey(DirectoryAccess scope) =>
       'grant-v1-${scope.workspace.storageId}-${scope.branchId}';
 
+  /// The subscription belongs to the account's organization, not to one
+  /// branch: a branch created (or first opened) offline uses the same grant.
+  String _workspaceGrantKey(DirectoryAccess scope) =>
+      'grant-v1-${scope.workspace.storageId}';
+
   /// Save the last *live* Business entitlement, including a denial, without
   /// changing Personal access or extending the date assigned by the server.
   Future<void> remember(
@@ -247,16 +252,15 @@ final class DirectoryPilotStore {
       final entry = raw is Map
           ? {'active': raw['active'] == true, 'end_date': raw['end_date']}
           : null;
-      await _keys.write(
-        _grantKey(scope),
-        jsonEncode({
-          'status': status['status'],
-          'is_trial': status['is_trial'] == true,
-          'business_setup_completed':
-              status['business_setup_completed'] == true,
-          'sections': {'business': entry},
-        }),
-      );
+      final encoded = jsonEncode({
+        'status': status['status'],
+        'is_trial': status['is_trial'] == true,
+        'business_setup_completed':
+            status['business_setup_completed'] == true,
+        'sections': {'business': entry},
+      });
+      await _keys.write(_grantKey(scope), encoded);
+      await _keys.write(_workspaceGrantKey(scope), encoded);
     } catch (_) {
       // A vault error is not a grant, and must not break working online routes.
     }
@@ -264,7 +268,10 @@ final class DirectoryPilotStore {
 
   Future<Map<String, dynamic>?> entry(DirectoryAccess scope) async {
     try {
-      final encoded = await _keys.read(_grantKey(scope));
+      // The organization copy is the newest live answer (every branch writes
+      // it); an older per-branch copy is only a fallback from before it.
+      final encoded = await _keys.read(_workspaceGrantKey(scope)) ??
+          await _keys.read(_grantKey(scope));
       if (encoded == null) return null;
       final snapshot = Map<String, dynamic>.from(jsonDecode(encoded) as Map);
       if (!const {'active', 'trial'}.contains(snapshot['status']) ||

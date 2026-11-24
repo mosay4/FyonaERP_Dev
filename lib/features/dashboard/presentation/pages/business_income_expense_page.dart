@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/localization/app_localizations.dart';
@@ -94,7 +95,7 @@ class _BusinessIncomeExpensePageState
             .where((t) {
               final isBankTx = (t['source_type'] ?? '') == 'bank_tx';
               final isExpense = t['source_type'] == 'expense' && t['bank_account_id'] != null;
-              final ref = (t['reference'] ?? '').toString();
+              final ref = shortDocumentNumber(t['reference']);
               final k = (t['kind'] ?? '').toString();
               final isManualKind = k == 'income' || k == 'bank_withdrawal';
               return (isBankTx || isExpense) && ref.isEmpty && isManualKind;
@@ -568,7 +569,7 @@ class _BusinessIncomeExpensePageState
     final iso = (t['date'] ?? '').toString();
     final dt = DateTime.tryParse(iso)?.toLocal();
     final kind = _kindLabel((t['kind'] ?? '').toString(), l10n);
-    final reference = (t['reference'] ?? '').toString();
+    final reference = shortDocumentNumber(t['reference']);
     final account = (t['account'] ?? '').toString();
     final notes = (t['notes'] ?? '').toString();
     final party = (t['party'] ?? '').toString();

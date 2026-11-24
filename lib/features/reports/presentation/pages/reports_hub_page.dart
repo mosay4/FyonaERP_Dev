@@ -18,6 +18,8 @@ import '../../../../shared/widgets/styled_snack.dart';
 import '../../data/reports_api.dart';
 import '../../data/report_request_guard.dart';
 import '../../data/business_report_rates.dart';
+import '../../../../core/di/providers.dart' show apiClientProvider;
+import '../../../../core/services/connectivity_service.dart';
 import '../../../branches/data/branch_epoch.dart';
 import '../../../core_business/presentation/providers/business_ledger_session.dart';
 import '../../../../core/services/currency/currency_engine.dart';
@@ -422,6 +424,14 @@ class _ReportsHubPageState extends ConsumerState<ReportsHubPage> {
       );
     } catch (_) {}
     if (mounted) _load();
+    // Online: fetch fresh rates for the new currency; the report re-reads
+    // by itself when they arrive. Offline it uses the rates saved here.
+    final rates = ref.read(businessReportRatesProvider);
+    if (rates != null && ref.read(connectivityServiceProvider).isOnline) {
+      unawaited(
+        refreshBusinessReportRates(ref.read(apiClientProvider), rates),
+      );
+    }
   }
 
   @override

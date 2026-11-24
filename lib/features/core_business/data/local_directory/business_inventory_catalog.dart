@@ -160,6 +160,25 @@ extension BusinessInventoryCatalog on BusinessLedger {
     }, allowed: allowed);
   }
 
+  /// The category's picture lives in the row on the device (like products),
+  /// so it is set or removed with or without internet.
+  Future<Map<String, Object?>> setCommerceCategoryImage(
+    BusinessLedgerAccess access, {
+    required String commandId,
+    required String id,
+    required String? image,
+    bool Function()? allowed,
+  }) {
+    final branch = _branch(access, BusinessLedgerAction.manageProducts);
+    if (image != null) _checkInventoryImage(image);
+    return _commit(branch, commandId, ['branch_category_image', id, image?.length], (txn, _) async {
+      await _commerceCategory(txn, branch, id);
+      await txn.update(_commerceCategories, {'image': image},
+          where: 'branch_id = ? AND id = ?', whereArgs: [branch, id]);
+      return {'id': id, 'image': image};
+    }, allowed: allowed);
+  }
+
   /// The products stay; they just become uncategorized.
   Future<Map<String, Object?>> deleteCommerceCategory(
     BusinessLedgerAccess access, {

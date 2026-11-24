@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../shared/widgets/secure_image.dart';
+import '../../../inventory/presentation/widgets/business_product_image.dart';
 import '../../../inventory/presentation/providers/warehouse_settings.dart';
 import '../../../purchases/presentation/pages/barcode_scan_page.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
@@ -483,7 +483,7 @@ class _BranchInventoryPickerPageState
                   width: 64,
                   height: 64,
                   child: image.trim().isNotEmpty
-                      ? SecureImage(url: image, width: 64, height: 64)
+                      ? BusinessProductImage(url: image, width: 64, height: 64)
                       : Container(
                           decoration: BoxDecoration(
                             color: AppColors.primary.withAlpha(12),
@@ -558,7 +558,7 @@ class _BranchInventoryPickerPageState
                   width: 56,
                   height: 56,
                   child: image.isNotEmpty
-                      ? SecureImage(url: image, width: 56, height: 56)
+                      ? BusinessProductImage(url: image, width: 56, height: 56)
                       : Container(
                           width: 56,
                           height: 56,

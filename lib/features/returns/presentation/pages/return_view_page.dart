@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:go_router/go_router.dart';
 import 'package:printing/printing.dart';
 
@@ -115,7 +116,7 @@ class _ReturnViewPageState extends ConsumerState<ReturnViewPage> {
       }
     }
     return {
-      'invoice_number': (r['return_number'] ?? '').toString(),
+      'invoice_number': shortDocumentNumber(r['return_number']),
       'invoice_type': isSupplier ? 'purchase_return' : 'sale_return',
       'customer_name': isSupplier ? '' : (r['party'] ?? '').toString(),
       'supplier_name': isSupplier ? (r['party'] ?? '').toString() : '',
@@ -126,7 +127,7 @@ class _ReturnViewPageState extends ConsumerState<ReturnViewPage> {
       'paid_amount': r['total'],
       'balance': 0,
       'notes': (r['reason'] ?? '').toString(),
-      'original_invoice': (r['invoice_number'] ?? '').toString(),
+      'original_invoice': shortDocumentNumber(r['invoice_number']),
       'status': r['status'],
       'items': items,
     };

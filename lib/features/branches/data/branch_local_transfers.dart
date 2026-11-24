@@ -15,17 +15,76 @@ final class BranchLocalTransfers {
     required bool Function() allowed,
     required bool Function(String) can,
     void Function()? changed,
+    Future<Map<String, String>> Function()? ownerBranches,
+    Map<String, Object?> Function()? actor,
   }) : _scope = scope,
        _store = store,
        _allowed = allowed,
        _can = can,
-       _changed = changed;
+       _changed = changed,
+       _ownerBranches = ownerBranches,
+       _actor = actor;
 
   final DirectoryAccess? Function() _scope;
   final DirectoryPilotStore Function() _store;
   final bool Function() _allowed;
   final bool Function(String) _can;
   final void Function()? _changed;
+  final Future<Map<String, String>> Function()? _ownerBranches;
+  final Map<String, Object?> Function()? _actor;
+
+  /// The branches a transfer may name: the signed list for a session, and
+  /// for the owner every branch of the organization this device knows
+  /// (also the ones created offline). An employee keeps the signed list.
+  Future<Map<String, String>> _peers(DirectoryAccess scope) async {
+    final names = <String, String>{...scope.transferBranches};
+    if (!scope.member && _ownerBranches != null) {
+      try {
+        for (final entry in (await _ownerBranches()).entries) {
+          if (!isDirectoryId(entry.key)) continue;
+          final known = names[entry.key] ?? '';
+          names[entry.key] = entry.value.trim().isEmpty ? known : entry.value;
+        }
+      } catch (_) {
+        // A missing saved list only narrows the choice to the signed one.
+      }
+    }
+    return names;
+  }
+
+  Map<String, Object?>? _actorInfo() {
+    try {
+      final info = _actor?.call();
+      if (info == null) return null;
+      return {
+        for (final entry in info.entries)
+          if (entry.value != null) entry.key: entry.value,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Names for branches the device's tables do not name (e.g. born here).
+  static List<Map<String, Object?>> _named(
+    List<Map<String, Object?>> rows,
+    Map<String, String> peers,
+  ) => [for (final row in rows) _nameRow(row, peers)];
+
+  static Map<String, Object?> _nameRow(
+    Map<String, Object?> row,
+    Map<String, String> peers,
+  ) {
+    final out = Map<String, Object?>.from(row);
+    for (final side in ['from', 'to']) {
+      final name = '${out['${side}_branch_name'] ?? ''}'.trim();
+      final known = peers['${out['${side}_branch']}'] ?? '';
+      if ((name.isEmpty || name == 'null') && known.trim().isNotEmpty) {
+        out['${side}_branch_name'] = known;
+      }
+    }
+    return out;
+  }
 
   static const _uuid = Uuid();
 
@@ -51,7 +110,12 @@ final class BranchLocalTransfers {
   }
 
   Future<T> _run<T>(
-    Future<T> Function(BusinessLedger, BusinessLedgerAccess, bool Function())
+    Future<T> Function(
+      BusinessLedger,
+      BusinessLedgerAccess,
+      bool Function(),
+      Map<String, String>,
+    )
     run, {
     String? permission,
     List<String> branches = const [],
@@ -59,6 +123,7 @@ final class BranchLocalTransfers {
   }) async {
     final scope = _scope();
     if (scope == null) throw const DirectoryAccessDenied();
+    final peers = await _peers(scope);
     bool valid() {
       final live = _scope();
       return live?.financialCutover == true &&
@@ -73,13 +138,32 @@ final class BranchLocalTransfers {
           (permission == null
               ? _can('banks.transfer') || _can('inventory.transfer')
               : _can(permission)) &&
-          branches.every(live.transferBranches.containsKey);
+          branches.every(peers.containsKey);
     }
 
     if (!valid()) {
       throw Exception('ما عندك صلاحية التحويل الآن');
     }
-    final access = BusinessLedgerAccess(scope, {
+    // The owner's verified branches (see _peers) are this access's transfer
+    // list; an employee's session keeps exactly the signed one.
+    final directory = scope.member
+        ? scope
+        : DirectoryAccess(
+            workspace: scope.workspace,
+            branchId: scope.branchId,
+            readable: DirectoryPartyKind.values
+                .where(scope.canRead)
+                .toSet(),
+            writable: DirectoryPartyKind.values
+                .where(scope.canCreate)
+                .toSet(),
+            financialCutover: scope.financialCutover,
+            writerSession: scope.writerSession,
+            transferExpiry: scope.transferExpiry,
+            cashLinkId: scope.cashLinkId,
+            transferBranches: peers,
+          );
+    final access = BusinessLedgerAccess(directory, {
       BusinessLedgerAction.transfer,
       BusinessLedgerAction.readInventory,
       if (_can('inventory_cost')) BusinessLedgerAction.readInventoryCost,
@@ -88,7 +172,7 @@ final class BranchLocalTransfers {
       final result = await _store().withLedger(
         access,
         () => valid() ? _scope() : null,
-        (ledger) => run(ledger, access, valid),
+        (ledger) => run(ledger, access, valid, peers),
       );
       if (!valid()) throw const DirectoryAccessDenied();
       if (changed) _changed?.call();
@@ -103,7 +187,7 @@ final class BranchLocalTransfers {
     String? search,
     bool includeZero = false,
   }) => _run(
-    (ledger, access, _) async => {
+    (ledger, access, _, _) async => {
       if (_can('banks.transfer') && _can('banks.details'))
         'accounts': [
           for (final account in await ledger.transferAccounts(access, branchId))
@@ -131,7 +215,7 @@ final class BranchLocalTransfers {
     String? fromUnitId,
     String? fromBranchId,
   }) async => _run(
-    (ledger, access, _) => ledger.transferProductMatch(
+    (ledger, access, _, _) => ledger.transferProductMatch(
       access,
       fromProduct: fromProductId,
       targetBranch: toBranchId,
@@ -149,7 +233,7 @@ final class BranchLocalTransfers {
     String? toBranchId,
     String? fromBranchId,
   }) async => _run(
-    (ledger, access, _) async {
+    (ledger, access, _, _) async {
       final target = toBranchId ?? access.directory.branchId;
       return ledger.transferUnitInfo(
         access,
@@ -175,7 +259,7 @@ final class BranchLocalTransfers {
     String? notes,
     String? commandId,
   }) async => _run(
-    (ledger, access, current) async {
+    (ledger, access, current, _) async {
       if (allowNegative) {
         // The device store never moves money it does not hold.
         throw Exception('التحويل على هذا الجهاز لا يقبل السحب بالسالب');
@@ -206,6 +290,7 @@ final class BranchLocalTransfers {
             : BusinessRate(from, to, '$exchangeRate'),
         notes: notes,
         allowed: () => current() && _can('banks.details'),
+        actor: _actorInfo(),
       );
     },
     branches: [fromBranchId, toBranchId],
@@ -232,13 +317,14 @@ final class BranchLocalTransfers {
     String? notes,
     String? commandId,
   }) async => _run(
-    (ledger, access, current) => ledger.transferStockBetweenBranches(
+    (ledger, access, current, _) => ledger.transferStockBetweenBranches(
       access,
       commandId: commandId ?? newCommandId(),
       fromBranch: fromBranchId,
       toBranch: toBranchId,
       notes: notes,
       allowed: current,
+      actor: _actorInfo(),
       items: [
         for (final item in items)
           BusinessStockTransferLine(
@@ -266,20 +352,28 @@ final class BranchLocalTransfers {
     String? kind,
     String? branchId,
   }) async => _run(
-    (ledger, access, _) async => (await ledger.branchTransfers(
-      access,
-      kind: kind == 'financial' || kind == 'inventory' ? kind : null,
-      peers: access.directory.transferBranches.keys.toSet(),
-    )).where((r) => _allowedKind(r['kind'])).toList(),
+    (ledger, access, _, peers) async => _named(
+      (await ledger.branchTransfers(
+        access,
+        kind: kind == 'financial' || kind == 'inventory' ? kind : null,
+        peers: peers.keys.toSet(),
+        everyBranch: !access.directory.member,
+      )).where((r) => _allowedKind(r['kind'])).toList(),
+      peers,
+    ),
     branches: [?branchId],
   );
 
   Future<Map<String, Object?>> transfer(String id) async =>
-      _run((ledger, access, _) async {
-        final row = await ledger.branchTransferDetail(
-          access,
-          id,
-          peers: access.directory.transferBranches.keys.toSet(),
+      _run((ledger, access, _, peers) async {
+        final row = _nameRow(
+          await ledger.branchTransferDetail(
+            access,
+            id,
+            peers: peers.keys.toSet(),
+            everyBranch: !access.directory.member,
+          ),
+          peers,
         );
         if (!_allowedKind(row['kind'])) throw const DirectoryAccessDenied();
         if (!_can('inventory_cost')) {
@@ -295,26 +389,26 @@ final class BranchLocalTransfers {
       : kind == 'inventory' && _can('inventory.transfer');
 
   Future<void> reverseTransfer(String id, {String? commandId}) async =>
-      _run((ledger, access, current) async {
+      _run((ledger, access, current, peers) async {
         final kind = (await ledger.branchTransferDetail(
           access,
           id,
-          peers: access.directory.transferBranches.keys.toSet(),
+          peers: peers.keys.toSet(),
         ))['kind'];
         if (!_allowedKind(kind)) throw const DirectoryAccessDenied();
         await ledger.reverseBranchTransfer(
           access,
           commandId: commandId ?? newCommandId(),
           transferId: id,
-          peers: access.directory.transferBranches.keys.toSet(),
+          peers: peers.keys.toSet(),
           kinds: {'financial', 'inventory'}.where(_allowedKind).toSet(),
           allowed: () => current() && _allowedKind(kind),
         );
       }, changed: true);
 
   Future<List<Map<String, Object?>>> transferBranches() async =>
-      _run((ledger, access, _) async {
-        final names = access.directory.transferBranches;
+      _run((ledger, access, _, peers) async {
+        final names = peers;
         return [
           {
             'organization_id': access.directory.workspace.organizationId,

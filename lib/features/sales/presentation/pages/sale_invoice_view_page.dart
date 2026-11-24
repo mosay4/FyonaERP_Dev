@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:printing/printing.dart';
@@ -45,7 +46,7 @@ class SaleInvoiceViewPage extends ConsumerWidget {
   Future<void> _share(BuildContext context, Map<String, dynamic> inv) async {
     final imgs = await _images(context, inv);
     final bytes = await buildSaleInvoicePdf(inv, images: imgs);
-    final no = (inv['invoice_number'] ?? '').toString();
+    final no = shortDocumentNumber(inv['invoice_number']);
     await Printing.sharePdf(bytes: bytes, filename: 'invoice-$no.pdf');
   }
 
@@ -108,7 +109,7 @@ class SaleInvoiceViewPage extends ConsumerWidget {
                 ],
                 const SizedBox(height: 16),
                 PdfActions(
-                  title: (inv['invoice_number'] ?? '').toString(),
+                  title: shortDocumentNumber(inv['invoice_number']),
                   pdfBytes: null,
                   fileName: 'invoice-${inv['invoice_number']}.pdf',
                   onPrint: () => _print(context, inv),
@@ -144,7 +145,7 @@ class _HeadCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text((invoice['invoice_number'] ?? '').toString(),
+                child: Text(shortDocumentNumber(invoice['invoice_number']),
                     style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 17), fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
               ),
               StatusBadge(status: (invoice['status'] ?? '').toString()),

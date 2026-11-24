@@ -9,7 +9,7 @@ import 'package:fyona_flutter/features/ai/domain/agent/sara_screen_catalog.dart'
 void main() {
   test('catalog covers the whole app with unique routes', () {
     final ar = SaraScreenCatalog.entries(arabic: true);
-    expect(ar.length, greaterThanOrEqualTo(80));
+    expect(ar.length, greaterThanOrEqualTo(70));
     final routes = ar.map((e) => e['route'] ?? '').toList();
     expect(routes.toSet().length, routes.length);
     expect(routes.every((r) => r.startsWith('/')), isTrue);
@@ -30,11 +30,21 @@ void main() {
   test('key sections and future screens resolve to routes', () {
     expect(SaraScreenCatalog.routeForTitle('البنوك', arabic: true),
         '/personal/banks');
-    expect(SaraScreenCatalog.routeForTitle('نقطة البيع', arabic: true), '/pos');
+    // Old screens open the screen that does their job now; a screen this
+    // app does not have is never offered (it used to land on the home page).
+    expect(SaraScreenCatalog.routeForTitle('نقطة البيع', arabic: true),
+        '/sales/add');
     expect(SaraScreenCatalog.routeForTitle('Point of Sale', arabic: false),
-        '/pos');
-    expect(SaraScreenCatalog.routeForTitle('المشاريع', arabic: true),
-        '/projects');
+        '/sales/add');
+    final routes = SaraScreenCatalog.entries(arabic: true)
+        .map((e) => e['route'])
+        .toSet();
+    expect(routes.contains('/projects'), isFalse);
+    expect(routes.contains('/products'), isFalse);
+    expect(routes.contains('/inventory/product'), isTrue);
+    expect(SaraScreenCatalog.liveRoute('/products'), '/inventory');
+    expect(SaraScreenCatalog.liveRoute('/inventory/product?id=x'),
+        '/inventory/product?id=x');
   });
 
   test('HelpContent.catalog skips parameterized routes', () {

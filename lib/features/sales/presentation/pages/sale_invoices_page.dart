@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core_business/presentation/providers/local_commerce_navigation.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/presentation/widgets/business_operation_error.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
@@ -161,7 +162,7 @@ class _InvoiceTile extends StatelessWidget {
             vertical: 4,
           ),
           title: Text(
-            (invoice['invoice_number'] ?? '').toString(),
+            shortDocumentNumber(invoice['invoice_number']),
             style: TextStyle(
               fontFamily: 'Cairo',
               fontSize: R.fontSize(context, 14),

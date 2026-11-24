@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'secure_image.dart';
 import 'package:go_router/go_router.dart';
@@ -50,8 +51,25 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
   final Set<String> _precachedBranches = <String>{};
   final Map<String, String> _branchLabels = {};
 
+  /// Branch pictures from the owner's branch list (the same source as the
+  /// branches page, including a picture saved on this device offline).
+  Map<String, String> _branchPictures = const {};
+
   @override
   Widget build(BuildContext context) {
+    final user = ref.watch(currentUserProvider);
+    if (user != null &&
+        BranchScope.organizationId != null &&
+        BranchScope.organizationId == user.organizationId) {
+      final rows = ref.watch(savedBranchListProvider).valueOrNull;
+      if (rows != null) {
+        _branchPictures = {
+          for (final row in rows)
+            if ('${row['image'] ?? ''}'.trim().isNotEmpty)
+              '${row['id']}': '${row['image']}'.trim(),
+        };
+      }
+    }
     return Drawer(
       backgroundColor: AppColors.background,
       width: 300,
@@ -774,6 +792,8 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
   String? _branchImage(Map<String, dynamic>? branch) => versionedServerImageUrl(
     '${branch?['image'] ?? ''}'.trim().isNotEmpty
         ? '${branch?['image']}'
+        : _branchPictures['${branch?['id']}'] != null
+        ? _branchPictures['${branch?['id']}']!
         : (branch?['is_default'] == true &&
                   '${branch?['organization_id']}' == widget.user?.organizationId
               ? '${widget.user?.organizationAvatar ?? ''}'
@@ -786,7 +806,34 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
     double size = 36,
     bool allMode = false,
   }) {
-    final image = _branchImage(branch);
+    final saved = _branchPictures['${branch?['id']}'] ?? '';
+    final onDevice = !allMode &&
+        '${branch?['image'] ?? ''}'.trim().isEmpty &&
+        saved.startsWith('local://');
+    final image = onDevice ? null : _branchImage(branch);
+    if (onDevice) {
+      return Container(
+        width: size,
+        height: size,
+        clipBehavior: Clip.antiAlias,
+        decoration: const BoxDecoration(shape: BoxShape.circle),
+        child: Image.file(
+          File(saved.substring('local://'.length)),
+          fit: BoxFit.cover,
+          width: size,
+          height: size,
+          errorBuilder: (_, _, _) => Container(
+            color: AppColors.primary.withAlpha(18),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.storefront_rounded,
+              size: size * .5,
+              color: AppColors.primary,
+            ),
+          ),
+        ),
+      );
+    }
     return Container(
       width: size,
       height: size,

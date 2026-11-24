@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:go_router/go_router.dart';
 import 'package:printing/printing.dart';
 
@@ -51,7 +52,7 @@ class _ReturnSuccessDialogState extends ConsumerState<ReturnSuccessDialog> {
 
   Map<String, dynamic> get _ret =>
       Map<String, dynamic>.from((widget.result['return'] as Map?) ?? const {});
-  String get _no => (_ret['return_number'] ?? '').toString();
+  String get _no => shortDocumentNumber(_ret['return_number']);
   String get _id => (_ret['id'] ?? '').toString();
   String get _kind =>
       (_ret['kind'] ?? (widget.isSale ? 'sale_return' : 'purchase_return'))
@@ -82,7 +83,7 @@ class _ReturnSuccessDialogState extends ConsumerState<ReturnSuccessDialog> {
       }
     }
     return {
-      'invoice_number': (r['return_number'] ?? '').toString(),
+      'invoice_number': shortDocumentNumber(r['return_number']),
       'invoice_type': isSupplier ? 'purchase_return' : 'sale_return',
       'customer_name': isSupplier ? '' : (r['party'] ?? '').toString(),
       'supplier_name': isSupplier ? (r['party'] ?? '').toString() : '',
@@ -93,7 +94,7 @@ class _ReturnSuccessDialogState extends ConsumerState<ReturnSuccessDialog> {
       'paid_amount': r['total'],
       'balance': 0,
       'notes': (r['reason'] ?? '').toString(),
-      'original_invoice': (r['invoice_number'] ?? '').toString(),
+      'original_invoice': shortDocumentNumber(r['invoice_number']),
       'status': r['status'],
       'items': items,
     };

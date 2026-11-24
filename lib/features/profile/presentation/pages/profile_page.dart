@@ -2413,8 +2413,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       }
       return;
     }
+    final opened = ref.read(localBusinessBankingProvider);
     if (!mounted || epoch != ref.read(branchEpochProvider) ||
-        !identical(local, ref.read(localBusinessBankingProvider))) return;
+        (local == null) != (opened == null) ||
+        (opened != null && !opened.isCurrent)) return;
 
     var savingLocal = false;
     final command = const Uuid().v4();
@@ -2430,15 +2432,28 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         isArabic: isArabic,
         initialSelected: initial,
         onSave: (selected) async {
-          if (!mounted || !ctx.mounted || epoch != ref.read(branchEpochProvider) ||
-              !identical(local, ref.read(localBusinessBankingProvider))) return;
-          if (local != null) {
+          if (!mounted || !ctx.mounted || epoch != ref.read(branchEpochProvider)) return;
+          // The same branch may hand out a fresh banking object (connectivity,
+          // sync); only a different branch or a revoked scope stops the save.
+          final current = ref.read(localBusinessBankingProvider);
+          if ((local == null) != (current == null) ||
+              (current != null && !current.isCurrent)) return;
+          if (current != null) {
             if (savingLocal) return;
             savingLocal = true;
             try {
-              await local.saveCashCurrencies(initial, selected, command);
+              // Compare against the device's cash slots as they are now.
+              final before = await current.cashCurrencies();
+              await current.saveCashCurrencies(
+                before,
+                selected,
+                const Uuid().v5(
+                  Uuid.NAMESPACE_URL,
+                  'fyona-cash-currencies:$command:${(selected.toList()..sort()).join(',')}',
+                ),
+              );
               if (ctx.mounted) Navigator.pop(ctx);
-              if (mounted && local.isCurrent) {
+              if (mounted && current.isCurrent) {
                 _snack(
                   AppLocalizations.of(context).translate('profileCurrenciesSaved'),
                   bg: AppColors.success,

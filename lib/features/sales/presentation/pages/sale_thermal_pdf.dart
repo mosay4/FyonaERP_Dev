@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../../../../core/utils/currency_formatter.dart' as cf;
@@ -36,7 +37,7 @@ Future<Uint8List> buildSaleThermalPdf(Map<String, dynamic> inv) async {
                 style: pw.TextStyle(font: bold, fontSize: 13)),
           ),
           pw.Center(
-            child: pw.Text((inv['invoice_number'] ?? '').toString(),
+            child: pw.Text(shortDocumentNumber(inv['invoice_number']),
                 style: pw.TextStyle(font: bold, fontSize: 11)),
           ),
           pw.Center(

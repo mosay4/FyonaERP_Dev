@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
@@ -340,7 +341,7 @@ class _BranchTransfersPageState extends ConsumerState<BranchTransfersPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${t['number'] ?? ''}',
+                        shortDocumentNumber(t['number'], uuidPrefix: 'TRF'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -1800,6 +1801,14 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
     return units.isNotEmpty ? '${(units.first as Map)['id']}' : null;
   }
 
+  static String _plainRate(double rate) {
+    final digits = rate >= 100 ? 2 : rate >= 1 ? 4 : 6;
+    return rate
+        .toStringAsFixed(digits)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
   Future<void> _prefillRate() async {
     if (_fromAccount == null || _toAccount == null) return;
     final from = '${_fromAccount!['currency'] ?? 'SAR'}'.toUpperCase();
@@ -1815,9 +1824,14 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
       final engine = ref.read(currencyEngineProvider);
       await engine.load();
       final rate = engine.getRate(from, to);
-      if (rate != null && rate > 0 && mounted && _rate.text == initialRate &&
-          _fromAccount?['id'] == sourceAccount && _toAccount?['id'] == destinationAccount) {
-        setState(() => _rate.text = rate.toStringAsFixed(6));
+      final same = mounted && _rate.text == initialRate &&
+          _fromAccount?['id'] == sourceAccount && _toAccount?['id'] == destinationAccount;
+      if (rate != null && rate > 0 && same) {
+        // The rate saved on this device (also offline), editable.
+        setState(() => _rate.text = _plainRate(rate));
+      } else if (same && initialRate == '1') {
+        // «1» was only right for the same currency; never send it silently.
+        setState(() => _rate.text = '');
       }
     } catch (_) {}
   }
@@ -2374,7 +2388,7 @@ class _TransferDetailPageState extends ConsumerState<_TransferDetailPage> {
               const SizedBox(height: 14),
               _row(
                 l10n.translate('branchOperationNumber'),
-                '${t['number'] ?? ''}',
+                shortDocumentNumber(t['number'], uuidPrefix: 'TRF'),
               ),
               _row(
                 l10n.translate('branchFrom'),
@@ -2383,17 +2397,22 @@ class _TransferDetailPageState extends ConsumerState<_TransferDetailPage> {
               _row(l10n.translate('branchTo'), _routeTo(t)),
               _row(
                 l10n.translate('branchBy'),
-                '${t['actor_name'] ?? ''} · ${_roleLabel(l10n, '${t['actor_role'] ?? ''}')}',
+                _actorText(l10n, t),
               ),
               if (t['kind'] == 'financial') ...[
                 _row(
                   l10n.translate('branchAmount'),
                   '${_fmt(t['amount'])} ${currencyLabel('${t['currency'] ?? ''}')}',
                 ),
-                _row(
-                  l10n.translate('branchExchangeRate'),
-                  '${t['exchange_rate']}',
-                ),
+                // Only a transfer between two different currencies has a rate.
+                if (t['exchange_rate'] != null &&
+                    '${t['exchange_rate']}'.trim().isNotEmpty &&
+                    '${t['exchange_rate']}' != 'null' &&
+                    '${t['currency'] ?? ''}' != '${t['to_currency'] ?? ''}')
+                  _row(
+                    l10n.translate('branchExchangeRate'),
+                    '${t['exchange_rate']}',
+                  ),
                 _row(
                   l10n.translate('branchExpectedAmount'),
                   '${_fmt(t['received_amount'])} ${currencyLabel('${t['to_currency'] ?? ''}')}',
@@ -2646,6 +2665,19 @@ class _TransferDetailPageState extends ConsumerState<_TransferDetailPage> {
     return currency.isEmpty ? total : '$total ${currencyLabel(currency)}';
   }
 
+  /// «الاسم · الدور»; an older transfer that did not record its author says
+  /// only the role it can prove, never a stray dot.
+  String _actorText(AppLocalizations l10n, Map t) {
+    final name = '${t['actor_name'] ?? ''}'.trim();
+    final role = '${t['actor_role'] ?? ''}'.trim();
+    final hasName = name.isNotEmpty && name != 'null';
+    final hasRole = role.isNotEmpty && role != 'null';
+    if (!hasName && !hasRole) return '—';
+    if (!hasName) return _roleLabel(l10n, role);
+    if (!hasRole) return name;
+    return '$name · ${_roleLabel(l10n, role)}';
+  }
+
   String _roleLabel(AppLocalizations l10n, String role) {
     switch (role.toLowerCase()) {
       case 'owner':
@@ -2721,7 +2753,7 @@ class _TransferDetailPageState extends ConsumerState<_TransferDetailPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${t['number'] ?? ''}',
+                      shortDocumentNumber(t['number'], uuidPrefix: 'TRF'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(

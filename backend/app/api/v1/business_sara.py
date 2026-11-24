@@ -61,6 +61,21 @@ def catalog(app):
     return result
 
 
+_SCREEN_QUERY = re.compile(r'^(id|kind|type|source|invoice)=[A-Za-z0-9_-]{1,64}'
+                           r'(&(id|kind|type|source|invoice)=[A-Za-z0-9_-]{1,64}){0,2}$')
+
+
+def screen_allowed(route, routes):
+    """A catalog screen, optionally with the id of one record in it."""
+    path, _, query = str(route).partition('?')
+    return path in routes and (not query or bool(_SCREEN_QUERY.fullmatch(query)))
+
+
+def route_shape(key):
+    """'PUT /products/{product_id}' and 'PUT /products/{id}' are one route."""
+    return re.sub(r'\{[^}]+\}', '{}', str(key))
+
+
 def resolve(app, method, path):
     if not path.startswith('/') or any(s in path for s in ('..', '?', '#', '%', '://', '//')):
         raise HTTPException(422, detail='مسار العملية غير صالح')
@@ -172,7 +187,10 @@ async def answer(data, request, identity, db, *, device=False, resume=None):
     device_routes = set()
     if device:
         device_routes = {str(r) for r in ((resume or {}).get('device_routes') or data.device_routes or [])}
-        endpoints = {k: v for k, v in endpoints.items() if k in device_routes}
+        # The phone names path parameters {id}; the server {product_id}, etc.
+        # Only the shape counts, never the parameter's name.
+        shapes = {route_shape(r) for r in device_routes}
+        endpoints = {k: v for k, v in endpoints.items() if route_shape(k) in shapes}
 
     def on_device(method, path):
         spec = resolve(request.app, method, path)
@@ -205,6 +223,11 @@ async def answer(data, request, identity, db, *, device=False, resume=None):
     routes = {x.get('route') for x in data.screen_catalog or [] if isinstance(x, dict)
               and str(x.get('route', '')).startswith('/') and not str(x.get('route')).startswith('/personal')}
     prompt += '\nشاشات التطبيق: ' + json.dumps(sorted(routes), ensure_ascii=False)
+    prompt += ('\nلفتح سجل بعينه أضيفي معرفه الحقيقي (بعد قراءته): منتج /inventory/product?id=<id>، '
+               'تعديل منتج (الحد الأدنى، الباركود، السعر...) /inventory/product/edit?id=<id>، '
+               'حركة منتج /inventory/product/movements?id=<id>، تصنيف /inventory/category?id=<id>. '
+               'تعديل بيانات المنتج نفسها (الاسم، السعر، الحد الأدنى min_stock، الباركود، التصنيف...) '
+               'متاح عبر PUT /products/{product_id} بعد قراءة المنتج؛ والباركود والوحدات والأسعار لها مساراتها.')
     prompt += '\n' + conversation_policy(language)
     prompt += policy(subscription_context)
     prompt += '\nالعملات الكاملة المتاحة للتخصيص: ' + ', '.join(currency_catalog())
@@ -332,7 +355,7 @@ async def answer(data, request, identity, db, *, device=False, resume=None):
                 elif name == 'app_read':
                     result = await call_api(request, 'GET', args['path'], args.get('params'))
                 elif name == 'open_app_screen':
-                    if args['route'] not in routes:
+                    if not screen_allowed(args['route'], routes):
                         raise HTTPException(422, detail='الشاشة غير متاحة')
                     actions.append({'action': 'open_screen', 'params': args, 'label': args['screen']})
                     result = {'button_ready': True}

@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:printing/printing.dart';
 import '../../../../core/localization/app_localizations.dart';
@@ -74,7 +75,7 @@ class PurchaseInvoiceViewPage extends ConsumerWidget {
                 _row(context, l10n.translate('purSupplier'),
                     (inv['supplier_name'] ?? l10n.translate('purCashSupplier'))
                         .toString()),
-                _row(context, '#', (inv['invoice_number'] ?? '').toString()),
+                _row(context, '#', shortDocumentNumber(inv['invoice_number'])),
                 if ((inv['due_date'] ?? '').toString().isNotEmpty)
                   _row(context, l10n.translate('saleDueDateOptional'),
                       inv['due_date'].toString()),
@@ -156,7 +157,7 @@ class PurchaseInvoiceViewPage extends ConsumerWidget {
                         final imgs = await _images(context, inv);
                         final bytes =
                             await buildSaleInvoicePdf(inv, images: imgs);
-                        final no = (inv['invoice_number'] ?? '').toString();
+                        final no = shortDocumentNumber(inv['invoice_number']);
                         await Printing.sharePdf(
                             bytes: bytes, filename: 'purchase-$no.pdf');
                       },

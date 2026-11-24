@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:fyona_flutter/core/utils/document_number.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:printing/printing.dart';
@@ -87,7 +88,7 @@ class _PurchaseSuccessDialogState extends ConsumerState<PurchaseSuccessDialog> {
       final d = _preset('paper');
       final bytes = await buildInvoicePdf(_inv, d,
           templateId: 'paper', isPurchase: true);
-      final no = (_inv['invoice_number'] ?? '').toString();
+      final no = shortDocumentNumber(_inv['invoice_number']);
       await Printing.sharePdf(bytes: bytes, filename: 'purchase-$no.pdf');
     } catch (_) {}
     if (mounted) setState(() => _busy = false);
@@ -118,7 +119,7 @@ class _PurchaseSuccessDialogState extends ConsumerState<PurchaseSuccessDialog> {
     final scope = _scope;
     if (scope != null) ref.watch(localInvoiceDesignProvider(scope));
     final l10n = AppLocalizations.of(context);
-    final no = (_inv['invoice_number'] ?? '').toString();
+    final no = shortDocumentNumber(_inv['invoice_number']);
     return AlertDialog(scrollable: true,
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16)),

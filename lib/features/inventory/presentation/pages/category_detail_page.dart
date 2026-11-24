@@ -127,6 +127,8 @@ class _CategoryDetailPageState extends ConsumerState<CategoryDetailPage> {
           ref.watch(employeeCanProvider('inventory.edit')) && !BranchScope.readOnly,
       // Categorizing has nothing to do with stock — never block 0-stock items.
       checkStock: false,
+      // A product already in this category is not offered again.
+      excludeIds: {for (final p in _products) '${p['id']}'},
     );
     if (list == null || list.isEmpty || !_canChangeLinks) return;
     if (api is LocalInventoryApi) {

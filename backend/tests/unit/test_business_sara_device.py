@@ -105,3 +105,18 @@ async def test_a_route_the_phone_does_not_answer_is_refused(model):
         SimpleNamespace(app=app), _identity(), None, device=True)
     assert not result.get('pending_tools')
     assert 'غير متاحة على الجهاز' in seen[1][-1]['content']
+
+
+@pytest.mark.asyncio
+async def test_routes_with_an_id_are_offered_whatever_the_parameter_name(model):
+    """The phone says {id}; the server says {product_id}. Same route."""
+    script, seen = model
+    script.append(_reply(content='تمام.'))
+    await business_sara.answer(
+        AIQuery(query='عدلي حد التنبيه', account_type='business',
+                device_routes=['GET /products/{id}', 'PUT /products/{id}']),
+        SimpleNamespace(app=app), _identity(), None, device=True)
+    prompt = seen[0][0]['content']
+    assert 'PUT /products/{product_id}' in prompt
+    assert 'GET /products/{product_id}' in prompt
+    assert 'DELETE /products/{product_id}' not in prompt

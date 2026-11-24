@@ -10,6 +10,7 @@ import '../../../branches/data/branch_scope.dart';
 import '../../../dashboard/data/business_finance_api.dart';
 import '../../../employees/data/employee_permissions.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
+import '../../../inventory/data/business_inventory_image.dart';
 import '../../../inventory/data/inventory_api.dart';
 import '../../../invoices/data/invoices_api.dart';
 import '../../../purchases/data/purchase_api.dart';
@@ -791,6 +792,11 @@ final class LocalCommerceBridge {
       _catalogWrite(['inventory', 'inventory.edit'], (ledger, grant, allowed) =>
           ledger.renameCommerceCategory(grant, commandId: const Uuid().v4(), id: id, name: name, allowed: allowed));
 
+  Future<Map<String, dynamic>> setCategoryImage(String id, String? image) =>
+      _catalogWrite(['inventory', 'inventory.edit'], (ledger, grant, allowed) =>
+          ledger.setCommerceCategoryImage(grant, commandId: const Uuid().v4(), id: id,
+              image: image, allowed: allowed));
+
   Future<Map<String, dynamic>> deleteCategory(String id) =>
       _catalogWrite(['inventory', 'inventory.delete'], (ledger, grant, allowed) =>
           ledger.deleteCommerceCategory(grant, commandId: const Uuid().v4(), id: id, allowed: allowed));
@@ -1507,15 +1513,14 @@ final class LocalInventoryApi extends InventoryApi {
     String id,
     String filePath, {
     required Dio dio,
-  }) => _rejectSharedWrite('inventory.edit');
+  }) async =>
+      _bridge.setCategoryImage(id, await readBusinessProductImage(filePath));
 
   @override
-  Future<void> deleteCategoryImage(String id) => _rejectSharedWrite('inventory.edit');
-
-  Future<Never> _rejectSharedWrite(String permission) async {
-    _bridge._require([permission]);
-    throw const SharedCatalogReadOnly();
+  Future<void> deleteCategoryImage(String id) async {
+    await _bridge.setCategoryImage(id, null);
   }
+
 }
 
 final class LocalReturnsApi extends ReturnsApi {

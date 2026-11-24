@@ -137,14 +137,25 @@ class CurrencyEngine {
 
   Future<void> _fetchSnapshot(bool force) async {
     try {
-      Object? data = await _public?.fetch();
-      if (data == null && _apiClient != null) {
-        final response = await _apiClient.get(
-          '/personal/exchange-rates',
-          queryParameters: {'force_refresh': force},
-        );
-        final body = response.data;
-        data = body is Map && body['data'] is Map ? body['data'] as Map : body;
+      Object? data;
+      try {
+        data = await _public?.fetch();
+      } catch (_) {}
+      if (_apiClient != null && !_completeSnapshot(data)) {
+        // A device whose network cannot reach one of the public sources
+        // (e.g. the Yemeni market page) takes that part from the server.
+        try {
+          final response = await _apiClient.get(
+            '/personal/exchange-rates',
+            queryParameters: {'force_refresh': force},
+          );
+          final body = response.data;
+          final server =
+              body is Map && body['data'] is Map ? body['data'] as Map : body;
+          data = _mergeSnapshots(data, server);
+        } catch (_) {
+          if (data == null) rethrow;
+        }
       }
       if (data is! Map) {
         _lastCheckFailed = true;
@@ -212,6 +223,67 @@ class CurrencyEngine {
       _lastCheckFailed = true;
       // A failed refresh never clears a previously approved observation.
     }
+  }
+
+  static bool _usableSource(Object? source) =>
+      source is String &&
+      !const {'fallback', 'hardcoded', 'unavailable', 'unknown', ''}
+          .contains(source.trim().toLowerCase());
+
+  static bool _completeSnapshot(Object? data) {
+    if (data is! Map) return false;
+    final meta = data['meta'];
+    final yemen = data['yemen'];
+    return meta is Map &&
+        _usableSource(meta['global_source']) &&
+        yemen is Map &&
+        _usableSource(yemen['source']);
+  }
+
+  /// The device's own snapshot, with whatever part it could not get taken
+  /// from the server's snapshot (same shape).
+  static Object? _mergeSnapshots(Object? device, Object? server) {
+    if (device is! Map) return server;
+    if (server is! Map) return device;
+    final out = Map<String, dynamic>.from(device);
+    final meta = Map<String, dynamic>.from(
+      device['meta'] is Map ? device['meta'] as Map : const {},
+    );
+    final serverMeta = server['meta'] is Map ? server['meta'] as Map : const {};
+    final observations = <String, dynamic>{
+      if (meta['observations'] is Map) ...meta['observations'] as Map,
+    };
+    final serverObservations = serverMeta['observations'] is Map
+        ? serverMeta['observations'] as Map
+        : const {};
+    if (!_usableSource(meta['global_source']) &&
+        _usableSource(serverMeta['global_source']) &&
+        server['global'] is Map) {
+      out['global'] = server['global'];
+      meta['global_source'] = serverMeta['global_source'];
+      for (final entry in serverObservations.entries) {
+        if ('${entry.key}'.startsWith('YER')) continue;
+        observations['${entry.key}'] = entry.value;
+      }
+    }
+    final yemen = device['yemen'];
+    final serverYemen = server['yemen'];
+    if (!(yemen is Map && _usableSource(yemen['source'])) &&
+        serverYemen is Map &&
+        _usableSource(serverYemen['source'])) {
+      out['yemen'] = serverYemen;
+      for (final code in ['YER_OLD', 'YER_NEW']) {
+        if (serverObservations[code] != null) {
+          observations[code] = serverObservations[code];
+        }
+      }
+    }
+    meta['observations'] = observations;
+    out['meta'] = meta;
+    if (server['admin_rates'] != null && out['admin_rates'] == null) {
+      out['admin_rates'] = server['admin_rates'];
+    }
+    return out;
   }
 
   Future<void> _save() async {
