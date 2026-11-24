@@ -13,6 +13,7 @@ import '../../../../../shared/widgets/styled_snack.dart';
 import '../../../../../shared/widgets/business_selection_sheet.dart';
 import '../../../../../core/utils/currency_formatter.dart';
 import '../../../../../core/utils/amount_input_formatter.dart';
+import '../../../inventory/presentation/widgets/business_unit_image.dart';
 import '../../../inventory/presentation/widgets/product_picker.dart';
 import '../../../inventory/presentation/providers/inventory_providers.dart';
 import '../../../inventory/presentation/providers/warehouse_settings.dart';
@@ -836,6 +837,8 @@ class _UnitPickerSheet extends StatelessWidget {
         children: [
           for (final u in units)
             ListTile(
+              // The unit's own photo (a carton) when it has one.
+              leading: BusinessUnitImage(image: u['image']?.toString()),
               title: Text((u['name'] ?? '').toString(),
                   style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w600)),
               subtitle: Text(

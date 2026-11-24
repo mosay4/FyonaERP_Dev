@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:synchronized/synchronized.dart';
 
 import '../../../../core/config/directory_pilot_build.dart';
@@ -206,8 +208,52 @@ final directoryPartyRevisionProvider = StateProvider.autoDispose
 final businessLocalLedgerScopeProvider = Provider<DirectoryAccess?>((ref) {
   if (!const bool.fromEnvironment('FYONA_BUSINESS_LEDGER_QA')) return null;
   final scope = ref.watch(directoryPilotAccessProvider);
+  if (scope?.financialCutover == true && !scope!.member) {
+    // «جميع الفروع» of this organization reads the same device ledger.
+    DeviceLedgerOrganizations.remember(scope.workspace.organizationId);
+  }
   return scope?.financialCutover == true ? scope : null;
 });
+
+/// Organizations whose business data lives on this device (learnt from a
+/// signed single-branch context). The all-branches token carries no ledger
+/// claim, so this is how «جميع الفروع» knows to read the device ledger.
+abstract final class DeviceLedgerOrganizations {
+  static const _key = 'device_ledger_organizations_v1';
+  static final Set<String> _known = {};
+  static bool _loaded = false;
+
+  static bool contains(String? organizationId) =>
+      organizationId != null && _known.contains(organizationId);
+
+  static Future<void> load() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      _known.addAll(sp.getStringList(_key) ?? const []);
+      _loaded = true;
+    } catch (_) {}
+  }
+
+  static void remember(String organizationId) {
+    if (_known.contains(organizationId) && _loaded) return;
+    _known.add(organizationId);
+    () async {
+      try {
+        final sp = await SharedPreferences.getInstance();
+        final saved = {...?sp.getStringList(_key), ..._known};
+        _known.addAll(saved);
+        _loaded = true;
+        await sp.setStringList(_key, saved.toList()..sort());
+      } catch (_) {}
+    }();
+  }
+
+  @visibleForTesting
+  static void reset() {
+    _known.clear();
+    _loaded = false;
+  }
+}
 
 /// The only Phase 1 UI repository. No production import and no fallback to
 /// HTTP. A missing key, missing grant or failed write never creates a server row.
@@ -319,7 +365,9 @@ final class DirectoryPilotStore {
     final expected = access.directory;
     void check() {
       final selected = current();
-      if (!expected.financialCutover ||
+      // «جميع الفروع» is read-only on the device too, whatever screen asks.
+      if ((BranchScope.readOnly && !access.onlyReads) ||
+          !expected.financialCutover ||
           selected == null ||
           !selected.financialCutover ||
           !sameDirectoryScope(expected, selected))
@@ -329,6 +377,30 @@ final class DirectoryPilotStore {
     check();
     final db = await _open(expected);
     check();
+    return action(db.ledger);
+  });
+
+  /// «جميع الفروع»: one read over several branches of the same organization
+  /// database. Every [scopes] entry is a read-only branch scope (nothing is
+  /// writable); [current] is checked before and after the database opens so
+  /// a switch back to one branch never receives merged rows.
+  Future<T> withBranchesLedger<T>(
+    List<DirectoryAccess> scopes,
+    bool Function() current,
+    Future<T> Function(BusinessLedger ledger) action,
+  ) => _lock.synchronized(() async {
+    if (scopes.isEmpty ||
+        !current() ||
+        scopes.any(
+          (scope) =>
+              !scope.financialCutover ||
+              scope.workspace.storageId != scopes.first.workspace.storageId ||
+              DirectoryPartyKind.values.any(scope.canCreate),
+        )) {
+      throw const DirectoryAccessDenied();
+    }
+    final db = await _open(scopes.first);
+    if (!current()) throw const DirectoryAccessDenied();
     return action(db.ledger);
   });
 

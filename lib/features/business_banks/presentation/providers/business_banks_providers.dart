@@ -158,6 +158,7 @@ class BusinessBanksState {
 class BusinessBanksNotifier extends StateNotifier<BusinessBanksState> {
   final BusinessBanksApi? _api;
   final LocalBusinessBanking? _local;
+  final AllBranchesBanking? _all;
   final bool Function()? _connectedScope;
   CurrencyEngine _engine;
   int _readGeneration = 0;
@@ -168,20 +169,35 @@ class BusinessBanksNotifier extends StateNotifier<BusinessBanksState> {
     this._engine, {
     bool Function()? connectedScope,
   }) : _local = null,
+       _all = null,
        _connectedScope = connectedScope,
        super(const BusinessBanksState());
 
   BusinessBanksNotifier.local(LocalBusinessBanking local)
     : _api = null,
       _local = local,
+      _all = null,
       _connectedScope = null,
       _engine = CurrencyEngine(),
       super(const BusinessBanksState());
 
-  bool get isLocal => _local != null;
+  /// «جميع الفروع»: every branch's banks merged, read-only.
+  BusinessBanksNotifier.allBranches(AllBranchesBanking all)
+    : _api = null,
+      _local = null,
+      _all = all,
+      _connectedScope = null,
+      _engine = CurrencyEngine(),
+      super(const BusinessBanksState());
+
+  bool get isLocal => _local != null || _all != null;
+
+  /// The merged all-branches view: nothing can be added, moved or deleted.
+  bool get isReadOnly => _all != null;
 
   bool get isCurrent =>
-      mounted && (_local?.isCurrent ?? _connectedScope?.call() ?? true);
+      mounted &&
+      (_local?.isCurrent ?? _all?.isCurrent ?? _connectedScope?.call() ?? true);
 
   BusinessBanksApi get _connected {
     if (!isCurrent || isLocal) throw const DirectoryAccessDenied();
@@ -200,6 +216,8 @@ class BusinessBanksNotifier extends StateNotifier<BusinessBanksState> {
       final wallet = prefs.getString(walletCurrencyKey) ?? 'USD';
       final raw = _local != null
           ? await _local.accounts()
+          : _all != null
+          ? await _all.accounts()
           : await _connected.listAccounts();
       final accounts = <BusinessBankAccount>[];
       for (final a in raw.whereType<Map>()) {
@@ -266,6 +284,8 @@ class BusinessBanksNotifier extends StateNotifier<BusinessBanksState> {
   Future<List<Map<String, dynamic>>> history(List<String> ids) async {
     final local = _local;
     if (local != null) return local.history(ids);
+    final all = _all;
+    if (all != null) return all.history(ids);
     final pages = await Future.wait([
       for (final id in ids) _connected.transactions(id),
     ]);
@@ -480,7 +500,7 @@ class BusinessBanksNotifier extends StateNotifier<BusinessBanksState> {
   }
 
   Future<void> _closeLocal(List<String> ids, {bool onlyCash = false}) =>
-      _local!.run(
+      (_local ?? (throw const DirectoryAccessDenied())).run(
         BusinessLedgerAction.manageBank,
         'banks.add_delete',
         (ledger, grant) => ledger.closeBankAccounts(
@@ -571,7 +591,7 @@ class BusinessBanksNotifier extends StateNotifier<BusinessBanksState> {
     bool withdraw,
     String? description,
   ) async {
-    await _local!.run(
+    await (_local ?? (throw const DirectoryAccessDenied())).run(
       BusinessLedgerAction.moveMoney,
       withdraw ? 'expenses' : 'income',
       (ledger, grant) => ledger.move(
@@ -590,6 +610,8 @@ class BusinessBanksNotifier extends StateNotifier<BusinessBanksState> {
 final businessBanksProvider =
     StateNotifierProvider<BusinessBanksNotifier, BusinessBanksState>((ref) {
       ref.watch(branchEpochProvider);
+      final merged = ref.watch(allBranchesBankingProvider);
+      if (merged != null) return BusinessBanksNotifier.allBranches(merged);
       final local = ref.watch(localBusinessBankingProvider);
       if (local != null) {
         final notifier = BusinessBanksNotifier.local(local);

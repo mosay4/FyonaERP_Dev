@@ -5,10 +5,12 @@ import '../../../core/network/api_client.dart';
 import '../../../shared/providers/current_user_provider.dart';
 import '../../branches/data/branch_epoch.dart';
 import '../../branches/data/branch_scope.dart';
+import '../../core_business/data/local_directory/all_branches_ledger.dart';
 import '../../core_business/data/local_directory/directory_database.dart';
 import '../../core_business/data/local_directory/directory_pilot.dart';
 import '../../core_business/data/local_directory/directory_scope.dart';
 import '../../core_business/data/local_ledger/business_report_fx.dart';
+import '../../core_business/presentation/providers/business_all_branches_provider.dart';
 import '../../employees/presentation/providers/employee_providers.dart';
 import 'business_report_rates.dart';
 import 'report_currency.dart';
@@ -57,9 +59,21 @@ final localReportAllowedProvider = Provider.family<bool, String>((ref, kind) {
 
 final businessReportsApiProvider = Provider<BusinessReportsApi>((ref) {
   ref.watch(branchEpochProvider);
-  final local = ref.watch(businessLocalLedgerScopeProvider);
   var active = true;
   ref.onDispose(() => active = false);
+  // «جميع الفروع»: each branch's report from the device ledger, merged in
+  // the chosen report currency (the same rates as a single branch).
+  final all = ref.watch(businessAllBranchesProvider);
+  if (all != null) {
+    return BusinessReportsApi._withAll(
+      _AllBranchReports(
+        all,
+        ref.watch(businessReportRatesProvider),
+        () => active && all.isCurrent,
+      ),
+    );
+  }
+  final local = ref.watch(businessLocalLedgerScopeProvider);
   if (local == null) {
     ref.watch(currentUserIdProvider);
     return BusinessReportsApi(
@@ -180,23 +194,96 @@ final class _LocalReports {
   }
 }
 
+/// «جميع الفروع» reports: every branch computes its own report in the same
+/// report currency, then the reports are merged (sums are exact; each branch
+/// keeps its own headline figures in `by_branch`).
+final class _AllBranchReports {
+  _AllBranchReports(this.all, this.rates, this.current);
+  final BusinessAllBranches all;
+  final BusinessReportRates? rates;
+  final bool Function() current;
+
+  static Set<BusinessLedgerAction> actions(String kind) => switch (kind) {
+    'inventory' => {
+      BusinessLedgerAction.readInventory,
+      BusinessLedgerAction.readInventoryCost,
+    },
+    'sales' => {
+      BusinessLedgerAction.readSalesReport,
+      BusinessLedgerAction.readInventory,
+      BusinessLedgerAction.readInvoiceProfit,
+    },
+    'home' || 'overview' => {
+      BusinessLedgerAction.readOverviewReport,
+      BusinessLedgerAction.readInvoiceProfit,
+      if (kind == 'overview') BusinessLedgerAction.readInventoryCost,
+    },
+    'money' => {BusinessLedgerAction.readMoneyReport},
+    'debts' => {BusinessLedgerAction.readDebtReport},
+    _ => {},
+  };
+
+  Future<List<BranchRead<T>>> read<T>(
+    String kind,
+    Future<T> Function(BusinessLedger, BusinessLedgerAccess) load,
+  ) async {
+    if (!current()) throw const ReportScopeChanged();
+    final result = await all.each(actions(kind), load);
+    if (!current()) throw const ReportScopeChanged();
+    return result;
+  }
+
+  Future<Map<String, dynamic>> report(
+    String kind,
+    Future<Map<String, dynamic>> Function(
+      BusinessLedger,
+      BusinessLedgerAccess,
+      BusinessReportFx,
+    )
+    load,
+  ) async {
+    final fx = await rates?.read() ?? const BusinessReportFx.empty();
+    final reads = await read(kind, (ledger, access) => load(ledger, access, fx));
+    return convertReportRows(mergeBranchReports(reads), fx);
+  }
+}
+
 /// Business reports API (قسم التقارير) — read-only, FX-honest aggregates.
 class BusinessReportsApi {
   final ApiClient? _client;
   final _LocalReports? _device;
+  final _AllBranchReports? _all;
   final bool Function()? _active;
   BusinessReportsApi(this._client, {bool Function()? active})
     : _device = null,
+      _all = null,
       _active = active;
-  BusinessReportsApi._withDevice(this._device) : _client = null, _active = null;
+  BusinessReportsApi._withDevice(this._device)
+    : _client = null,
+      _all = null,
+      _active = null;
+  BusinessReportsApi._withAll(this._all)
+    : _client = null,
+      _device = null,
+      _active = null;
 
-  bool get isDeviceLedger => _device != null;
+  /// Device ledger data (one branch, or all branches merged).
+  bool get isDeviceLedger => _device != null || _all != null;
+
+  /// The merged «جميع الفروع» view (read-only).
+  bool get isAllBranches => _all != null;
   DirectoryAccess? get deviceScope => _device?.scope;
+
+  /// The account whose device holds the reports' data.
+  String? get deviceAccountId =>
+      _device?.scope.workspace.accountId ?? _all?.all.workspace.accountId;
 
   /// Stable identity of the data source. Two instances with the same key see
   /// exactly the same facts; only a real scope/source change may clear a page.
   String get scopeKey {
     final scope = deviceScope;
+    final all = _all;
+    if (all != null) return 'device:${all.all.scopeKey}';
     return scope == null
         ? 'rest:${BusinessReportsApi.scopeIdentity}'
         : 'device:${scope.workspace.storageId}:${scope.branchId}:'
@@ -204,6 +291,26 @@ class BusinessReportsApi {
   }
 
   Future<Set<String>> deviceCurrencies() async {
+    final all = _all;
+    if (all != null) {
+      return {
+        for (final read in await all.read(
+          'debts',
+          (ledger, access) => ledger.debtReportCurrencies(access),
+        ))
+          ...read.value,
+        for (final read in await all.read(
+          'money',
+          (ledger, access) => ledger.moneyReportCurrencies(access),
+        ))
+          ...read.value,
+        for (final read in await all.read(
+          'inventory',
+          (ledger, access) => ledger.inventoryReportCurrencies(access),
+        ))
+          ...read.value,
+      };
+    }
     final device = _device;
     if (device == null) return {};
     final codes = <String>{};
@@ -317,6 +424,7 @@ class BusinessReportsApi {
     String? to, [
     String currency = 'SAR',
   ]) async {
+    if (_all != null) return _allOverview('home', currency, from, to);
     if (_device != null) return _deviceOverview('home', currency, from, to);
     return _get('/business-reports/home', _params(from, to, currency));
   }
@@ -326,6 +434,19 @@ class BusinessReportsApi {
     String? to, [
     String currency = 'SAR',
   ]) async {
+    final all = _all;
+    if (all != null) {
+      return all.report(
+        'sales',
+        (ledger, access, fx) => ledger.salesReport(
+          access,
+          currency: currency,
+          from: from,
+          to: to,
+          fx: fx,
+        ),
+      );
+    }
     final device = _device;
     if (device != null) {
       return device.report(
@@ -351,6 +472,30 @@ class BusinessReportsApi {
     String currency = 'SAR',
     String? accountId,
   ]) async {
+    final all = _all;
+    if (all != null) {
+      // One account belongs to one branch: the merged report is the branch's
+      // own when an account is chosen.
+      return all.report('money', (ledger, access, fx) async {
+        if (accountId != null &&
+            !(await ledger.managedBankAccounts(
+              BusinessLedgerAccess(access.directory, {
+                BusinessLedgerAction.readBank,
+              }),
+              includeBalances: false,
+            )).any((row) => row['id'] == accountId)) {
+          return <String, dynamic>{};
+        }
+        return ledger.moneyReport(
+          access,
+          currency: currency,
+          from: from,
+          to: to,
+          accountId: accountId,
+          fx: fx,
+        );
+      });
+    }
     final device = _device;
     if (device != null) {
       return device.report(
@@ -376,6 +521,19 @@ class BusinessReportsApi {
     String? to, [
     String currency = 'SAR',
   ]) async {
+    final all = _all;
+    if (all != null) {
+      return all.report(
+        'inventory',
+        (ledger, access, fx) => ledger.inventoryReport(
+          access,
+          currency: currency,
+          from: from,
+          to: to,
+          fx: fx,
+        ),
+      );
+    }
     final device = _device;
     if (device != null) {
       return device.report(
@@ -397,6 +555,19 @@ class BusinessReportsApi {
     String? to, [
     String currency = 'SAR',
   ]) async {
+    final all = _all;
+    if (all != null) {
+      return all.report(
+        'debts',
+        (ledger, access, fx) => ledger.debtReport(
+          access,
+          from: from,
+          to: to,
+          currency: currency,
+          fx: fx,
+        ),
+      );
+    }
     final device = _device;
     if (device != null) {
       return device.report(
@@ -418,6 +589,7 @@ class BusinessReportsApi {
     String? to, [
     String currency = 'SAR',
   ]) async {
+    if (_all != null) return _allOverview('overview', currency, from, to);
     if (_device != null) return _deviceOverview('overview', currency, from, to);
     return _get('/business-reports/overview', _params(from, to, currency));
   }
@@ -428,6 +600,23 @@ class BusinessReportsApi {
     String? from,
     String? to,
   ) => _device!.report(
+    kind,
+    (ledger, access, fx) => ledger.overviewReport(
+      access,
+      currency: currency,
+      from: from,
+      to: to,
+      home: kind == 'home',
+      fx: fx,
+    ),
+  );
+
+  Future<Map<String, dynamic>> _allOverview(
+    String kind,
+    String currency,
+    String? from,
+    String? to,
+  ) => _all!.report(
     kind,
     (ledger, access, fx) => ledger.overviewReport(
       access,

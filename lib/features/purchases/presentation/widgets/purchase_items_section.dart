@@ -17,6 +17,7 @@ import '../../../sales/presentation/providers/sale_providers.dart'
 import '../providers/purchase_providers.dart';
 import '../../../core_business/presentation/widgets/invoice_line_widgets.dart';
 import '../pages/barcode_scan_page.dart';
+import '../../../inventory/presentation/widgets/business_unit_image.dart';
 import '../../../inventory/presentation/widgets/product_picker.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/amount_input_formatter.dart';
@@ -814,6 +815,9 @@ class _ItemRow extends ConsumerWidget {
               subtitle: _purchaseUnitSubtitle(
                   e, baseUnit: baseUnit, currency: invCur),
               icon: Icons.straighten_outlined,
+              leading: BusinessUnitImage.has(e['image'])
+                  ? BusinessUnitImage(image: '${e['image']}')
+                  : null,
             ),
         ],
       );

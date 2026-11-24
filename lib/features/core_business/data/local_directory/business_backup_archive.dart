@@ -294,7 +294,13 @@ extension BusinessBackupLedger on BusinessLedger {
               )).isNotEmpty) {
             throw _badBackup;
           }
-          final columns = await _columns(txn, 'main', table);
+          // A backup made before a later optional column (see
+          // _archiveOptionalColumns) restores with that column empty.
+          final archived = (await _columns(txn, _archive, table)).toSet();
+          final columns = [
+            for (final name in await _columns(txn, 'main', table))
+              if (archived.contains(name)) name,
+          ];
           if (table == BusinessLedger._legs) {
             // sequence is local to one SQLite file, not a finance ID.
             // Preserve its order without colliding with a sibling's sequence.
@@ -421,6 +427,11 @@ Future<void> _requireMainSchema(DatabaseExecutor db) async {
     throw _badBackup;
 }
 
+/// Nullable columns added after a backup format: older backups lack them.
+const _archiveOptionalColumns = <String, Set<String>>{
+  _commerceUnits: {'image'},
+};
+
 Future<(int, List<String>)> _requireArchiveSchema(DatabaseExecutor db) async {
   final schema = await db.rawQuery(
     'SELECT name, type FROM $_archive.sqlite_schema',
@@ -453,8 +464,11 @@ Future<(int, List<String>)> _requireArchiveSchema(DatabaseExecutor db) async {
   for (final table in tables) {
     final main = await _columns(db, 'main', table);
     final incoming = await _columns(db, _archive, table);
-    if (incoming.length != main.length ||
-        !incoming.toSet().containsAll(main) ||
+    final missing = main.toSet().difference(incoming.toSet());
+    final optional = _archiveOptionalColumns[table] ?? const <String>{};
+    if (incoming.length != incoming.toSet().length ||
+        !main.toSet().containsAll(incoming) ||
+        !optional.containsAll(missing) ||
         !incoming.contains('branch_id'))
       throw _badBackup;
   }

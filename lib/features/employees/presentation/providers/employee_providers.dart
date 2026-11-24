@@ -273,7 +273,37 @@ final employeePermissionsProvider = Provider<Map<String, bool>>((ref) {
 
 /// True when the active employee workspace grants [key] (or its parent).
 /// Merchant accounts always have every permission.
+/// Rights that add, edit, delete, move or settle something. «جميع الفروع» is
+/// a read-only view: these are off for everyone (owner included) while it is
+/// selected, so every button guarded by them disappears; reading rights stay.
+const businessWriteRights = {
+  'banks.add_delete',
+  'banks.transfer',
+  'debts.add',
+  'debts.settle',
+  'customers.add',
+  'customers.edit',
+  'customers.delete',
+  'suppliers.add',
+  'suppliers.edit',
+  'suppliers.delete',
+  'inventory.add',
+  'inventory.edit',
+  'inventory.delete',
+  'inventory.count',
+  'inventory.transfer',
+  'sales.create',
+  'purchases.create',
+  'reconciliation.equalize',
+  'reconciliation.bank',
+  'reconciliation.inventory',
+};
+
 final employeeCanProvider = Provider.family<bool, String>((ref, key) {
+  if (businessWriteRights.contains(key)) {
+    ref.watch(branchEpochProvider);
+    if (BranchScope.readOnly) return false;
+  }
   final perms = ref.watch(employeePermissionsProvider);
   final user = ref.watch(currentUserProvider);
   final foreign =

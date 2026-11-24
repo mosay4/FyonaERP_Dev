@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/localization/app_localizations.dart';
+import '../../data/local_commerce/all_branches_commerce.dart';
+import '../widgets/all_branches_party_sheet.dart';
 import '../../../../core/network/api_exceptions.dart';
 import '../../../../shared/widgets/styled_snack.dart';
 import '../../../../core/responsive/r_api.dart';
@@ -63,7 +65,11 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
       _loading = pilot == null;
     });
     try {
-      final rows = pilot == null
+      final merged = pilot == null ? ref.read(allBranchesCommerceProvider) : null;
+      final rows = merged != null
+          // «جميع الفروع»: every branch's people, merged, with their debts.
+          ? await merged.parties(_kind, query)
+          : pilot == null
           ? [
               for (final s in (await ref.read(purchaseApiProvider).searchCustomers(query)).whereType<Map>())
                 Map<String, dynamic>.from(s),
@@ -576,7 +582,9 @@ class _CustomerCard extends ConsumerWidget {
         '/customers/detail?id=$id&name=${Uri.encodeComponent(name)}';
     void open() {
       final scope = directoryAccess;
-      if (scope == null) {
+      if (customer['members'] is List) {
+        showAllBranchesPartySheet(context, customer);
+      } else if (scope == null) {
         context.push(detailRoute);
       } else {
         openDirectoryParty(context, ref, DirectoryPartyReference(
@@ -612,16 +620,32 @@ class _CustomerCard extends ConsumerWidget {
               const Icon(Icons.person_outline, size: 22, color: DebtStyle.red),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  name.isEmpty ? '—' : name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: R.fontSize(context, 15),
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name.isEmpty ? '—' : name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'Cairo',
+                        fontSize: R.fontSize(context, 15),
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    if (customer['members'] is List)
+                      Text(
+                        allBranchesPartyLine(context, customer),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: R.fontSize(context, 12),
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),

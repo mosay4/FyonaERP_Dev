@@ -246,11 +246,11 @@ class _ReportsHubPageState extends ConsumerState<ReportsHubPage> {
     final api = ref.read(businessReportsApiProvider);
     final ticket = ++_currencyRequest;
     try {
-      final local = api.deviceScope;
+      final local = api.deviceAccountId;
       final enabled = local == null
           ? await ref.read(enabledCurrenciesProvider.future)
           : {
-              ...await loadBizEnabledCurrencies(local.workspace.accountId),
+              ...await loadBizEnabledCurrencies(local),
               if (mounted) ...await api.deviceCurrencies(),
             };
       if (!mounted ||

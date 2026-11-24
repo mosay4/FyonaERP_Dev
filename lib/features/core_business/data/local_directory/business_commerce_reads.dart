@@ -368,6 +368,7 @@ extension BusinessCommerceReads on BusinessLedger {
                 'purchase_price': _commerceDecimal(unit, 'purchase_minor', 100),
               'is_base': unit['is_base'] == 1,
               'is_active': unit['is_active'] == 1,
+              'image': _deviceInventoryImage(unit['image']),
             },
         ],
         'barcodes': [
@@ -447,11 +448,15 @@ extension BusinessCommerceReads on BusinessLedger {
   }) async {
     final rows = await db.rawQuery(
       '''
-      SELECT m.*, i.invoice_type
+      SELECT m.*, i.invoice_type,
+        COALESCE(i.number, r.number) AS reference_number
       FROM $_commerceMovements m
       LEFT JOIN $_commerceInvoices i ON m.reference_type = 'invoice'
         AND i.branch_id = m.branch_id AND i.id = m.reference_id
         AND i.deleted_us IS NULL
+      LEFT JOIN $_commerceReturns r
+        ON m.reference_type IN ('invoice_return', 'purchase_return')
+        AND r.branch_id = m.branch_id AND r.id = m.reference_id
       WHERE m.branch_id = ? AND m.product_id = ?
         ${from == null ? '' : 'AND m.created_us >= ?'}
         ${until == null ? '' : 'AND m.created_us < ?'}
@@ -476,6 +481,7 @@ extension BusinessCommerceReads on BusinessLedger {
             'reference_type',
             'reference_id',
             'invoice_type',
+            'reference_number',
             'notes',
             'created_by',
           ])

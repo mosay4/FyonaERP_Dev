@@ -389,6 +389,10 @@ extension BusinessCommerceProducts on BusinessLedger {
     required String name,
     required Object? factor,
     String? barcode,
+    Object? salePrice,
+    Object? purchasePrice,
+    String? family,
+    String? image,
   }) {
     final branch = _branch(access, BusinessLedgerAction.manageProducts);
     final clean = _commerceName(name);
@@ -396,10 +400,23 @@ extension BusinessCommerceProducts on BusinessLedger {
     if (factor4 <= 0) {
       throw const BusinessLedgerError(BusinessLedgerProblem.invalidProduct);
     }
+    // The unit's own prices travel with the unit row (never dropped).
+    final saleMinor = salePrice == null ? null : _commerceMinor(salePrice);
+    final purchaseMinor =
+        purchasePrice == null ? null : _commerceMinor(purchasePrice);
+    if ((saleMinor ?? 0) < 0 || (purchaseMinor ?? 0) < 0) {
+      throw const BusinessLedgerError(BusinessLedgerProblem.invalidAmount);
+    }
+    final cleanFamily = family?.trim().isEmpty ?? true ? null : family!.trim();
+    if (image != null) _checkInventoryImage(image);
     return _commit(
       branch,
       commandId,
-      ['create_unit', productId, clean, factor4, barcode],
+      [
+        'create_unit', productId, clean, factor4, barcode,
+        saleMinor, purchaseMinor, cleanFamily,
+        if (image != null) sha256.convert(utf8.encode(image)).toString(),
+      ],
       (txn, now) async {
         await _commerceProductRow(txn, branch, productId);
         await _requireUniqueCode(txn, branch, barcode, null);
@@ -422,11 +439,50 @@ extension BusinessCommerceProducts on BusinessLedger {
           'product_id': productId,
           'name': clean,
           'factor_4': factor4,
+          'family': cleanFamily,
           'barcode': barcode,
+          'sale_minor': saleMinor,
+          'purchase_minor': purchaseMinor,
+          'image': image,
           'is_base': 0,
           'is_active': 1,
         });
         return {'id': id};
+      },
+    );
+  }
+
+  /// The unit's own photo (e.g. a carton). Stored in the encrypted ledger
+  /// like a product image, so it reaches the other devices with the unit row.
+  /// `null` removes it (the product image is shown again).
+  Future<Map<String, Object?>> setCommerceUnitImage(
+    BusinessLedgerAccess access, {
+    required String commandId,
+    required String productId,
+    required String unitId,
+    required String? image,
+  }) {
+    final branch = _branch(access, BusinessLedgerAction.manageProducts);
+    if (image != null) _checkInventoryImage(image);
+    return _commit(
+      branch,
+      commandId,
+      [
+        'unit_image', productId, unitId,
+        image == null ? null : sha256.convert(utf8.encode(image)).toString(),
+      ],
+      (txn, now) async {
+        await _commerceProductRow(txn, branch, productId);
+        final changed = await txn.update(
+          _commerceUnits,
+          {'image': image},
+          where: 'branch_id = ? AND product_id = ? AND id = ?',
+          whereArgs: [branch, productId, unitId],
+        );
+        if (changed != 1) {
+          throw const BusinessLedgerError(BusinessLedgerProblem.invalidProduct);
+        }
+        return {'id': unitId};
       },
     );
   }
@@ -635,6 +691,7 @@ extension BusinessCommerceProducts on BusinessLedger {
                 'purchase_price': _commerceDecimal(unit, 'purchase_minor', 100),
               'is_base': unit['is_base'] == 1,
               'is_active': unit['is_active'] == 1,
+              'image': _deviceInventoryImage(unit['image']),
             },
         ],
       };

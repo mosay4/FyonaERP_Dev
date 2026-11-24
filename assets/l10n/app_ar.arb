@@ -5129,6 +5129,13 @@
   "invMoveBy": "نُفذت بواسطة",
   "invMoveByManager": "تم بواسطة المدير",
   "invMoveDateTime": "التاريخ والوقت",
+  "invMoveInvoiceNo": "رقم الفاتورة",
+  "invMoveReturnNo": "رقم المرتجع",
+  "invMoveQty": "الكمية",
+  "invMoveUnitPrice": "سعر الوحدة",
+  "invMoveViewReturn": "عرض المرتجع",
+  "invUnitImageTitle": "صورة الوحدة",
+  "invUnitImageHint": "اضغط على الصورة لتغييرها",
   "invManage": "إدارة",
   "invCategoryImage": "صورة التصنيف",
   "invTapCategoryHint": "اضغط على التصنيف لعرض منتجاته",
@@ -6309,5 +6316,10 @@
   "bdvPdfTotal": "الإجمالي",
   "bdvPdfPage": "صفحة {page} من {pages}",
   "bdvPdfFooter": "صادر عن FYONA ERP",
-  "bdvPdfConverted": "المبالغ محوّلة إلى {currency} بسعر الصرف الحالي"
+  "bdvPdfConverted": "المبالغ محوّلة إلى {currency} بسعر الصرف الحالي",
+  "allBranchesPartyBranches": "الفروع: {names}",
+  "allBranchesNoDebt": "لا يوجد دين مفتوح",
+  "allBranchesTotal": "الإجمالي في جميع الفروع",
+  "allBranchesUnnamed": "فرع بدون اسم",
+  "allBranchesPerBranch": "حسب الفرع"
 }

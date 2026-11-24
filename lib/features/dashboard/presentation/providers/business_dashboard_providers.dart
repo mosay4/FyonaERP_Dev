@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/network/dio_provider.dart';
 import '../../../branches/data/branch_epoch.dart';
 import '../../../business_banks/presentation/providers/local_business_banking.dart';
+import '../../../core_business/data/local_commerce/all_branches_commerce.dart';
 import '../../../core_business/data/local_commerce/local_commerce_api.dart';
 import '../../../core_business/presentation/providers/business_ledger_session.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
@@ -12,14 +13,17 @@ import '../../data/business_finance_api.dart';
 // business home renders the EXACT same card widgets with zero drift.
 import '../../../personal/data/models/personal_models.dart';
 
-final businessFinanceApiProvider = Provider<BusinessFinanceApi>(
-  (ref) => localCommerceApi<BusinessFinanceApi>(
+final businessFinanceApiProvider = Provider<BusinessFinanceApi>((ref) {
+  // «جميع الفروع»: every branch's operations, read-only.
+  final all = ref.watch(allBranchesCommerceProvider);
+  if (all != null) return AllBranchesFinanceApi(all);
+  return localCommerceApi<BusinessFinanceApi>(
     BusinessFinanceApi.new,
     LocalBusinessFinanceApi.new,
     ref.watch(apiClientProvider),
     ref.watch(localCommerceBridgeProvider),
-  ),
-);
+  );
+});
 
 final visibleBusinessOperationKindsProvider = Provider<Set<String>>((ref) {
   if (!ref.watch(employeeCanProvider('transactions'))) return const {};
@@ -55,9 +59,12 @@ final businessAccountsProvider = FutureProvider<List<PersonalBankAccount>>((
   ref,
 ) async {
   ref.watch(branchEpochProvider);
+  final all = ref.watch(allBranchesBankingProvider);
   final local = ref.watch(localBusinessBankingProvider);
   if (local != null) ref.watch(businessBankRevisionProvider);
-  final raw = local == null
+  final raw = all != null
+      ? await all.accounts(requireBalances: true)
+      : local == null
       ? await ref.watch(businessFinanceApiProvider).listAccounts()
       : await local.accounts(requireBalances: true);
   // All-branches returns aggregate cards with their ORIGINAL accounts nested.
@@ -103,7 +110,9 @@ final businessRecentProvider =
         ref.watch(businessBankRevisionProvider);
         ref.watch(businessOperationsRevisionProvider);
       }
-      final raw = api is LocalBusinessFinanceApi
+      final raw = api is AllBranchesFinanceApi
+          ? await api.recent(ref.watch(visibleBusinessOperationKindsProvider), 5)
+          : api is LocalBusinessFinanceApi
           ? await api.bridge.operations(
               kinds: ref.watch(visibleBusinessOperationKindsProvider),
               limit: 5,

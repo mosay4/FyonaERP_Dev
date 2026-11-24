@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/network/dio_provider.dart';
+import '../../../core_business/data/local_commerce/all_branches_commerce.dart';
 import '../../../core_business/data/local_commerce/local_commerce_api.dart';
 import '../../../core_business/presentation/providers/business_ledger_session.dart';
 import '../../../sales/presentation/providers/sale_providers.dart' show businessPaymentRows;
@@ -8,14 +9,17 @@ import '../../data/returns_api.dart';
 
 import '../../../branches/data/branch_epoch.dart';
 
-final returnsApiProvider = Provider<ReturnsApi>(
-  (ref) => localCommerceApi<ReturnsApi>(
+final returnsApiProvider = Provider<ReturnsApi>((ref) {
+  // «جميع الفروع»: every branch's records, read-only.
+  final all = ref.watch(allBranchesCommerceProvider);
+  if (all != null) return AllBranchesReturnsApi(all);
+  return localCommerceApi<ReturnsApi>(
     ReturnsApi.new,
     LocalReturnsApi.new,
     ref.watch(apiClientProvider),
     ref.watch(localCommerceBridgeProvider),
-  ),
-);
+  );
+});
 
 /// Previous returns list, filtered by kind ('all' | 'sale_return' |
 /// 'purchase_return'). Not auto-disposed so a return created on another page

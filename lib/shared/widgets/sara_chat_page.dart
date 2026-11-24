@@ -1,5 +1,6 @@
 import '../../features/ai/domain/agent/business_device_router.dart';
 import '../../features/core_business/data/local_commerce/local_commerce_api.dart' show localCommerceBridgeProvider;
+import '../../features/core_business/presentation/providers/business_all_branches_provider.dart' show businessAllBranchesProvider;
 import 'dart:math';
 import 'dart:io';
 import 'dart:async';
@@ -1135,6 +1136,9 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
       // this phone (same APIs as the buttons), never by the server.
       final deviceRoutes = ref.read(localCommerceBridgeProvider).active
           ? BusinessDeviceRouter.supportedRoutes
+          // «جميع الفروع» on the device: every branch's data, reads only.
+          : ref.read(businessAllBranchesProvider) != null
+          ? BusinessDeviceRouter.readRoutes
           : null;
       var response = audio != null || image != null
           ? await api.askQuestionWithAudio(query, audioFile: audio,

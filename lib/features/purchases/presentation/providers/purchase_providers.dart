@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/network/dio_provider.dart';
+import '../../../core_business/data/local_commerce/all_branches_commerce.dart';
 import '../../../core_business/data/local_commerce/local_commerce_api.dart';
 import '../../../core_business/presentation/providers/business_ledger_session.dart';
 import '../../data/purchase_api.dart';
@@ -8,14 +9,17 @@ import '../../../sales/domain/sale_totals.dart';
 import '../../../sales/presentation/providers/sale_providers.dart'
     show SaleItem, SalePaymentRow, newIdempotencyKey, businessPaymentRows;
 
-final purchaseApiProvider = Provider<PurchaseApi>(
-  (ref) => localCommerceApi<PurchaseApi>(
+final purchaseApiProvider = Provider<PurchaseApi>((ref) {
+  // «جميع الفروع»: every branch's records, read-only.
+  final all = ref.watch(allBranchesCommerceProvider);
+  if (all != null) return AllBranchesPurchaseApi(all);
+  return localCommerceApi<PurchaseApi>(
     PurchaseApi.new,
     LocalPurchaseApi.new,
     ref.watch(apiClientProvider),
     ref.watch(localCommerceBridgeProvider),
-  ),
-);
+  );
+});
 
 final purchaseAccountsProvider = FutureProvider<List<Map<String, String>>>((ref) async {
   final api = ref.watch(purchaseApiProvider);

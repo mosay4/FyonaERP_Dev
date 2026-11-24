@@ -119,8 +119,9 @@ class _SaleInvoicesPageState extends ConsumerState<SaleInvoicesPage> {
                           status: status,
                           onTap: () => openCommerceRecord(
                             context,
-                            RouteNames.salesView,
+                            RouteNames.invoicesView,
                             '${inv['id']}',
+                            kind: 'sale',
                             fromLocal: scope,
                           ),
                         );

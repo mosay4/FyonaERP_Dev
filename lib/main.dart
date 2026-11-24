@@ -30,6 +30,8 @@ import 'shared/services/notification_service.dart';
 import 'features/personal/data/chat_background_upload.dart';
 import 'features/subscription/presentation/providers/subscription_providers.dart';
 import 'features/branches/data/branch_scope.dart';
+import 'features/core_business/data/local_directory/directory_pilot.dart'
+    show DeviceLedgerOrganizations;
 import 'package:image_picker_android/image_picker_android.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 
@@ -267,6 +269,7 @@ Future<void> main() async {
   try {
     await BranchScope.load();
   } catch (_) {}
+  await DeviceLedgerOrganizations.load();
 
   StartupLogger.log('NATIVE_SPLASH_READY');
   runApp(

@@ -26,7 +26,7 @@ extension BusinessProductStatistics on BusinessLedger {
     return _directory._transaction((txn) async {
       final card = (await txn.query(
         _commerceProducts,
-        columns: ['cost_currency', 'name', 'unit', 'min_stock_4', 'is_service'],
+        columns: ['cost_currency', 'name', 'unit', 'min_stock_4', 'is_service', 'image'],
         where: 'branch_id = ? AND id = ? AND deleted_us IS NULL',
         whereArgs: [branch, product],
       )).singleOrNull;
@@ -125,6 +125,7 @@ extension BusinessProductStatistics on BusinessLedger {
       }
       return {
         'name': card['name'],
+        'image': _deviceInventoryImage(card['image']),
         'unit': card['unit'],
         'is_service': card['is_service'] == 1,
         'stock': onHand == null

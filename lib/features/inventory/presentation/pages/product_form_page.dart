@@ -1185,20 +1185,31 @@ class _UnitsSectionState extends ConsumerState<_UnitsSection> {
       ),
     );
     if (ok == true && _isCurrent && name.text.trim().isNotEmpty) {
+      // Prices are typed with thousands separators («1,500»): parse them the
+      // way the field formats them, never drop them.
+      final salePrice = parseFormattedAmount(sale.text);
+      final buyPrice = parseFormattedAmount(buy.text);
       try {
         await widget.source.createUnit(widget.productId, {
           'name': name.text.trim(),
-          'factor': double.tryParse(factor.text.trim()) ?? 1,
+          'factor': parseFormattedAmount(factor.text) ?? 1,
           if (_groupOf(ref, name.text.trim()) != null)
             'group': _groupOf(ref, name.text.trim()),
-          if (sale.text.trim().isNotEmpty)
-            'sale_price': double.tryParse(sale.text.trim()),
-          if (buy.text.trim().isNotEmpty)
-            'purchase_price': double.tryParse(buy.text.trim()),
+          'sale_price': ?salePrice,
+          'purchase_price': ?buyPrice,
           if (bc.text.trim().isNotEmpty) 'barcode': bc.text.trim(),
         });
+        // Every open view of this product re-reads its units at once.
+        ref.invalidate(productUnitsProvider);
+        ref.invalidate(productDetailProvider);
         await _load();
-      } catch (_) {}
+      } catch (e) {
+        if (mounted) {
+          showFyonaSnack(context,
+              businessOperationError(l10n, e, fallback: 'invActionFailed'),
+              success: false);
+        }
+      }
     }
   }
 
@@ -1261,6 +1272,8 @@ class _UnitsSectionState extends ConsumerState<_UnitsSection> {
                        try {
                          await widget.source.deleteUnit(u['id'].toString());
                       } catch (_) {}
+                      ref.invalidate(productUnitsProvider);
+                      ref.invalidate(productDetailProvider);
                       await _load();
                     },
                   ),

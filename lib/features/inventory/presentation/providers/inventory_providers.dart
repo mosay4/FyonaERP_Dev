@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/network/dio_provider.dart';
+import '../../../core_business/data/local_commerce/all_branches_commerce.dart';
 import '../../../core_business/data/local_commerce/local_commerce_api.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/data/local_directory/directory_database.dart'
@@ -11,14 +12,17 @@ import '../../data/inventory_api.dart';
 
 import 'warehouse_settings.dart';
 
-final inventoryApiProvider = Provider<InventoryApi>(
-  (ref) => localCommerceApi<InventoryApi>(
+final inventoryApiProvider = Provider<InventoryApi>((ref) {
+  // «جميع الفروع»: the products of every branch, read-only.
+  final all = ref.watch(allBranchesCommerceProvider);
+  if (all != null) return AllBranchesInventoryApi(all);
+  return localCommerceApi<InventoryApi>(
     InventoryApi.new,
     LocalInventoryApi.new,
     ref.watch(apiClientProvider),
     ref.watch(localCommerceBridgeProvider),
-  ),
-);
+  );
+});
 
 /// Currently selected inventory filter: all | low | out.
 final inventoryFilterProvider = StateProvider<String>((ref) => 'all');

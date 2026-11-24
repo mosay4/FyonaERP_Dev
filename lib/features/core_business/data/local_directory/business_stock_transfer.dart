@@ -553,6 +553,7 @@ extension BusinessStockTransfer on BusinessLedger {
             'name': unit['name'],
             'factor': (unit['factor_4'] as int) / 10000.0,
             'is_base': unit['is_base'] == 1,
+            'image': _deviceInventoryImage(unit['image']),
           },
       ],
     };

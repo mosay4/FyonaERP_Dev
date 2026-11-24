@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -350,6 +351,91 @@ void main() {
       expect(await api.getProduct('${created['id']}'), isEmpty);
     },
   );
+
+  test(
+    'a new unit keeps its sale and purchase prices and saves at once',
+    () async {
+      final access = scope();
+      await prepare(access);
+      final api = LocalInventoryApi(client, bridge(access));
+      final product = await api.createProduct({
+        'name': 'Unit prices',
+        'unit': 'قطعة',
+        'price': 2,
+        'cost_price': 1,
+        'cost_currency': 'SAR',
+        // A real-sized device photo on the product, like on a phone.
+        'image': encodeBusinessInventoryImage([
+          137, 80, 78, 71, 13, 10, 26, 10,
+          ...List.filled(700 * 1024, 7),
+        ]),
+      });
+      final id = '${product['id']}';
+      final clock = Stopwatch()..start();
+      final created = await api.createUnit(id, {
+        'name': 'كرتون',
+        'factor': 12,
+        'group': 'count',
+        'sale_price': 1500.5,
+        'purchase_price': 1200,
+      });
+      final units = (await api.productUnits(id))['units'] as List;
+      clock.stop();
+      // Local write + read only: no network, no waiting.
+      expect(clock.elapsed, lessThan(const Duration(seconds: 2)));
+      final carton = units.cast<Map>().singleWhere(
+        (u) => u['id'] == created['id'],
+      );
+      expect(carton['sale_price'], 1500.5);
+      expect(carton['purchase_price'], 1200);
+      expect(carton['group'], 'count');
+      expect(carton['factor'], 12);
+      expect(carton['image'], isNull);
+      // The same prices reach the product card and the invoice pickers.
+      final card = await api.getProduct(id);
+      final listed = (card['units'] as List).cast<Map>().singleWhere(
+        (u) => u['id'] == created['id'],
+      );
+      expect(listed['sale_price'], 1500.5);
+      expect(listed['purchase_price'], 1200);
+      final sales = LocalSalesApi(client, bridge(access));
+      final picker = ((await sales.productUnits(id))['units'] as List)
+          .cast<Map>()
+          .singleWhere((u) => u['id'] == created['id']);
+      expect(picker['sale_price'], 1500.5);
+    },
+  );
+
+  test('a unit photo is stored in the device ledger and can be removed',
+      () async {
+    final access = scope();
+    await prepare(access);
+    final api = LocalInventoryApi(client, bridge(access));
+    final product = await api.createProduct({
+      'name': 'Unit photo',
+      'unit': 'قطعة',
+      'price': 2,
+    });
+    final id = '${product['id']}';
+    final unit = await api.createUnit(id, {'name': 'كرتون', 'factor': 24});
+    final photo = File('${root.path}/carton.png')
+      ..writeAsBytesSync(base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      ));
+    await api.setUnitImage(id, '${unit['id']}', photo.path);
+    Map unitOf(Map data) => (data['units'] as List).cast<Map>().singleWhere(
+      (u) => u['id'] == unit['id'],
+    );
+    final stored = unitOf(await api.productUnits(id))['image'] as String;
+    expect(stored, startsWith(businessInventoryImagePrefix));
+    expect(unitOf(await api.getProduct(id))['image'], stored);
+    // The base unit keeps showing the product image (none here).
+    final base = (await api.productUnits(id))['units'] as List;
+    expect(base.cast<Map>().singleWhere((u) => u['is_base'] == true)['image'],
+        isNull);
+    await api.setUnitImage(id, '${unit['id']}', null);
+    expect(unitOf(await api.productUnits(id))['image'], isNull);
+  });
 
   test('duplicate codes and impossible units are refused', () async {
     final access = scope();

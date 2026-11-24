@@ -169,6 +169,17 @@ TOOLS = [
 
 DEVICE_STEPS = 8
 
+# «جميع الفروع» on the phone: the device merges every branch and labels it.
+ALL_BRANCHES_DEVICE_RULE = (
+    '\nأنت في «جميع الفروع» وبيانات كل الفروع محفوظة على جهاز المستخدم وتُقرأ منه عبر app_read. '
+    'كل سجل يحمل branch_name (اسم الفرع)، والتقارير تحمل by_branch بأرقام كل فرع باسمه. '
+    'البنوك مدمجة: البنك نفسه في عدة فروع يظهر مرة واحدة بأرصدة كل عملة مجموعة، وbranch_names تبين فروعه. '
+    'عند أي تنبيه أو نصيحة اذكري اسم الفرع المعني بالضبط. إذا شملت النتيجة أكثر من فرع فاعرضي نتيجة كل فرع '
+    'باسمه وملاحظته، ثم الإجمالي. لا تخلطي العملات. '
+    'هذا الوضع قراءة واستشارة فقط: لا تجهزي ولا تنفذي أي عملية (إضافة، سحب، تحويل، تعديل، حذف)، '
+    'وإذا طلب المستخدم عملية فاطلبي منه الانتقال إلى الفرع المطلوب لتنفيذها.'
+)
+
 
 async def answer(data, request, identity, db, *, device=False, resume=None):
     """[device]: the branch ledger lives on the user's phone (local mode).
@@ -237,7 +248,9 @@ async def answer(data, request, identity, db, *, device=False, resume=None):
         'عبر POST /banking/accounts وحقل balance. هذه ميزات موجودة؛ اقرئي schema ولا تقولي إنها غير مدعومة. '
         'اقرئي البنوك قبل السؤال عن الحساب؛ لا تفترضي أن قائمة العملات المفعلة هي كل العملات. '
         'العمليات المفعلة تشمل كل واجهات الكتالوج، مع حدود الصلاحيات والمخزون والرصيد العادية.')
-    if device:
+    if device and scope.all_mode:
+        prompt += ALL_BRANCHES_DEVICE_RULE
+    elif device:
         prompt += ('\nبيانات هذا الفرع محفوظة على جهاز المستخدم: app_read وget_reconciliation_accounts '
                    'تُقرأ من الجهاز مباشرة بنفس المسارات، والعمليات تُنفذ على الجهاز بعد تأكيد المستخدم.')
     messages = [{'role': 'system', 'content': prompt}]

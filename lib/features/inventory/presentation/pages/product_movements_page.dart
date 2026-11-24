@@ -8,8 +8,10 @@ import '../../../../core/responsive/r_api.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/document_number.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
 import '../providers/inventory_providers.dart';
+import '../widgets/business_product_image.dart';
 import '../widgets/falcon_icon.dart';
 import 'product_detail_page.dart' show productRecordReplaces;
 import '../../../core_business/presentation/widgets/business_online_gate.dart';
@@ -334,15 +336,29 @@ class _ProductMovementsPageState extends ConsumerState<ProductMovementsPage> {
 
   Widget _productHeader(
       BuildContext context, AppLocalizations l10n, Map<String, dynamic> s) {
+    final image = '${s['image'] ?? ''}';
+    const icon = Icon(Icons.inventory_2_outlined,
+        size: 19, color: AppColors.primary);
     return Row(children: [
       Container(
-        width: 36,
-        height: 36,
+        width: image.isEmpty ? 36 : 44,
+        height: image.isEmpty ? 36 : 44,
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
             color: AppColors.primary.withAlpha(22),
-            borderRadius: BorderRadius.circular(10)),
-        child: const Icon(Icons.inventory_2_outlined,
-            size: 19, color: AppColors.primary),
+            border: image.isEmpty
+                ? null
+                : Border.all(color: AppColors.primary.withAlpha(40)),
+            borderRadius: BorderRadius.circular(image.isEmpty ? 10 : 12)),
+        // The product's own photo when it has one.
+        child: image.isEmpty
+            ? icon
+            : BusinessProductImage(
+                url: image,
+                width: 44,
+                height: 44,
+                fit: BoxFit.cover,
+                placeholder: const Center(child: icon)),
       ),
       const SizedBox(width: 10),
       Expanded(
@@ -775,6 +791,56 @@ class _MoveRow extends ConsumerWidget {
     return '${parts[0]} $time';
   }
 
+  /// The document this movement belongs to, shown short (INV-49A55AD4):
+  /// the ledger's own number, or the one older rows kept in their notes.
+  String get _docNumber {
+    final raw = '${m['reference_number'] ?? m['invoice_number'] ?? ''}'.trim();
+    if (raw.isNotEmpty && raw != 'null') return shortDocumentNumber(raw);
+    final notes = '${m['notes'] ?? ''}';
+    final hit = _longNumber.firstMatch(notes);
+    return hit == null ? '' : shortDocumentNumber(hit[0]);
+  }
+
+  /// The merchant's own notes only: the automatic «بيع INV-…» / «شراء INV-…»
+  /// text is the document number, which has its own line.
+  String get _realNotes {
+    var notes = '${m['notes'] ?? ''}'.trim();
+    if (notes.isEmpty || notes == 'null') return '';
+    final raw = '${m['reference_number'] ?? ''}'.trim();
+    if (raw.isNotEmpty && raw != 'null') notes = notes.replaceAll(raw, '');
+    notes = notes.replaceAll(_longNumber, '').trim();
+    return const {'بيع', 'شراء', 'مرتجع', 'Sale', 'Purchase'}.contains(notes)
+        ? ''
+        : notes;
+  }
+
+  static final _longNumber = RegExp(r'[A-Za-z]{2,5}-\d{8}-[0-9A-Fa-f]{32}');
+
+  String get _subtype => ((m['movement_type'] ?? m['type']) ?? '').toString();
+
+  (IconData, Color) _look() {
+    final qty = (m['quantity'] as num?)?.toDouble() ?? 0;
+    final subtype = _subtype;
+    // A return that was NOT put back into stock (damaged) → yellow warning.
+    if (subtype.endsWith('_no_stock')) {
+      return (Icons.warning_amber_rounded, AppColors.warning);
+    }
+    // Manual stock changes are always yellow; sale stays red, purchase green.
+    if (_isAdjust) {
+      return (
+        subtype == 'adjust_add'
+            ? Icons.arrow_downward
+            : subtype == 'adjust_remove'
+                ? Icons.arrow_upward
+                : Icons.edit,
+        AppColors.warning,
+      );
+    }
+    return qty >= 0
+        ? (Icons.south_west, AppColors.success)
+        : (Icons.north_east, AppColors.danger);
+  }
+
   void _openDetails(BuildContext context, WidgetRef ref, AppLocalizations l10n) {
     final qty = (m['quantity'] as num?)?.toDouble() ?? 0;
     final refId = (m['reference_id'] ?? '').toString();
@@ -784,37 +850,106 @@ class _MoveRow extends ConsumerWidget {
     final diff = m['difference'] as num?;
     final performer = (m['performer_name'] ?? '').toString();
     final byManager = m['performed_by_manager'] == true;
-    final type = m['invoice_type'] == 'purchase' ? 'purchase' : 'sale';
+    final type = m['invoice_type'] == 'purchase' ||
+            _subtype.startsWith('purchase')
+        ? 'purchase'
+        : 'sale';
+    final isReturn = const {'invoice_return', 'purchase_return'}.contains(refType);
     final canOpen = refId.isNotEmpty &&
         (refType == 'invoice'
             ? ref.read(employeeCanProvider(type == 'purchase' ? 'purchases.view' : 'sales.view'))
-            : const {'invoice_return', 'purchase_return'}.contains(refType) &&
+            : isReturn &&
                 ref.read(employeeCanProvider('returns')) &&
                 ref.read(employeeCanProvider(
                     refType == 'purchase_return' ? 'purchases.returns' : 'sales.returns')));
+    final (icon, color) = _look();
+    final cur = currencySymbol((m['currency'] ?? '').toString());
+    final docNo = _docNumber;
+    final notes = _realNotes;
+    final reason = _reasonText(l10n);
+    final when = _dateTime();
+    final rows = <(String, String, Color?)>[
+      if (_isAdjust) ...[
+        if (oldQ != null) (l10n.translate('invMoveBefore'), _fmt(oldQ), null),
+        if (newQ != null) (l10n.translate('invMoveAfter'), _fmt(newQ), null),
+        if (diff != null)
+          (l10n.translate('invMoveChange'),
+              _ltr('${diff.toDouble() > 0 ? '+' : ''}${_fmt(diff)}'), color),
+      ] else
+        (l10n.translate('invMoveQty'),
+            _ltr('${qty >= 0 ? '+' : ''}${_fmt(qty)}'), color),
+      if (!_isAdjust && asDoubleValue(m['unit_price']) != 0)
+        (l10n.translate('invMoveUnitPrice'),
+            '${fmtNum(m['unit_price'])} $cur'.trim(), null),
+      if (reason.isNotEmpty) (l10n.translate('invReason'), reason, null),
+      if (performer.isNotEmpty) (l10n.translate('invMoveBy'), performer, null),
+    ];
+    final total = !_isAdjust && asDoubleValue(m['total']) != 0
+        ? '${fmtNum(m['total'])} $cur'.trim()
+        : '';
+    TextStyle text(double size,
+            {FontWeight weight = FontWeight.w600, Color? tone}) =>
+        TextStyle(
+            fontFamily: 'Cairo',
+            fontSize: R.fontSize(context, size),
+            fontWeight: weight,
+            height: 1.35,
+            color: tone ?? AppColors.textPrimary);
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.85),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         padding: EdgeInsets.fromLTRB(
-            16, 16, 16, 16 + MediaQuery.of(ctx).padding.bottom),
+            18, 10, 18, 18 + MediaQuery.of(ctx).padding.bottom),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                      color: AppColors.border,
+                      borderRadius: BorderRadius.circular(4)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              // Header: what happened, when, and its signed quantity.
               Row(
                 children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                        color: color.withAlpha(30), shape: BoxShape.circle),
+                    child: Icon(icon, size: 22, color: color),
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: Text(l10n.translate(label),
-                        style: const TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(l10n.translate(label),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: text(16, weight: FontWeight.w800)),
+                        if (when.isNotEmpty)
+                          Text(when,
+                              textDirection: TextDirection.ltr,
+                              style: text(12,
+                                  weight: FontWeight.w500,
+                                  tone: AppColors.textSecondary)),
+                      ],
+                    ),
                   ),
                   if (byManager)
                     Container(
@@ -825,75 +960,160 @@ class _MoveRow extends ConsumerWidget {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(l10n.translate('invMoveByManager'),
-                          style: const TextStyle(
-                              fontFamily: 'Cairo',
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.primary)),
+                          style: text(11,
+                              weight: FontWeight.w700,
+                              tone: AppColors.primary)),
                     ),
                 ],
               ),
-              const SizedBox(height: 10),
-              if (_isAdjust) ...[
-                if (oldQ != null)
-                  _line(ctx, l10n.translate('invMoveBefore'), _fmt(oldQ)),
-                if (newQ != null)
-                  _line(ctx, l10n.translate('invMoveAfter'), _fmt(newQ)),
-                if (diff != null)
-                  _line(
-                      ctx,
-                      l10n.translate('invMoveChange'),
-                      '${diff.toDouble() > 0 ? '+' : ''}${_fmt(diff)}'),
-                if (_reasonText(l10n).isNotEmpty)
-                  _line(ctx, l10n.translate('invReason'),
-                      _reasonText(l10n)),
-              ] else ...[
-                _line(ctx, l10n.translate('invQtyNow'), _fmt(qty)),
-              ],
-              if (!_isAdjust && asDoubleValue(m['unit_price']) != 0)
-                _line(ctx, l10n.translate('invSellPrice'),
-                    '${fmtNum(m['unit_price'])} ${currencySymbol((m['currency'] ?? '').toString())}'),
-              if (!_isAdjust && asDoubleValue(m['total']) != 0)
-                _line(ctx, l10n.translate('saleGrandTotal'),
-                    '${fmtNum(m['total'])} ${currencySymbol((m['currency'] ?? '').toString())}'),
-              if (!_isAdjust && _reasonText(l10n).isNotEmpty)
-                _line(ctx, l10n.translate('invReason'),
-                    _reasonText(l10n)),
-              if (_dateTime().isNotEmpty)
-                _line(ctx, l10n.translate('invMoveDateTime'), _dateTime()),
-              if (performer.isNotEmpty)
-                _line(ctx, l10n.translate('invMoveBy'), performer),
-              if ((m['notes'] ?? '').toString().isNotEmpty)
-                _line(ctx, l10n.translate('saleNotes'),
-                    (m['notes'] ?? '').toString()),
-               if (canOpen) ...[
+              if (docNo.isNotEmpty) ...[
                 const SizedBox(height: 14),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: FilledButton.icon(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                       if (!context.mounted) return;
-                       if (refType == 'invoice') {
-                         openCommerceRecord(context, type == 'purchase'
-                             ? RouteNames.purchasesView : RouteNames.salesView,
-                             refId, fromLocal: scope);
-                       } else {
-                         openCommerceRecord(context, RouteNames.returnsView, refId,
-                             kind: refType == 'purchase_return' ? refType : 'sale_return',
-                             fromLocal: scope);
-                       }
-                    },
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                    icon: const Icon(Icons.receipt_long_outlined, size: 18),
-                    label: Text(l10n.translate('saleViewInvoice'),
-                        style: const TextStyle(fontFamily: 'Cairo')),
+                // The document number on its own line, always short.
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withAlpha(16),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.primary.withAlpha(45)),
                   ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.receipt_long_outlined,
+                          size: 18, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                            l10n.translate(isReturn
+                                ? 'invMoveReturnNo'
+                                : 'invMoveInvoiceNo'),
+                            style: text(13,
+                                weight: FontWeight.w600,
+                                tone: AppColors.textSecondary)),
+                      ),
+                      Text(docNo,
+                          key: const ValueKey('movement-doc-number'),
+                          maxLines: 1,
+                          textDirection: TextDirection.ltr,
+                          style: text(14,
+                              weight: FontWeight.w800,
+                              tone: AppColors.primary)),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  color: AppColors.background,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  children: [
+                    for (var i = 0; i < rows.length; i++) ...[
+                      if (i > 0) Divider(height: 1, color: AppColors.divider),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(rows[i].$1,
+                                style: text(13,
+                                    weight: FontWeight.w500,
+                                    tone: AppColors.textSecondary)),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(rows[i].$2,
+                                  textAlign: TextAlign.end,
+                                  style: text(13.5,
+                                      weight: FontWeight.w700,
+                                      tone: rows[i].$3)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (total.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: color.withAlpha(20),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(l10n.translate('saleGrandTotal'),
+                            style: text(14, weight: FontWeight.w700)),
+                      ),
+                      Text(total,
+                          style: text(16, weight: FontWeight.w800, tone: color)),
+                    ],
+                  ),
+                ),
+              ],
+              if (notes.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(l10n.translate('saleNotes'),
+                    style: text(12.5,
+                        weight: FontWeight.w700,
+                        tone: AppColors.textSecondary)),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.background,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Text(notes, style: text(13, weight: FontWeight.w500)),
+                ),
+              ],
+              if (canOpen) ...[
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  key: const ValueKey('movement-open-document'),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    if (!context.mounted) return;
+                    if (refType == 'invoice') {
+                      // The same invoice screen the Business invoices
+                      // section opens.
+                      openCommerceRecord(context, RouteNames.invoicesView,
+                          refId, kind: type, fromLocal: scope);
+                    } else {
+                      openCommerceRecord(context, RouteNames.returnsView, refId,
+                          kind: refType == 'purchase_return' ? refType : 'sale_return',
+                          fromLocal: scope);
+                    }
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(52),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  icon: const Icon(Icons.receipt_long_outlined, size: 20),
+                  label: Text(
+                      l10n.translate(
+                          isReturn ? 'invMoveViewReturn' : 'saleViewInvoice'),
+                      maxLines: 1,
+                      overflow: TextOverflow.visible,
+                      style: const TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: 15,
+                          height: 1.3,
+                          fontWeight: FontWeight.w700)),
                 ),
               ],
             ],
@@ -903,29 +1123,6 @@ class _MoveRow extends ConsumerWidget {
     );
   }
 
-  Widget _line(BuildContext context, String label, String value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label,
-                style: TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: R.fontSize(context, 13),
-                    color: AppColors.textSecondary)),
-            Flexible(
-              child: Text(value,
-                  textAlign: TextAlign.end,
-                  style: TextStyle(
-                      fontFamily: 'Cairo',
-                      fontSize: R.fontSize(context, 13),
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary)),
-            ),
-          ],
-        ),
-      );
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context);
@@ -933,26 +1130,10 @@ class _MoveRow extends ConsumerWidget {
     final positive = qty >= 0;
     final date = (m['created_at'] ?? '').toString();
     final day = date.length >= 10 ? date.substring(0, 10) : date;
-    final notes = (m['notes'] ?? '').toString();
-    // Manual stock changes are always yellow; sale stays red, purchase green.
+    final notes = _realNotes;
+    final docNo = _docNumber;
     final adjust = _isAdjust;
-    final subtype = ((m['movement_type'] ?? m['type']) ?? '').toString();
-    // A return that was NOT put back into stock (damaged) → yellow warning.
-    final noStock = subtype.endsWith('_no_stock');
-    final IconData icon = noStock
-        ? Icons.warning_amber_rounded
-        : adjust
-            ? (subtype == 'adjust_add'
-                ? Icons.arrow_downward
-                : subtype == 'adjust_remove'
-                    ? Icons.arrow_upward
-                    : Icons.edit)
-            : (positive ? Icons.south_west : Icons.north_east);
-    final Color color = noStock
-        ? AppColors.warning
-        : adjust
-            ? AppColors.warning
-            : (positive ? AppColors.success : AppColors.danger);
+    final (icon, color) = _look();
     final time = _dateTime();
     final total = asDoubleValue(m['total']);
     final cur = currencySymbol((m['currency'] ?? '').toString());
@@ -986,6 +1167,7 @@ class _MoveRow extends ConsumerWidget {
                   Text(
                       [
                         time.isEmpty ? day : time,
+                        if (docNo.isNotEmpty) docNo,
                         if (notes.isNotEmpty) notes,
                       ].join(' • '),
                       maxLines: 1,
@@ -1022,6 +1204,9 @@ class _MoveRow extends ConsumerWidget {
     );
   }
 }
+
+/// A signed number keeps its sign in front inside Arabic text («-3», not «3-»).
+String _ltr(String value) => '\u2066$value\u2069';
 
 String _fmt(dynamic v) {
   final d = v is num ? v.toDouble() : double.tryParse('$v') ?? 0;

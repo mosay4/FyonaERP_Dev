@@ -971,6 +971,33 @@ void main() {
           );
           expect(lab.attempted, isEmpty);
 
+          // A purchase movement opens a tidy sheet: the invoice number on its
+          // own line, short (PUR-XXXXXXXX), never inside the notes; «عرض
+          // الفاتورة» opens the Business invoice screen, not the old one.
+          await tap(find.descendant(
+            of: stats,
+            matching: exact(AppLocalizations.t('invMovementPurchase')),
+          ).first);
+          final docNo = find.byKey(const ValueKey('movement-doc-number'));
+          await until(docNo);
+          final shown = tester.widget<Text>(docNo).data!;
+          expect(shown, matches(RegExp(r'^PUR-[0-9A-F]{8}$')));
+          expect(
+            find.descendant(
+              of: find.byType(BottomSheet),
+              matching: exact(AppLocalizations.t('saleNotes')),
+            ),
+            findsNothing,
+          );
+          await tap(find.byKey(const ValueKey('movement-open-document')));
+          await until(
+            find.descendant(
+              of: find.byType(InvoiceViewPage),
+              matching: find.textContaining('PUR-'),
+            ),
+          );
+          expect(lab.attempted, isEmpty);
+
           // Deliberately keep an old detail mounted across a connected branch
           // change: neither provider reload nor a later frame may send its ID.
           router.go(RouteNames.inventoryProduct, extra: productTarget);

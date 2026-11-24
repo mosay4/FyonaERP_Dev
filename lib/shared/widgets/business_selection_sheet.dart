@@ -14,6 +14,9 @@ class BizSheetItem<T> {
   final IconData? icon;
   final String? balance;
   final String? group;
+
+  /// Optional 42×42 picture shown instead of [icon] (e.g. a unit's photo).
+  final Widget? leading;
   const BizSheetItem({
     required this.value,
     required this.title,
@@ -21,6 +24,7 @@ class BizSheetItem<T> {
     this.icon,
     this.balance,
     this.group,
+    this.leading,
   });
 }
 
@@ -317,15 +321,17 @@ class _Row<T> extends StatelessWidget {
         ),
         child: Row(
           children: [
-            if (item.icon != null) ...[
+            if (item.icon != null || item.leading != null) ...[
               Container(
                 width: 42,
                 height: 42,
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: bizIconChip(context),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(item.icon, size: 22, color: bizIconRed(context)),
+                child: item.leading ??
+                    Icon(item.icon, size: 22, color: bizIconRed(context)),
               ),
               const SizedBox(width: 12),
             ],

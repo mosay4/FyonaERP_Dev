@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../business_banks/presentation/providers/business_banks_providers.dart';
 import '../../../business_banks/presentation/providers/local_business_banking.dart';
+import '../../../branches/data/branch_scope.dart';
 import '../../../core_business/data/local_directory/directory_database.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/data/local_ledger/business_money.dart';
@@ -91,6 +92,8 @@ abstract final class BusinessDeviceRouter {
     ('GET', '/banking/accounts', (r, p, q, b) => _bankAccounts(r)),
     ('GET', '/banking/accounts/{id}', (r, p, q, b) => _find(_bankAccounts(r), p['id']!)),
     ('GET', '/banking/accounts/{id}/transactions', (r, p, q, b) async {
+      final all = r(allBranchesBankingProvider);
+      if (all != null) return all.history([p['id']!]);
       final local = r(localBusinessBankingProvider);
       return local != null ? local.history([p['id']!]) : r(businessBanksApiProvider).transactions(p['id']!);
     }),
@@ -162,6 +165,12 @@ abstract final class BusinessDeviceRouter {
     for (final (verb, template, _) in _routes) '$verb $template',
   ];
 
+  /// «جميع الفروع» is read-only: Sara reads and advises, never executes.
+  static List<String> get readRoutes => [
+    for (final (verb, template, _) in _routes)
+      if (verb == 'GET') '$verb $template',
+  ];
+
   static (_Handler, Map<String, String>)? _match(String method, String path) {
     final clean = path.split('?').first;
     for (final (verb, template, handler) in _routes) {
@@ -194,6 +203,11 @@ abstract final class BusinessDeviceRouter {
     WidgetRef? screen,
   }) async {
     _screen = screen;
+    if (BranchScope.readOnly && method.toUpperCase() != 'GET') {
+      const reason =
+          'أنت في جميع الفروع: قراءة واستشارة فقط. انتقل إلى الفرع المطلوب لتنفيذ العملية.';
+      return {'success': false, 'error': reason, 'message': reason};
+    }
     final hit = _match(method, path);
     if (hit == null) {
       const reason = 'هذه العملية غير متاحة على الجهاز. استخدم مسارًا آخر من الدليل.';
@@ -218,6 +232,10 @@ abstract final class BusinessDeviceRouter {
   static WidgetRef? _screen;
 
   static Future<List<dynamic>> _bankAccounts(ProviderReader read) async {
+    // «جميع الفروع»: one bank per name, its currencies summed over branches;
+    // each row lists the branches it comes from.
+    final all = read(allBranchesBankingProvider);
+    if (all != null) return all.accounts();
     final local = read(localBusinessBankingProvider);
     return local != null ? local.accounts() : read(businessBanksApiProvider).listAccounts();
   }

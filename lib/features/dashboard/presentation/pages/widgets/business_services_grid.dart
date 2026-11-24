@@ -1,3 +1,4 @@
+import '../../../../core_business/presentation/providers/business_all_branches_provider.dart';
 import 'package:flutter/material.dart';
 import '../../../../core_business/data/local_directory/directory_pilot.dart';
 import 'package:flutter/services.dart';
@@ -210,7 +211,18 @@ class BusinessServicesGrid extends ConsumerWidget {
     };
     final allowed = _rows
         .expand((r) => r)
-        .where((key) => !BranchScope.readOnly || key != 'bizExpenses')
+        // «جميع الفروع» is read-only: tiles that only start an operation are
+        // not shown at all (reading tiles stay).
+        .where(
+          (key) =>
+              !ref.watch(businessReadOnlyProvider) ||
+              !const {
+                'bizExpenses',
+                'bizSaleInvoice',
+                'bizPurchaseInvoice',
+                'bizReconcile',
+              }.contains(key),
+        )
         .where(
           (k) => k == 'bizReturns'
               ? ref.watch(employeeCanProvider('returns')) && (ref.watch(employeeCanProvider('sales.returns')) || ref.watch(employeeCanProvider('purchases.returns')))

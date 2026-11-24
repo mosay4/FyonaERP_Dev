@@ -18,6 +18,15 @@ const _commerceLots = 'business_commerce_lots';
 const _commerceConsumptions = 'business_commerce_lot_consumptions';
 const _commerceMovements = 'business_commerce_stock_movements';
 
+/// Schema v18: a unit may carry its own photo (e.g. a carton), stored in the
+/// encrypted ledger like a product image and synced with the unit row.
+/// Idempotent: a database created at v18 runs it right after its tables.
+Future<void> _upgradeUnitImages(DatabaseExecutor db) async {
+  final columns = await db.rawQuery('PRAGMA table_info($_commerceUnits)');
+  if (columns.any((column) => column['name'] == 'image')) return;
+  await db.execute('ALTER TABLE $_commerceUnits ADD COLUMN image TEXT');
+}
+
 // Branch stock is exact to 0.001 in PostgreSQL. Document lines, lots and
 // movements came from floating-point columns with finer precision. Keep them
 // independently at 0.000001 and reject input that would require rounding.

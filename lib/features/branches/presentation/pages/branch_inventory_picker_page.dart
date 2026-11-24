@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../inventory/presentation/widgets/business_product_image.dart';
+import '../../../inventory/presentation/widgets/business_unit_image.dart';
 import '../../../inventory/presentation/providers/warehouse_settings.dart';
 import '../../../purchases/presentation/pages/barcode_scan_page.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
@@ -725,13 +726,25 @@ class _BranchInventoryPickerPageState
                           .map(
                             (u) => DropdownMenuItem(
                               value: '${u['id']}',
-                              child: Text(
-                                '${u['name']}',
-                                style: TextStyle(
-                                  fontFamily: 'Cairo',
-                                  fontSize: 10.5,
+                              child: Row(children: [
+                                if (BusinessUnitImage.has(u['image'])) ...[
+                                  BusinessUnitImage(
+                                      image: '${u['image']}',
+                                      size: 22,
+                                      radius: 6),
+                                  const SizedBox(width: 6),
+                                ],
+                                Flexible(
+                                  child: Text(
+                                    '${u['name']}',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontFamily: 'Cairo',
+                                      fontSize: 10.5,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                              ]),
                             ),
                           )
                           .toList(),

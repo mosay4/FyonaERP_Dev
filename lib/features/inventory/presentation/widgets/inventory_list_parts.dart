@@ -285,17 +285,35 @@ class InventoryProductTile extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  (product['name'] ?? '').toString(),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: R.fontSize(context, 14),
-                    fontWeight: FontWeight.w700,
-                    height: 1.35,
-                    color: AppColors.textPrimary,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      (product['name'] ?? '').toString(),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'Cairo',
+                        fontSize: R.fontSize(context, 14),
+                        fontWeight: FontWeight.w700,
+                        height: 1.35,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    // «جميع الفروع»: every product names its branch.
+                    if ('${product['branch_name'] ?? ''}'.trim().isNotEmpty)
+                      Text(
+                        '${product['branch_name']}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: R.fontSize(context, 11),
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                  ],
                 ),
               ),
               if (status.low) _badge(l10n.translate('invLow'), AppColors.warning),

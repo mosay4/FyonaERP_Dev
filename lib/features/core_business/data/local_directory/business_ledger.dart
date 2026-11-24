@@ -64,6 +64,31 @@ final class BusinessLedgerAccess {
   final Set<BusinessLedgerAction> _actions;
   final String? cashSessionId;
   final BusinessEmployeeDelegation? employee;
+
+  /// Reads only: allowed in the «جميع الفروع» view, which never writes.
+  static const readActions = {
+    BusinessLedgerAction.readBank,
+    BusinessLedgerAction.readBankHistory,
+    BusinessLedgerAction.readManualMovements,
+    BusinessLedgerAction.readOperations,
+    BusinessLedgerAction.readDebt,
+    BusinessLedgerAction.readSaleInvoice,
+    BusinessLedgerAction.readPurchaseInvoice,
+    BusinessLedgerAction.readInvoiceProfit,
+    BusinessLedgerAction.readReturns,
+    BusinessLedgerAction.readInventory,
+    BusinessLedgerAction.readInventoryCost,
+    BusinessLedgerAction.readInventoryProfit,
+    BusinessLedgerAction.readDebtReport,
+    BusinessLedgerAction.readMoneyReport,
+    BusinessLedgerAction.readSalesReport,
+    BusinessLedgerAction.readOverviewReport,
+    BusinessLedgerAction.readBankReconciliation,
+    BusinessLedgerAction.readInventoryReconciliation,
+    BusinessLedgerAction.readEmployeeFinance,
+  };
+
+  bool get onlyReads => readActions.containsAll(_actions);
 }
 
 enum BusinessLedgerProblem {

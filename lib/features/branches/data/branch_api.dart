@@ -754,6 +754,11 @@ class BranchApi {
     }
   }
 
+  /// This device holds a signed device-ledger context of [org] (opened
+  /// before): «جميع الفروع» then reads the same device ledger.
+  Future<bool> hasDeviceLedger(String org) async =>
+      _owner != null && await _anySavedBranchToken(org) != null;
+
   Future<String?> _anySavedBranchToken(String org) async {
     try {
       final prefs = await SharedPreferences.getInstance();

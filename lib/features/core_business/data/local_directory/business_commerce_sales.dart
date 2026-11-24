@@ -786,11 +786,10 @@ extension BusinessCommerceSales on BusinessLedger {
         }
         service = product['is_service'] == 1;
         unitName = product['unit'] as String?;
-        image ??= product['image'] as String?;
         if (unitId != null) {
           final unit = (await txn.query(
             _commerceUnits,
-            columns: ['id', 'factor_4', 'name'],
+            columns: ['id', 'factor_4', 'name', 'image'],
             where:
                 'branch_id = ? AND product_id = ? AND id = ? AND is_active = 1',
             whereArgs: [branch, productRow, unitId],
@@ -802,11 +801,14 @@ extension BusinessCommerceSales on BusinessLedger {
           }
           factor4 = unit['factor_4'] as int;
           unitName = unit['name'] as String;
+          // The unit's own photo (a carton) is the line's picture.
+          image ??= _deviceInventoryImage(unit['image']);
         } else if (line.factor != null) {
           factor4 = _commerceFactor4(line.factor!);
         } else {
           factor4 = 10000;
         }
+        image ??= product['image'] as String?;
       } else {
         if (quick != null) {
           service = true;

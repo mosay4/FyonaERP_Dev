@@ -260,9 +260,19 @@ def device_dataset(items: list, report_currency: Optional[str], scope: str,
                 value = 0.0
             row[key] = round(value, 4) if value == value and abs(value) != float("inf") else 0.0
         unverified = unverified or raw.get("fx_incomplete") is True
+        if isinstance(raw.get("branch_id"), str) and raw.get("branch_id"):
+            row["branch_id"] = raw["branch_id"][:64]
+            row["branch_name"] = str(raw.get("branch_name") or raw["branch_id"])[:120]
         clean.append(row)
+    branches = _device_branches(clean)
+    if branches:
+        # «جميع الفروع» on the phone: one figure per product name over every
+        # branch, and each branch's own figures by name.
+        summaries = [_device_branch_summary(bid, name, rows) for bid, (name, rows) in branches.items()]
+        clean = _device_merge_by_name(clean)
     if scope == "product":
-        p = next((i for i in clean if not ref_id or i["id"] == ref_id), None) or {}
+        p = next((i for i in clean if not ref_id or i["id"] == ref_id), None) or (
+            clean[0] if branches and clean else {})
         stock, qty = _f(p.get("stock")), _f(p.get("qty_sold"))
         data = {
             "report_currency": rep, "unified": False, "unverified_fx": unverified,
@@ -281,12 +291,65 @@ def device_dataset(items: list, report_currency: Optional[str], scope: str,
         if qty > 0:
             target = max(_f(data["min_stock"]) * 2, qty / 6.0)
             data["suggested_order_qty"] = max(0, round(target - stock))
+        if branches:
+            data.update(branch_ids=list(branches), branch_summaries=summaries)
         return data, "المنتج"
     data = _summary(clean, rep, False, unverified)
+    if branches:
+        data.update(branch_ids=list(branches), branch_summaries=summaries)
     if scope == "category":
         data["category_name"] = (category_name or "")[:120]
         return data, "التصنيف"
     return data, "المخزون"
+
+
+def _device_branches(rows: list) -> dict:
+    out: dict = {}
+    for row in rows:
+        if row.get("branch_id"):
+            out.setdefault(row["branch_id"], (row["branch_name"], []))[1].append(row)
+    return out
+
+
+def _device_branch_summary(branch_id: str, name: str, items: list) -> dict:
+    """Same shape as a server branch summary (falcon_scoped_dataset)."""
+    return {
+        'branch_id': branch_id, 'branch_name': name,
+        'products_count': len(items), 'stock': sum(i['stock'] for i in items),
+        'total_sales': sum(i['sales'] for i in items), 'total_profit': sum(i['profit'] for i in items),
+        'total_cogs': sum(i['cogs'] for i in items), 'total_purchases': sum(i['purchases'] for i in items),
+        'inventory_value': sum(i['cost_price'] * i['stock'] for i in items),
+        'low_stock': [i['name'] for i in items if 0 < i['stock'] <= i['min_stock']][:10],
+        'out_of_stock': [i['name'] for i in items if i['stock'] <= 0][:10],
+        'top_sellers': sorted(items, key=lambda i: i['qty_sold'], reverse=True)[:5],
+    }
+
+
+_DEVICE_SUMMED = ("stock", "min_stock", "sales", "qty_sold", "cogs", "profit", "purchases", "qty_purchased")
+
+
+def _device_merge_by_name(rows: list) -> list:
+    """The same product (by name) in several branches is one product of the
+    business: quantities and money add up, cost is the stock-weighted cost."""
+    merged: dict = {}
+    for row in rows:
+        key = ' '.join(row['name'].strip().lower().split())
+        entry = merged.get(key)
+        if entry is None:
+            merged[key] = {k: v for k, v in row.items() if k not in ('branch_id', 'branch_name')}
+            merged[key]['_value'] = row['cost_price'] * row['stock']
+            continue
+        for field in _DEVICE_SUMMED:
+            entry[field] = round(entry[field] + row[field], 4)
+        entry['_value'] += row['cost_price'] * row['stock']
+        entry['sell_price'] = entry['sell_price'] or row['sell_price']
+    out = []
+    for entry in merged.values():
+        value = entry.pop('_value')
+        if entry['stock'] > 0:
+            entry['cost_price'] = round(value / entry['stock'], 4)
+        out.append(entry)
+    return out
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1217,6 +1280,7 @@ async def chat(
     report_currency: Optional[str] = None,
     branch_ids=None,
     device=None,
+    device_rebuild=None,
 ) -> dict:
     import json
 
@@ -1225,7 +1289,13 @@ async def chat(
     # Resolve only against the signed permitted set, then recompute every metric
     # for the named branch. Never mix an all-branch total into a branch answer.
     named = [row for row in all_summaries if _mentions_branch(question, row['branch_name'])]
-    if named:
+    if named and device is not None:
+        # The phone's own figures: recompute from the named branches' rows.
+        if device_rebuild is None:
+            named = []
+        else:
+            data, title = device_rebuild({row['branch_id'] for row in named})
+    elif named:
         data, title = await _dataset(db, org_id, scope, ref_id, report_currency,
                                     branch_ids=[row['branch_id'] for row in named])
     cur = (data.get("report_currency") or "USD").strip().upper()

@@ -961,11 +961,19 @@ async def falcon_chat(
     device = (falcon_service.device_dataset(data.device_items, data.report_currency,
                                             data.scope, ref, data.device_category)
               if data.device_items is not None else None)
+
+    def device_rebuild(ids):
+        # «جميع الفروع» on the phone: a question about named branches only.
+        return falcon_service.device_dataset(
+            [i for i in data.device_items or [] if isinstance(i, dict) and i.get('branch_id') in ids],
+            data.report_currency, data.scope, ref, data.device_category)
+
     return ok(await falcon_service.chat(
         db, UUID(org_id), data.scope, ref,
         data.question, data.history, data.lang, data.report_currency,
         branch_ids=branch_context.branch_ids if branch_context.all_mode else [branch_context.branch_id],
         device=device,
+        device_rebuild=device_rebuild if data.device_items is not None else None,
     ))
 
 

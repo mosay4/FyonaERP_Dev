@@ -714,9 +714,33 @@ final class LocalCommerceBridge {
         name: '${body['name']}',
         factor: body['factor'],
         barcode: body['barcode'] as String?,
+        // The unit's own prices and family are part of the same local write.
+        salePrice: body['sale_price'],
+        purchasePrice: body['purchase_price'],
+        family: body['group'] as String?,
+        image: body['image'] as String?,
       ),
     );
     return Map<String, dynamic>.from(created);
+  }
+
+  Future<Map<String, dynamic>> setUnitImage(
+    String productId,
+    String unitId,
+    String? image,
+  ) async {
+    final saved = await _run(
+      {BusinessLedgerAction.manageProducts},
+      ['inventory.edit'],
+      (ledger, grant) => ledger.setCommerceUnitImage(
+        grant,
+        commandId: const Uuid().v4(),
+        productId: productId,
+        unitId: unitId,
+        image: image,
+      ),
+    );
+    return Map<String, dynamic>.from(saved);
   }
 
   Future<void> deleteUnit(String unitId) => _run(
@@ -1473,6 +1497,14 @@ final class LocalInventoryApi extends InventoryApi {
     String id,
     Map<String, dynamic> body,
   ) => _bridge.createUnit(id, body);
+
+  /// The unit's own photo, kept in the device ledger (never uploaded).
+  Future<Map<String, dynamic>> setUnitImage(
+    String productId,
+    String unitId,
+    String? filePath,
+  ) async => _bridge.setUnitImage(productId, unitId,
+      filePath == null ? null : await readBusinessProductImage(filePath));
 
   @override
   Future<void> deleteUnit(String unitId) => _bridge.deleteUnit(unitId);

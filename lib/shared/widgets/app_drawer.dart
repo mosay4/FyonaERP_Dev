@@ -974,7 +974,23 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
       for (final c in sectionCompanies) {
         final orgId = '${c['organization_id'] ?? ''}';
         final orgName = '${c['organization_name'] ?? ''}';
-        final branches = (c['branches'] as List? ?? const []).whereType<Map>();
+        // Archived branches never appear in the switcher (also the ones
+        // archived on this device before the server learned it) until they
+        // are reactivated.
+        final archivedHere = {
+          for (final row
+              in ref.read(savedBranchListProvider).valueOrNull ?? const [])
+            if (row['is_archived'] == true) '${row['id']}',
+        };
+        final branches = (c['branches'] as List? ?? const [])
+            .whereType<Map>()
+            .where(
+              (b) =>
+                  b['is_archived'] != true &&
+                  b['is_active'] != false &&
+                  !archivedHere.contains('${b['id']}'),
+            )
+            .toList();
         if (branches.length > 1) {
           items.add(
             _branchMenuItem(

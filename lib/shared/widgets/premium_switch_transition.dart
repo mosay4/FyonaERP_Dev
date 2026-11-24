@@ -206,20 +206,15 @@ class PremiumSwitchScene extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
+    // The transition keeps its own brand colours in both themes (the dark
+    // theme must not turn it into a blackened red).
     final personal = session.kind == PremiumSwitchKind.personal;
     final branch = session.kind == PremiumSwitchKind.branch;
-    final accent = Color.lerp(
-      AppColors.primaryLight,
-      Colors.white,
-      dark ? .72 : .64,
-    )!;
+    final accent = Color.lerp(AppColors.primaryLight, Colors.white, .64)!;
     final base = Color.lerp(
       AppColors.primaryDark,
       Colors.black,
-      dark
-          ? .8
-          : personal
+      personal
           ? .5
           : branch
           ? .4
@@ -491,15 +486,6 @@ class _SwitchGlassCard extends StatelessWidget {
           children: [
             Icon(icon, size: compact ? 30 : 42, color: accent),
             const Spacer(),
-            Container(
-              width: 28,
-              height: 20,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(5),
-                border: Border.all(color: accent.withValues(alpha: .5)),
-              ),
-              // The card chip, without the sparkle mark.
-            ),
           ],
         ),
         SizedBox(height: compact ? 12 : 25),

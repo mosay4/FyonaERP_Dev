@@ -184,6 +184,22 @@ TESTS / TOOLS
    - Inventory/categories redesign; product details units with prices;
      product statistics + Falcon product/category scopes (see git log).
 
+19. ROUND 11-12 (24-11-2026)
+   - Dark palette softened in AppColors (graphite #131418, off-white text).
+   - ConnectivityIndicator: custom Wi-Fi mark (reveal / finite breathing).
+   - FyonaRefresh holds bouncing lists during refresh (_listOver), min 1.4 s.
+   - Transition card: no chip/sparkles, brand colours in both themes.
+   - Router extraCodec (_MemoryExtraCodec) keeps in-memory extras on refresh.
+   - «جميع الفروع» on device ledgers: BusinessAllBranches
+     (all_branches_ledger.dart) reads every branch in one DB session, merges
+     banks/reports/lists; write fence (BusinessLedgerAccess.onlyReads);
+     businessWriteRights hides actions; Sara GET-only + branch naming;
+     Falcon per-branch summaries (backend deployed).
+   - Units: prices/group/image stored in ledger (schema v18 unit image);
+     movement sheet → real InvoiceViewPage; old sale/purchase view pages
+     deleted (routes now build InvoiceViewPage).
+   - Archived branches filtered in the drawer switcher (+ device archive).
+
 OPEN ITEMS (need owner decision or next round)
 1) 10 known failing tests remain (tools/ci/known_failures.txt), both
    deliberate product changes by the previous developer — owner decision:

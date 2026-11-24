@@ -73,7 +73,7 @@ final class DirectoryDatabase {
   // isolate while the first connection is waiting to send its COMMIT.
   static final _ioLanes = List.generate(32, (_) => Lock());
   static final _factory = createDatabaseFactoryFfi();
-  static const _schemaVersion = 17;
+  static const _schemaVersion = 18;
   static const _table = 'directory_parties';
   static const _groupTable = 'business_debt_groups';
   static const _deleted = 'business_deleted_directory_parties';
@@ -196,6 +196,7 @@ final class DirectoryDatabase {
               await _createCashLinkPrepares(db);
               await _createBusinessSync(db);
               await _createBusinessEmployees(db);
+              await _upgradeUnitImages(db);
           },
           onDowngrade: (_, _, _) =>
               throw StateError('Unsupported directory schema'),
@@ -235,6 +236,7 @@ final class DirectoryDatabase {
               if (from < 15) await _createCashLinkPrepares(db);
               if (from < 16) await _createBusinessSync(db);
               if (from < 17) await _createBusinessEmployees(db);
+              if (from < 18) await _upgradeUnitImages(db);
           },
           onOpen: (db) async {
             await _createBusinessSync(db);

@@ -52,9 +52,9 @@ class FyonaRefresh extends StatefulWidget {
 
 class _FyonaRefreshState extends State<FyonaRefresh>
     with TickerProviderStateMixin {
-  static const _pullExtent = 110.0;
+  static const _pullExtent = 90.0;
   static const _restingShift = 46.0;
-  static const _minimumShow = Duration(milliseconds: 1100);
+  static const _minimumShow = Duration(milliseconds: 1400);
 
   /// 0 → 1 while pulling; held at the resting value while refreshing.
   late final AnimationController _pull = AnimationController(
@@ -136,7 +136,7 @@ class _FyonaRefreshState extends State<FyonaRefresh>
       if (_pull.value > 0) {
         await _pull.animateTo(
           0,
-          duration: const Duration(milliseconds: 260),
+          duration: const Duration(milliseconds: 420),
           curve: Curves.easeOutCubic,
         );
       }
@@ -171,7 +171,7 @@ class _FyonaRefreshState extends State<FyonaRefresh>
         _wave.stop();
         await _pull.animateTo(
           0,
-          duration: const Duration(milliseconds: 520),
+          duration: const Duration(milliseconds: 650),
           curve: Curves.easeInOutCubic,
         );
         if (mounted) setState(() => _refreshing = false);

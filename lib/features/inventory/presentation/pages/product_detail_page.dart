@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core_business/presentation/widgets/business_number_field.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'package:fyona_flutter/features/auth/presentation/widgets/app_pin_sheet.dart';
 import '../../../../core/localization/app_localizations.dart';
@@ -11,6 +12,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../branches/data/branch_scope.dart';
 import '../../../../shared/providers/current_user_provider.dart';
 import '../../../../shared/widgets/business_selection_sheet.dart';
+import '../../../../shared/widgets/styled_snack.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../providers/inventory_providers.dart';
 import '../../domain/services/invalidate_inventory_data.dart';
@@ -134,7 +136,11 @@ class _ProductDetailView extends ConsumerWidget {
               final ok = await openCommerceRecord<bool>(
                   context, RouteNames.inventoryProductEdit, id,
                   fromLocal: localTarget?.scope);
-              if (ok == true && context.mounted) ref.invalidate(productDetailProvider(_record));
+              if (!context.mounted) return;
+              // Units are written inside the edit screen even when the
+              // product itself is not saved: always re-read them.
+              ref.invalidate(productUnitsProvider(_record));
+              if (ok == true) ref.invalidate(productDetailProvider(_record));
             },
             icon: const Icon(Icons.edit_outlined),
           ),
@@ -659,6 +665,11 @@ class _ProductDetailView extends ConsumerWidget {
     final baseUnit = '${p['unit'] ?? ''}';
     final productName = '${p['name'] ?? ''}';
     final image = showImage ? p['image']?.toString() : null;
+    // A unit's own photo (a carton) lives in the device ledger only.
+    final canEditImages = showImage &&
+        !BranchScope.readOnly &&
+        ref.watch(inventoryApiProvider) is LocalInventoryApi &&
+        ref.watch(employeeCanProvider('inventory.edit'));
     // The base unit's prices, one per currency the product is priced in.
     final listed = [
       for (final row in (p['prices'] as List? ?? const []).whereType<Map>())
@@ -743,6 +754,10 @@ class _ProductDetailView extends ConsumerWidget {
                       _unitBox(context, l10n,
                           productName: productName,
                           image: image,
+                          unitImage: showImage ? u['image']?.toString() : null,
+                          onEditImage: canEditImages
+                              ? () => _changeUnitImage(context, ref, u)
+                              : null,
                           name: '${u['name'] ?? ''}',
                           factor: ((u['factor'] ?? 1) as num).toDouble(),
                           qtyText: productUnitAvailableText(
@@ -768,6 +783,68 @@ class _ProductDetailView extends ConsumerWidget {
     );
   }
 
+  /// Camera / gallery / remove for one unit's photo. Saved in the device
+  /// ledger (works offline) and carried to the other devices by sync.
+  Future<void> _changeUnitImage(
+      BuildContext context, WidgetRef ref, Map<String, dynamic> unit) async {
+    final l10n = AppLocalizations.of(context);
+    final source = ref.read(inventoryApiProvider);
+    if (source is! LocalInventoryApi) return;
+    final hasOwn = '${unit['image'] ?? ''}'.isNotEmpty;
+    final choice = await showBusinessSelectionSheet<String>(
+      context: context,
+      title: l10n.translate('invUnitImageTitle'),
+      items: [
+        BizSheetItem(
+            value: 'camera',
+            title: l10n.translate('invFromCamera'),
+            icon: Icons.photo_camera_outlined),
+        BizSheetItem(
+            value: 'gallery',
+            title: l10n.translate('invFromGallery'),
+            icon: Icons.photo_library_outlined),
+        if (hasOwn)
+          BizSheetItem(
+              value: 'remove',
+              title: l10n.translate('invRemoveImage'),
+              icon: Icons.delete_outline),
+      ],
+    );
+    if (choice == null || !context.mounted) return;
+    String? path;
+    if (choice != 'remove') {
+      try {
+        final file = await ImagePicker().pickImage(
+          source: choice == 'camera' ? ImageSource.camera : ImageSource.gallery,
+          maxWidth: 1280,
+          maxHeight: 1280,
+          imageQuality: 70,
+        );
+        if (file == null) return;
+        path = file.path;
+      } catch (_) {
+        if (context.mounted) {
+          showFyonaSnack(context, l10n.translate('invImageFail'),
+              success: false);
+        }
+        return;
+      }
+    }
+    if (!context.mounted || !_isCurrent(ref, source)) return;
+    try {
+      await source.setUnitImage(id, '${unit['id']}', path);
+      ref.invalidate(productUnitsProvider(_record));
+      if (context.mounted && path != null) {
+        showFyonaSnack(context, l10n.translate('invImageSaved'), success: true);
+      }
+    } catch (_) {
+      if (context.mounted) {
+        showFyonaSnack(context, l10n.translate('invImageSaveFailed'),
+            success: false);
+      }
+    }
+  }
+
   /// One unit row: an icon, the product name, the unit's real name with a
   /// plain-language equivalence («1 باكيت = 8 قطعة»), the available
   /// quantity IN THAT UNIT, then its own sale price(s) and — when visible —
@@ -777,6 +854,8 @@ class _ProductDetailView extends ConsumerWidget {
     AppLocalizations l10n, {
     required String productName,
     String? image,
+    String? unitImage,
+    VoidCallback? onEditImage,
     required String name,
     required double factor,
     required String qtyText,
@@ -785,7 +864,22 @@ class _ProductDetailView extends ConsumerWidget {
     required List<_UnitPrice> purchase,
     bool showFactor = true,
   }) {
+    // The unit's own photo first, then the product's.
+    if (unitImage != null && unitImage.isNotEmpty) image = unitImage;
     final hasImage = image != null && image.isNotEmpty;
+    final thumb = Container(
+      width: 42,
+      height: 42,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+          color: AppColors.primary.withAlpha(20),
+          borderRadius: BorderRadius.circular(11)),
+      child: hasImage
+          ? BusinessProductImage(
+              url: image, width: 42, height: 42, fit: BoxFit.cover)
+          : const Icon(Icons.inventory_2_outlined,
+              size: 21, color: AppColors.primary),
+    );
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
@@ -800,19 +894,36 @@ class _ProductDetailView extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
             child: Row(
               children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(
-                      color: AppColors.primary.withAlpha(20),
-                      borderRadius: BorderRadius.circular(11)),
-                  child: hasImage
-                      ? BusinessProductImage(
-                          url: image, width: 42, height: 42, fit: BoxFit.cover)
-                      : const Icon(Icons.inventory_2_outlined,
-                          size: 21, color: AppColors.primary),
-                ),
+                if (onEditImage == null)
+                  thumb
+                else
+                  Tooltip(
+                    message: l10n.translate('invUnitImageHint'),
+                    child: InkWell(
+                      key: ValueKey('unit-image-$name'),
+                      onTap: onEditImage,
+                      borderRadius: BorderRadius.circular(11),
+                      child: Stack(clipBehavior: Clip.none, children: [
+                        thumb,
+                        PositionedDirectional(
+                          end: -4,
+                          bottom: -4,
+                          child: Container(
+                            width: 18,
+                            height: 18,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                  color: AppColors.surface, width: 1.5),
+                            ),
+                            child: const Icon(Icons.photo_camera_outlined,
+                                size: 10, color: Colors.white),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(

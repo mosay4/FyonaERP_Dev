@@ -58,10 +58,8 @@ import '../../features/reconciliation/presentation/pages/recon_archive_page.dart
 import '../../features/reconciliation/presentation/pages/recon_detail_page.dart';
 import '../../features/reports/presentation/pages/reports_hub_page.dart';
 import '../../features/reports/presentation/pages/report_view_page.dart';
-import '../../features/sales/presentation/pages/sale_invoice_view_page.dart';
 import '../../features/sales/presentation/pages/sale_invoices_page.dart';
 import '../../features/purchases/presentation/pages/purchase_invoice_page.dart';
-import '../../features/purchases/presentation/pages/purchase_invoice_view_page.dart';
 import '../../features/returns/presentation/pages/return_create_page.dart';
 import '../../features/returns/presentation/pages/return_view_page.dart';
 import '../../features/returns/presentation/pages/returns_page.dart';
@@ -941,9 +939,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             builder: (_, state) {
               final extra = state.extra;
               final target = extra is LocalCommerceTarget ? extra : null;
-              return SaleInvoiceViewPage(
-                invoiceId: target?.id ?? state.uri.queryParameters['id'] ?? '',
-                localTarget: target,
+              // Legacy link → the real Business invoice screen.
+              return InvoiceViewPage(
+                type: 'sale',
+                id: target?.id ?? state.uri.queryParameters['id'] ?? '',
+                localCommerce: target == null ? null : LocalCommerceTarget(
+                    target.scope, RouteNames.invoicesView, target.id, kind: 'sale'),
               );
             },
           ),
@@ -962,9 +963,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             builder: (_, state) {
               final extra = state.extra;
               final target = extra is LocalCommerceTarget ? extra : null;
-              return PurchaseInvoiceViewPage(
-                invoiceId: target?.id ?? state.uri.queryParameters['id'] ?? '',
-                localTarget: target,
+              // Legacy link → the real Business invoice screen.
+              return InvoiceViewPage(
+                type: 'purchase',
+                id: target?.id ?? state.uri.queryParameters['id'] ?? '',
+                localCommerce: target == null ? null : LocalCommerceTarget(
+                    target.scope, RouteNames.invoicesView, target.id, kind: 'purchase'),
               );
             },
           ),

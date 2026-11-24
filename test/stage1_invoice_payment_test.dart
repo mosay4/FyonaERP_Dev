@@ -11,12 +11,10 @@ import 'package:fyona_flutter/features/branches/data/branch_epoch.dart';
 import 'package:fyona_flutter/features/invoices/data/invoice_design_models.dart';
 import 'package:fyona_flutter/features/invoices/presentation/widgets/invoice_preview_card.dart';
 import 'package:fyona_flutter/features/purchases/data/purchase_api.dart';
-import 'package:fyona_flutter/features/purchases/presentation/pages/purchase_invoice_view_page.dart';
 import 'package:fyona_flutter/features/purchases/presentation/providers/purchase_providers.dart';
 import 'package:fyona_flutter/features/returns/data/returns_api.dart';
 import 'package:fyona_flutter/features/returns/presentation/providers/returns_providers.dart';
 import 'package:fyona_flutter/features/sales/data/sales_api.dart';
-import 'package:fyona_flutter/features/sales/presentation/pages/sale_invoice_view_page.dart';
 import 'package:fyona_flutter/features/sales/presentation/providers/sale_providers.dart';
 import 'package:fyona_flutter/shared/widgets/invoice_amount.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -66,19 +64,14 @@ void main() {
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
-        final Widget page;
-        if (target == 'sale') {
-          page = const SaleInvoiceViewPage(invoiceId: '1');
-        } else if (target == 'purchase') {
-          page = const PurchaseInvoiceViewPage(invoiceId: '1');
-        } else {
-          page = Scaffold(body: SingleChildScrollView(child: InvoicePreviewCard(
-            invoice: invoice,
-            design: InvoiceDesignPreset(templateId: target, showQR: false,
-              showSignature: false, showStamp: false),
-            isPurchase: false,
-          )));
-        }
+        // «عرض الفاتورة» (sale & purchase) renders InvoicePreviewCard.
+        final Widget page = Scaffold(body: SingleChildScrollView(child: InvoicePreviewCard(
+          invoice: invoice,
+          design: InvoiceDesignPreset(
+            templateId: target == 'sale' || target == 'purchase' ? 'paper' : target,
+            showQR: false, showSignature: false, showStamp: false),
+          isPurchase: target == 'purchase',
+        )));
         await tester.pumpWidget(ProviderScope(
           overrides: [salesApiProvider.overrideWithValue(FakeSales()),
             purchaseApiProvider.overrideWithValue(FakePurchase())],
