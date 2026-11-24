@@ -208,7 +208,12 @@ class ReportValuationNote extends StatelessWidget {
   }
 }
 
-List<String> localReportNoticeKeys(Map data) => [
+// The owner's rule: reports show their numbers, never warning lines. Why
+// profit shows «—» is explained only by tapping it.
+List<String> localReportNoticeKeys(Map data) => const [];
+
+// ignore: unused_element
+List<String> _legacyNoticeKeys(Map data) => [
   if (data['uncosted_stock'] != null && data['uncosted_stock'] != 0)
     'repLocalUncostedStock',
   // Why profit shows «—» is explained by tapping it (owner's choice).

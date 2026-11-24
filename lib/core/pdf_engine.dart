@@ -110,7 +110,7 @@ class PdfEngine {
         pw.Container(width: 4, height: 14, color: pdfColor(_kBrand)),
         pw.SizedBox(width: 6),
         pw.Expanded(
-          child: pw.Text(title,
+          child: _pdfText(title,
               style: pw.TextStyle(
                   font: bold,
                   fontSize: 12,
@@ -160,11 +160,11 @@ class PdfEngine {
     final out = <pw.Widget>[];
     for (var i = 0; i < parts.length; i++) {
       if (i > 0) {
-        out.add(pw.Text('•',
+        out.add(_pdfText('•',
             style: pw.TextStyle(font: f, fontSize: size, color: color)));
         out.add(pw.SizedBox(width: 5));
       }
-      out.add(pw.Text(parts[i],
+      out.add(_pdfText(parts[i],
           maxLines: 1,
           style: pw.TextStyle(
               font: f,
@@ -191,7 +191,7 @@ class PdfEngine {
       crossAxisAlignment:
           rtl ? pw.CrossAxisAlignment.end : pw.CrossAxisAlignment.start,
       children: [
-        pw.Text(title,
+        _pdfText(title,
             style: pw.TextStyle(
                 font: bold,
                 fontSize: 17,
@@ -199,7 +199,7 @@ class PdfEngine {
                 color: pdfColor(0xFFFFFFFF))),
         if (subtitle != null && subtitle.isNotEmpty) ...[
           pw.SizedBox(height: 3),
-          pw.Text(subtitle,
+          _pdfText(subtitle,
               style: pw.TextStyle(
                   font: regular, fontSize: 9.5, color: pdfColor(0xE6FFFFFF))),
         ],
@@ -258,14 +258,14 @@ class PdfEngine {
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    pw.Text(k['label'] ?? '',
+                    _pdfText(k['label'] ?? '',
                         maxLines: 1,
                         style: pw.TextStyle(
                             font: regular,
                             fontSize: 7.5,
                             color: pdfColor(_kMuted))),
                     pw.SizedBox(height: 2),
-                    pw.Text(k['value'] ?? '',
+                    _pdfText(k['value'] ?? '',
                         maxLines: 1,
                         style: pw.TextStyle(
                             font: bold,
@@ -330,7 +330,7 @@ class PdfEngine {
                     top: pw.BorderSide(color: pdfColor(_kLine), width: 0.6)),
               ),
               child: pw.Row(children: [
-              pw.Text('FYONA ERP',
+              _pdfText('FYONA ERP',
                   style: pw.TextStyle(
                       font: bold,
                       fontSize: 8,
@@ -342,7 +342,7 @@ class PdfEngine {
                     children: segments(parts, regular, 7.5,
                         pdfColor(_kMuted), false)),
               ),
-              pw.Text('${context.pageNumber} / ${context.pagesCount}',
+              _pdfText('${context.pageNumber} / ${context.pagesCount}',
                   style: pw.TextStyle(
                       font: regular, fontSize: 7.5, color: pdfColor(_kMuted))),
             ]),
@@ -525,7 +525,7 @@ class PdfEngine {
 
           if (footer != null) {
             children.add(pw.SizedBox(height: 24));
-            children.add(pw.Center(child: pw.Text(footer, style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFF999999)))));
+            children.add(pw.Center(child: _pdfText(footer, style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFF999999)))));
           }
 
           return children;
@@ -594,7 +594,7 @@ class PdfEngine {
 
           if (footer != null) {
             children.add(pw.SizedBox(height: 24));
-            children.add(pw.Center(child: pw.Text(footer, style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFF999999)))));
+            children.add(pw.Center(child: _pdfText(footer, style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFF999999)))));
           }
 
           return children;
@@ -628,7 +628,7 @@ class PdfEngine {
             children: [
               pw.SizedBox(
                 width: 80,
-                child: pw.Text(label, style: const pw.TextStyle(fontSize: 8)),
+                child: _pdfText(label, style: const pw.TextStyle(fontSize: 8)),
               ),
               pw.SizedBox(width: 8),
               pw.Expanded(
@@ -657,7 +657,7 @@ class PdfEngine {
               pw.SizedBox(width: 8),
               pw.SizedBox(
                 width: 50,
-                child: pw.Text(_fmtNumPdf(val), style: const pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.right),
+                child: _pdfText(_fmtNumPdf(val), style: const pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.right),
               ),
             ],
           ),
@@ -688,11 +688,11 @@ class PdfEngine {
           ),
           child: pw.Row(
             children: [
-              pw.Text(label, style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFFFFFFFF))),
+              _pdfText(label, style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFFFFFFFF))),
               pw.SizedBox(width: 8),
-              pw.Text('${(pct * 100).toStringAsFixed(1)}%', style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFFFFFFFF))),
+              _pdfText('${(pct * 100).toStringAsFixed(1)}%', style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFFFFFFFF))),
               pw.SizedBox(width: 4),
-              pw.Text(_fmtNumPdf(val), style: pw.TextStyle(fontSize: 8, color: pdfColor(0xEEFFFFFF))),
+              _pdfText(_fmtNumPdf(val), style: pw.TextStyle(fontSize: 8, color: pdfColor(0xEEFFFFFF))),
             ],
           ),
         ),
@@ -730,7 +730,7 @@ class PdfEngine {
           padding: const pw.EdgeInsets.only(bottom: 10),
           child: pw.Row(
             children: [
-              pw.SizedBox(width: 80, child: pw.Text(label, style: const pw.TextStyle(fontSize: 10))),
+              pw.SizedBox(width: 80, child: _pdfText(label, style: const pw.TextStyle(fontSize: 10))),
               pw.SizedBox(width: 8),
               pw.Expanded(
                 child: pw.Container(
@@ -750,7 +750,7 @@ class PdfEngine {
                 ),
               ),
               pw.SizedBox(width: 8),
-              pw.SizedBox(width: 60, child: pw.Text(_fmtNumPdf(val), style: const pw.TextStyle(fontSize: 10), textAlign: pw.TextAlign.right)),
+              pw.SizedBox(width: 60, child: _pdfText(_fmtNumPdf(val), style: const pw.TextStyle(fontSize: 10), textAlign: pw.TextAlign.right)),
             ],
           ),
         );
@@ -787,7 +787,7 @@ class PdfEngine {
             child: pw.Column(
               mainAxisAlignment: pw.MainAxisAlignment.end,
               children: [
-                pw.Text(_fmtNumPdf(val), style: const pw.TextStyle(fontSize: 6)),
+                _pdfText(_fmtNumPdf(val), style: const pw.TextStyle(fontSize: 6)),
                 pw.SizedBox(height: 2),
                 pw.Container(
                   width: barWidth,
@@ -798,7 +798,7 @@ class PdfEngine {
                   ),
                 ),
                 pw.SizedBox(height: 2),
-                pw.Text(day, style: const pw.TextStyle(fontSize: 6)),
+                _pdfText(day, style: const pw.TextStyle(fontSize: 6)),
               ],
             ),
           );
@@ -828,11 +828,11 @@ class PdfEngine {
             children: [
               pw.Row(
                 children: [
-                  pw.Text(label, style: const pw.TextStyle(fontSize: 9)),
+                  _pdfText(label, style: const pw.TextStyle(fontSize: 9)),
                   pw.SizedBox(width: 8),
-                  pw.Text(_fmtNumPdf(val), style: const pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                  _pdfText(_fmtNumPdf(val), style: const pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
                   pw.SizedBox(width: 4),
-                  pw.Text('(${(pct * 100).toStringAsFixed(1)}%)', style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFF999999))),
+                  _pdfText('(${(pct * 100).toStringAsFixed(1)}%)', style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFF999999))),
                 ],
               ),
               pw.SizedBox(height: 4),
@@ -875,7 +875,7 @@ class PdfEngine {
             color: pdfColor(0xFFA01530),
             borderRadius: pw.BorderRadius.circular(8),
           ),
-          child: pw.Text(title, style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFFFFFFF))),
+          child: _pdfText(title, style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFFFFFFF))),
         ),
       ],
     );
@@ -893,12 +893,12 @@ class PdfEngine {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text(title, style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFFFFFFF))),
+          _pdfText(title, style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFFFFFFF))),
           pw.SizedBox(height: 4),
-          pw.Text(period, style: pw.TextStyle(fontSize: 10, color: pdfColor(0xCCFFFFFF))),
+          _pdfText(period, style: pw.TextStyle(fontSize: 10, color: pdfColor(0xCCFFFFFF))),
           pw.SizedBox(height: 16),
-          pw.Text(AppLocalizations.t('totalBalances'), style: pw.TextStyle(fontSize: 10, color: pdfColor(0x99FFFFFF))),
-          pw.Text(_fmtNumPdf(balance), style: pw.TextStyle(fontSize: 28, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFFFFFFF))),
+          _pdfText(AppLocalizations.t('totalBalances'), style: pw.TextStyle(fontSize: 10, color: pdfColor(0x99FFFFFF))),
+          _pdfText(_fmtNumPdf(balance), style: pw.TextStyle(fontSize: 28, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFFFFFFF))),
         ],
       ),
     );
@@ -916,9 +916,9 @@ class PdfEngine {
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Text(AppLocalizations.t('revenue'), style: pw.TextStyle(fontSize: 9, color: pdfColor(0xFF888888))),
+                _pdfText(AppLocalizations.t('revenue'), style: pw.TextStyle(fontSize: 9, color: pdfColor(0xFF888888))),
                 pw.SizedBox(height: 4),
-                pw.Text(_fmtNumPdf(income), style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFF2E7D32))),
+                _pdfText(_fmtNumPdf(income), style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFF2E7D32))),
               ],
             ),
           ),
@@ -931,9 +931,9 @@ class PdfEngine {
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Text(AppLocalizations.t('pdfExpenses'), style: pw.TextStyle(fontSize: 9, color: pdfColor(0xFF888888))),
+                _pdfText(AppLocalizations.t('pdfExpenses'), style: pw.TextStyle(fontSize: 9, color: pdfColor(0xFF888888))),
                 pw.SizedBox(height: 4),
-                pw.Text(_fmtNumPdf(expense), style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFC62828))),
+                _pdfText(_fmtNumPdf(expense), style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFC62828))),
               ],
             ),
           ),
@@ -946,9 +946,9 @@ class PdfEngine {
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Text(AppLocalizations.t('pdfNet'), style: pw.TextStyle(fontSize: 9, color: pdfColor(0xFF888888))),
+                _pdfText(AppLocalizations.t('pdfNet'), style: pw.TextStyle(fontSize: 9, color: pdfColor(0xFF888888))),
                 pw.SizedBox(height: 4),
-                pw.Text(_fmtNumPdf(net), style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: pdfColor(net >= 0 ? 0xFFA01530 : 0xFFC62828))),
+                _pdfText(_fmtNumPdf(net), style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: pdfColor(net >= 0 ? 0xFFA01530 : 0xFFC62828))),
               ],
             ),
           ),
@@ -961,7 +961,7 @@ class PdfEngine {
     return pw.Container(
       padding: const pw.EdgeInsets.only(bottom: 4),
       decoration: pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: pdfColor(0xFFA01530), width: 1.5))),
-      child: pw.Text(title, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFA01530))),
+      child: _pdfText(title, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFA01530))),
     );
   }
 
@@ -978,9 +978,9 @@ class PdfEngine {
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Text(kpi['label'] ?? '', style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFF888888))),
+              _pdfText(kpi['label'] ?? '', style: pw.TextStyle(fontSize: 8, color: pdfColor(0xFF888888))),
               pw.SizedBox(height: 3),
-              pw.Text(kpi['value'] ?? '', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFA01530))),
+              _pdfText(kpi['value'] ?? '', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: pdfColor(0xFFA01530))),
             ],
           ),
         ),
@@ -1018,7 +1018,7 @@ class PdfEngine {
           final children = <pw.Widget>[];
           children.add(_buildHeader(title));
           children.add(pw.SizedBox(height: 8));
-          children.add(pw.Text(AppLocalizations.t('pdfPeriod', {'period': period}), style: pw.TextStyle(fontSize: 10, color: pdfColor(0xFF666666))));
+          children.add(_pdfText(AppLocalizations.t('pdfPeriod', {'period': period}), style: pw.TextStyle(fontSize: 10, color: pdfColor(0xFF666666))));
           children.add(pw.SizedBox(height: 20));
 
           children.add(_buildKpiRow(summaryKpis));
@@ -1051,3 +1051,21 @@ class PdfEngine {
 
 
 
+
+
+/// The PDF writer does not apply the font's spacing after a final «ر»/«ز»
+/// (their tail covers the space: «آخر الحركات» printed as «آخرالحركات»).
+/// One extra space there keeps the words apart, exactly as on screen.
+final _tailSpace = RegExp('([\u0631\u0632\u0698]) ');
+
+pw.Text _pdfText(
+  String text, {
+  pw.TextStyle? style,
+  pw.TextAlign? textAlign,
+  int? maxLines,
+}) => pw.Text(
+  text.replaceAllMapped(_tailSpace, (m) => '${m[1]}  '),
+  style: style,
+  textAlign: textAlign,
+  maxLines: maxLines,
+);

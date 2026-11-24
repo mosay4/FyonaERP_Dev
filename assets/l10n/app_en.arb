@@ -5526,6 +5526,7 @@
   "reconScanningStatus": "Reviewing the numbers and comparing with reality",
   "reconEqDoneBanner": "Equalization completed",
   "reconEqNow": "Equalize now",
+  "repPdfCurrency": "Currency",
   "repCurrencyPick": "Choose currency",
   "repShowAll": "Show all",
   "repShowAllProducts": "Show all products ({n})",

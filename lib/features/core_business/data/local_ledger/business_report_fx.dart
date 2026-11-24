@@ -49,30 +49,49 @@ final class BusinessReportFx {
         );
       }
     }
-    final rate =
-        _at(from, to, operationUs) ?? _at(to, from, operationUs)?.inverse;
-    if (rate != null) return rate.apply(amount);
-    final source = _at('USD', from, operationUs);
-    final target = _at('USD', to, operationUs);
-    return source != null && target != null
-        ? BusinessMoney.roundRatio(
-            amount * target.n * source.d,
-            target.d * source.n,
-          )
-        : null;
+    return _route(from, to, operationUs)?.apply(amount);
   }
 
-  _ReportRate? _at(String base, String currency, int? at) {
+  /// The rate between two currencies: direct, inverse, or through a common
+  /// currency (USD, SAR or a Yemeni rial) — whichever the saved rates allow.
+  /// A report must never fall back to showing another currency.
+  _ReportRate? _route(String from, String to, int? at) {
+    // First the current quotes (a withdrawn quote is honoured: the pair is
+    // then valued through a common currency); only when no route exists at
+    // all, the last saved quote of a withdrawn pair.
+    for (final loose in const [false, true]) {
+      _ReportRate? pair(String a, String b) =>
+          _at(a, b, at, loose: loose) ?? _at(b, a, at, loose: loose)?.inverse;
+      final direct = pair(from, to);
+      if (direct != null) return direct;
+      for (final pivot in const ['USD', 'SAR', 'YER_OLD', 'YER_NEW']) {
+        if (pivot == from || pivot == to) continue;
+        final source = pair(pivot, from);
+        final target = pair(pivot, to);
+        if (source != null && target != null) {
+          return _ReportRate(target.n * source.d, target.d * source.n);
+        }
+      }
+    }
+    return null;
+  }
+
+  _ReportRate? _at(String base, String currency, int? at, {bool loose = false}) {
     if (base == currency) return _ReportRate(BigInt.one, BigInt.one);
-    final rows = _history[(base, currency)];
-    if (rows == null) return null;
-    // A null rate is a withdrawn quote and is honoured as such.
+    final all = _history[(base, currency)];
+    if (all == null) return null;
+    // Loose: a withdrawn (null) quote is skipped, so the last saved rate
+    // still values the report when nothing else can.
+    final rows = [
+      for (final row in all)
+        if (!loose || row.$2 != null) row,
+    ];
+    if (rows.isEmpty) return null;
     if (at == null) return rows.last.$2;
-    // Prefer the last approved observation at or before the operation. When
-    // the operation predates every saved observation (e.g. recorded offline
-    // before the first rate was received), use the earliest dated approval,
-    // then the latest one — the report must always value every amount in the
-    // currency the merchant chose.
+    // Prefer the last observation at or before the operation. When the
+    // operation predates every saved observation (e.g. recorded offline
+    // before the first rate was received), use the earliest dated one, then
+    // the latest one.
     for (final (observed, rate) in rows.reversed) {
       if (observed != null && observed <= at) return rate;
     }

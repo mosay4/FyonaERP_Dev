@@ -975,6 +975,17 @@ String? singleFxNotice(
   List<dynamic> sections,
   String target,
 ) {
+  // The owner's rule: reports never show warnings. Every amount is valued
+  // with the saved rates (see BusinessReportFx), so there is nothing to warn.
+  return null;
+}
+
+// ignore: unused_element
+String? _legacySingleFxNotice(
+  AppLocalizations l10n,
+  List<dynamic> sections,
+  String target,
+) {
   final merged = <String, int>{};
   for (final m in sections.whereType<Map>()) {
     final gaps = m['gaps'];

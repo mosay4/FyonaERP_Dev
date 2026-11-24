@@ -154,10 +154,14 @@ final class BusinessReportRates {
     await (_restoreTask ??= _restore());
     final fallback = await _deviceRates();
     if (fallback.isEmpty) return _snapshot;
-    // Read-only last resort: a pair this store never received is valued with
-    // the rate already saved on this device by the app's exchange screen.
+    // Read-only last resort: a pair this store has no usable rate for is
+    // valued with the rate already saved on this device by the app's
+    // currency engine (same public sources + server).
     // The Personal cache itself is never written here.
-    final known = {for (final row in _rows) (row.$1, row.$2)};
+    final known = {
+      for (final row in _rows)
+        if (row.$3 != null) (row.$1, row.$2),
+    };
     final extra = [
       for (final row in fallback)
         if (!known.contains((row.$1, row.$2))) row,

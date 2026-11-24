@@ -17,8 +17,10 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/amount_input_formatter.dart';
 import '../../../../shared/widgets/styled_snack.dart';
 import '../../data/branch_api.dart';
-import '../../../../shared/widgets/secure_image.dart';
+import '../../../inventory/presentation/widgets/business_product_image.dart';
 import '../../../../core/services/currency/currency_engine.dart';
+import '../../../core_business/presentation/providers/biz_payment_pref.dart';
+import '../../../reports/data/business_report_rates.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'branch_inventory_picker_page.dart';
 
@@ -539,10 +541,11 @@ class _TransferFormPage extends ConsumerStatefulWidget {
 }
 
 class _BranchOption {
-  _BranchOption(this.id, this.name, this.orgName);
+  _BranchOption(this.id, this.name, this.orgName, {this.archived = false});
   final String id;
   final String name;
   final String orgName;
+  final bool archived;
 }
 
 bool _isReversedOriginal(Map t) =>
@@ -619,12 +622,18 @@ class _PickerOption {
     required this.subtitle,
     required this.icon,
     this.flag = '',
+    this.disabled = false,
+    this.header = false,
   });
   final String value;
   final String label;
   final String? subtitle;
   final IconData icon;
   final String flag;
+  /// Shown faded and not selectable (e.g. an archived branch).
+  final bool disabled;
+  /// A section title row, not an option.
+  final bool header;
 }
 
 class _Line {
@@ -649,7 +658,6 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
       ref.read(employeeCanProvider(_financial ? 'banks.transfer' : 'inventory.transfer'));
 
   final _notes = TextEditingController();
-  bool _allowNegative = false;
   Future<List<_BranchOption>>? _branchesFuture;
   List<_BranchOption> _branches = const [];
   _BranchOption? _from;
@@ -713,8 +721,37 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
         }
       }
     }
-    _branches = out;
-    return out;
+    // Archived branches: named, listed last, never selectable.
+    Map<String, String> archived = const {};
+    try {
+      archived = {
+        for (final row in await ref.read(branchApiProvider).savedList())
+          if (row['is_archived'] == true)
+            '${row['id']}': '${row['name'] ?? ''}',
+      };
+    } catch (_) {}
+    if (!mounted || !_mayEdit) return const [];
+    final seen = <String>{};
+    final listed = <_BranchOption>[
+      for (final b in out)
+        if (seen.add(b.id))
+          archived.containsKey(b.id)
+              ? _BranchOption(b.id, b.name.trim().isEmpty ? archived[b.id]! : b.name, b.orgName, archived: true)
+              : b,
+    ];
+    for (final entry in archived.entries) {
+      if (seen.add(entry.key) && entry.value.trim().isNotEmpty) {
+        listed.add(_BranchOption(entry.key, entry.value, '', archived: true));
+      }
+    }
+    final result = [
+      for (final b in listed)
+        if (!b.archived && b.name.trim().isNotEmpty) b,
+      for (final b in listed)
+        if (b.archived && b.name.trim().isNotEmpty) b,
+    ];
+    _branches = result;
+    return result;
   }
 
   Future<void> _loadFrom(_BranchOption? b) async {
@@ -832,9 +869,8 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
               ],
               const SizedBox(height: 20),
               TextField(key: const ValueKey('transfer_notes'), controller: _notes, enabled: !_busy,
-                decoration: const InputDecoration(labelText: 'Notes / ملاحظات')),
-              if (_financial) CheckboxListTile(key: const ValueKey('transfer_negative'), title: const Text('Allow negative / السماح بالسالب'),
-                value: _allowNegative, onChanged: _busy ? null : (value) => setState(() => _allowNegative = value ?? false)),
+                decoration: InputDecoration(labelText: l10n.translate('branchTransferNotes'))),
+              const SizedBox(height: 14),
               FilledButton(
                 key: const ValueKey('transfer_submit'),
                 style: FilledButton.styleFrom(
@@ -1054,7 +1090,21 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
                     itemBuilder: (ctx, i) {
                       final o = options[i];
                       final active = o.value == selected;
-                      return ListTile(
+                      if (o.header) {
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 14, 8, 4),
+                          child: Text(
+                            o.label,
+                            style: TextStyle(
+                              fontFamily: 'Cairo',
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        );
+                      }
+                      final tile = ListTile(
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(13),
                         ),
@@ -1109,8 +1159,13 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
                                 size: 20,
                               )
                             : null,
-                        onTap: () => Navigator.pop(ctx, o.value),
+                        onTap: o.disabled
+                            ? null
+                            : () => Navigator.pop(ctx, o.value),
                       );
+                      return o.disabled
+                          ? Opacity(opacity: 0.4, child: IgnorePointer(child: tile))
+                          : tile;
                     },
                   ),
                 ),
@@ -1124,21 +1179,39 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
   }
 
   Future<void> _pickBranch(bool sender, List<_BranchOption> options) async {
+    final l10n = AppLocalizations.of(context);
     final list = sender
         ? options
         : options.where((b) => b.id != _from?.id).toList();
+    final active = list.where((b) => !b.archived).toList();
+    final archived = list.where((b) => b.archived).toList();
     final id = await _chooseOption(
-      title: AppLocalizations.of(context).translate('branchSelectBranch'),
-      options: list
-          .map(
-            (b) => _PickerOption(
-              value: b.id,
-              label: b.name,
-              subtitle: '',
-              icon: Icons.storefront_rounded,
-            ),
-          )
-          .toList(),
+      title: l10n.translate('branchSelectBranch'),
+      options: [
+        for (final b in active)
+          _PickerOption(
+            value: b.id,
+            label: b.name,
+            subtitle: '',
+            icon: Icons.storefront_rounded,
+          ),
+        if (archived.isNotEmpty)
+          _PickerOption(
+            value: '',
+            label: l10n.translate('branchArchived'),
+            subtitle: null,
+            icon: Icons.archive_outlined,
+            header: true,
+          ),
+        for (final b in archived)
+          _PickerOption(
+            value: b.id,
+            label: b.name,
+            subtitle: '',
+            icon: Icons.storefront_rounded,
+            disabled: true,
+          ),
+      ],
       selected: sender ? _from?.id : _to?.id,
     );
     if (id == null) return;
@@ -1380,7 +1453,11 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
                 child: _numField(
                   l10n.translate('branchAmount'),
                   _amount,
-                  onChanged: (_) => setState(() {}),
+                  onChanged: (_) {
+                    setState(() {});
+                    // Typing the amount fills a still-empty rate.
+                    if (_rate.text.trim().isEmpty) _prefillRate();
+                  },
                 ),
               ),
               const SizedBox(width: 10),
@@ -1435,7 +1512,7 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
                   const SizedBox(height: 4),
                   _summaryRow(
                     l10n.translate('branchExchangeRate'),
-                    rate == null ? '—' : rate.toStringAsFixed(6),
+                    rate == null ? '—' : _plainRate(rate),
                   ),
                 ],
               ),
@@ -1618,7 +1695,7 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: image.isNotEmpty
-                ? SecureImage(url: image, width: 38, height: 38)
+                ? BusinessProductImage(url: image, width: 38, height: 38)
                 : Container(
                     width: 38,
                     height: 38,
@@ -1809,6 +1886,18 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
         .replaceFirst(RegExp(r'\.$'), '');
   }
 
+  Future<double?> _reportRate(String from, String to) async {
+    try {
+      final fx = await ref.read(businessReportRatesProvider)?.read();
+      final unit = BigInt.from(10).pow(8);
+      final value = fx?.convert(unit, from, to);
+      if (value == null || value <= BigInt.zero) return null;
+      return value / unit;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _prefillRate() async {
     if (_fromAccount == null || _toAccount == null) return;
     final from = '${_fromAccount!['currency'] ?? 'SAR'}'.toUpperCase();
@@ -1823,12 +1912,24 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
     try {
       final engine = ref.read(currencyEngineProvider);
       await engine.load();
-      final rate = engine.getRate(from, to);
+      var rate = engine.getRate(from, to);
+      // Same saved rates the reports use (direct, inverse or through USD).
+      rate ??= await _reportRate(from, to);
+      if (rate == null) {
+        // Nothing saved yet: fetch now (online), then try again.
+        try {
+          await engine
+              .refreshIfStale(maxAge: Duration.zero)
+              .timeout(const Duration(seconds: 12));
+        } catch (_) {}
+        rate = engine.getRate(from, to) ?? await _reportRate(from, to);
+      }
       final same = mounted && _rate.text == initialRate &&
           _fromAccount?['id'] == sourceAccount && _toAccount?['id'] == destinationAccount;
-      if (rate != null && rate > 0 && same) {
+      final found = rate;
+      if (found != null && found > 0 && same) {
         // The rate saved on this device (also offline), editable.
-        setState(() => _rate.text = _plainRate(rate));
+        setState(() => _rate.text = _plainRate(found));
       } else if (same && initialRate == '1') {
         // «1» was only right for the same currency; never send it silently.
         setState(() => _rate.text = '');
@@ -2156,6 +2257,46 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
     return raw;
   }
 
+  /// The overdraft question used by payments: true to continue (once or
+  /// always — «always» is saved as the branch's preference).
+  Future<bool> _askOverdraft(AppLocalizations l10n) async {
+    if (!mounted) return false;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          l10n.translate('payNegTitle'),
+          style: const TextStyle(fontFamily: 'Cairo', fontSize: 16, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'always'),
+            child: Text(l10n.translate('payNegAlways'),
+                style: const TextStyle(fontFamily: 'Cairo')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'once'),
+            child: Text(l10n.translate('payNegOnce'),
+                style: const TextStyle(fontFamily: 'Cairo')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: Text(l10n.translate('payNegCancel'),
+                style: const TextStyle(fontFamily: 'Cairo')),
+          ),
+        ],
+      ),
+    );
+    if (choice == 'always') {
+      try {
+        await ref.read(bizPaymentPrefProvider.notifier).setAllowNegative(true);
+      } catch (_) {}
+    }
+    return choice == 'always' || choice == 'once';
+  }
+
   Future<void> _submit() async {
     if (_busy || !_mayEdit) return;
     final l10n = AppLocalizations.of(context);
@@ -2237,11 +2378,17 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
           throw Exception(l10n.translate('branchSelectAccount'));
         }
         final available =
-            double.tryParse('${_fromAccount!['balance'] ?? ''}') ?? 0;
-        if (!_allowNegative && ref.read(employeeCanProvider('banks.balances')) && amount > available + 0.0001) {
-          throw Exception(l10n.translate('branchInsufficientBankBalance'));
+            double.tryParse('${_fromAccount!['balance'] ?? ''}');
+        // Beyond the balance: the app's own overdraft question (once /
+        // always / don't), asked only when it is actually needed.
+        var allowNegative = ref.read(bizPaymentPrefProvider).allowNegative;
+        if (!allowNegative &&
+            available != null &&
+            amount > available + 0.0001) {
+          if (!await _askOverdraft(l10n)) return;
+          allowNegative = true;
         }
-        await ref
+        Future<void> send(bool negative) => ref
             .read(branchApiProvider)
             .financialTransfer(
               fromBranchId: _from!.id,
@@ -2250,13 +2397,25 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
               toAccountId: '${_toAccount!['id']}',
               amount: amount,
               exchangeRate: rate,
-              allowNegative: _allowNegative,
+              allowNegative: negative,
               notes: _notes.text,
               commandId: _command([
                 _from!.id, _to!.id, _fromAccount!['id'], _toAccount!['id'],
-                amount, rate, _allowNegative, _notes.text,
+                amount, rate, negative, _notes.text,
               ]),
             );
+        try {
+          await send(allowNegative);
+        } catch (e) {
+          // The balance on this screen may be older than the ledger's.
+          if (allowNegative ||
+              _errorMessage(e, l10n) != 'الرصيد في الحساب ما يكفي' ||
+              !mounted ||
+              !await _askOverdraft(l10n)) {
+            rethrow;
+          }
+          await send(true);
+        }
       } else {
         if (_from == null || _to == null) {
           throw Exception(l10n.translate('branchSelectBranch'));
@@ -2504,7 +2663,7 @@ class _TransferDetailPageState extends ConsumerState<_TransferDetailPage> {
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: image.isNotEmpty
-                    ? SecureImage(url: image, width: 46, height: 46)
+                    ? BusinessProductImage(url: image, width: 46, height: 46)
                     : Container(
                         width: 46,
                         height: 46,

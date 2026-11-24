@@ -109,6 +109,33 @@ TESTS / TOOLS
      /inventory); buttons open record screens with the device target.
    - Profile currency customization saves against the live cash slots.
 
+14. ROUND 6 (24-11-2026) — field list after round 5
+   - QA server was OOM-killed (cgroup MemoryMax 820M for the whole lab) at
+     11:58 UTC: Sara/Falcon errors + the white loading screen + drawer
+     without branches/Personal followed. Drop-in
+     /run/systemd/system/fyona-directory-qa-enroll.service.d/70-memory.conf
+     (MemoryMax 2G, MALLOC_ARENA_MAX=2; /run is transient — recreate after
+     reboot). Caddy answers 502 when the API is down: the app now maps
+     502/504/bare 503 to a connection error (api_client.dart
+     gatewayDownAsOffline) so every screen behaves as offline.
+   - Reports never mix currencies: BusinessReportFx routes through USD/SAR/
+     YER pivots, skips withdrawn (null) quotes; the store falls back to the
+     engine cache for any pair without a usable rate. No warning lines in
+     reports (singleFxNotice → null, localReportNoticeKeys → []); legacy
+     bank legs count as money in/out; sales chart always drawn.
+   - PDF: Cairo-400/700 got cmap entries for Arabic isolated presentation
+     forms (outlines unchanged) — «سعودي» printed as «سعوم» before; one
+     extra space after final ر/ز in pdf_engine (_pdfText).
+   - Transfers: no «Allow negative» box; the payments overdraft dialog
+     (once/always/cancel) appears only when the amount exceeds the balance;
+     ledger transferBetweenBranches(allowNegative) (fingerprint gets
+     'allow_negative' only when true). Notes label localized. Archived
+     branches listed last, faded, unselectable. Product photos via
+     BusinessProductImage. Rate prefill: engine → report store → fetch.
+   - Archive offline: _afterBranchChange tolerates connection errors.
+   - SecureImage keeps a version-free copy (latest_*.bin) used offline;
+     drawer + Sara branch avatars use SecureImage.
+
 OPEN ITEMS (need owner decision or next round)
 1) 10 known failing tests remain (tools/ci/known_failures.txt), both
    deliberate product changes by the previous developer — owner decision:

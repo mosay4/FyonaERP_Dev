@@ -231,6 +231,9 @@ final class _ReportAmounts {
   String? get totalValue =>
       complete ? BusinessMoney.displayTotal(_reportMinor(precise)) : null;
 
+  /// Everything valued in the report currency so far (for charts).
+  String get knownValue => BusinessMoney.displayTotal(_reportMinor(precise));
+
   void add(
     String code,
     BigInt amount, {

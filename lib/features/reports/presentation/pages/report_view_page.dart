@@ -898,7 +898,7 @@ class _ReportViewPageState extends ConsumerState<ReportViewPage> {
             ? subParts(subtitleAcc)
             : [
                 '$periodLabel',
-                '${l10n.translate('repCurrencyPick')}: $_currency',
+                '${l10n.translate('repPdfCurrency')}: $_currency',
               ],
         footerParts: widget.kind == 'money'
             ? [

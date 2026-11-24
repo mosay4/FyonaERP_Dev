@@ -850,15 +850,13 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
               ),
             )
           : image != null
-          ? CachedNetworkImage(
-              imageUrl: image,
-              fadeInDuration: Duration.zero,
-              fadeOutDuration: Duration.zero,
-              memCacheWidth: 192,
+          ? SecureImage(
+              // Keeps the last copy on the device: the picture stays offline.
+              url: image,
               fit: BoxFit.cover,
               width: size,
               height: size,
-              placeholder: (_, __) => Container(
+              placeholder: Container(
                 color: AppColors.primary.withAlpha(18),
                 alignment: Alignment.center,
                 child: Icon(
@@ -867,7 +865,7 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
                   color: AppColors.primary,
                 ),
               ),
-              errorWidget: (_, __, ___) => Container(
+              errorBuilder: (_, __, ___) => Container(
                 color: AppColors.primary.withAlpha(18),
                 alignment: Alignment.center,
                 child: Icon(
@@ -1233,8 +1231,11 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
         isAdmin ||
         (isPersonal
             ? hasMerchant || hasSectionAccess(businessStatus, 'business')
+            // Offline — or the server can't be reached right now — the
+            // switch stays: each section opens from what the device saved.
             : (user != null &&
-                      !ref.read(connectivityServiceProvider).isOnline) ||
+                      (!ref.read(connectivityServiceProvider).isOnline ||
+                          ref.watch(subscriptionStatusProvider).hasError)) ||
                   (companies?.any((c) => c['role'] == 'member') ?? false) ||
                   (hasSectionAccess(status, 'personal') &&
                       hasSectionAccess(status, 'business')));

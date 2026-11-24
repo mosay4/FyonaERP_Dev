@@ -77,7 +77,7 @@ extension BusinessMoneyReport on BusinessLedger {
       ''',
         [branch, ...window.args],
       );
-      var historyGaps = false;
+      const historyGaps = false;
       var legacySettlements = false;
       for (final row in legs) {
         final flow = accountFlows[row['account_id']];
@@ -91,14 +91,9 @@ extension BusinessMoneyReport on BusinessLedger {
             final incoming = row['kind'] == 'deposit';
             final total = incoming ? branchFlows.inflow : branchFlows.outflow;
             final perAccount = incoming ? flow?.inflow : flow?.outflow;
-            if (legacy) {
-              // Imported bank legs have no stable discriminator for the
-              // original business event. Do not promote a payment to income.
-              historyGaps = true;
-              total.unclassified = true;
-              perAccount?.unclassified = true;
-              continue;
-            }
+            // Imported (legacy) bank legs are money that came in or went out
+            // like any other: they count in the flows. They never carry an
+            // expense category, so they are never promoted to an expense.
             total.add(native, amount.abs(), operationUs: when);
             perAccount?.add(native, amount.abs(), operationUs: when);
             final category = row['expense_category'];

@@ -5615,6 +5615,7 @@
   "reconScanningStatus": "نراجع الأرقام ونقارنها بالواقع",
   "reconEqDoneBanner": "تمت المساواة",
   "reconEqNow": "تنفيذ المساواة الآن",
+  "repPdfCurrency": "العملة",
   "repCurrencyPick": "اختر العملة",
   "repShowAll": "عرض الكل",
   "repShowAllProducts": "عرض جميع المنتجات ({n})",

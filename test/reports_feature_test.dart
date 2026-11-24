@@ -134,8 +134,9 @@ void main() {
     // Sold value rendered from the FAKE api (real data path).
     expect(find.text('1,750'), findsWidgets);
     expect(find.textContaining('دولار أمريكي'), findsWidgets);
-    // FX gap notice is honest, SINGLE, and visible (merged across KPIs).
-    expect(find.textContaining('لم تدخل في الإجمالي'), findsOneWidget);
+    // The owner's rule: no warning lines in reports (amounts are valued with
+    // the saved rates; «كم ربحت؟» explains a missing profit when tapped).
+    expect(find.textContaining('لم تدخل في الإجمالي'), findsNothing);
   });
 
   testWidgets('Report view page opens the cinematic gate then shows results', (

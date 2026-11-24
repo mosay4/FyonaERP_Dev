@@ -243,9 +243,10 @@ void main() {
       }
       db = await open();
       final legacy = await report(id: sar);
-      expect(legacy['legacy_flow_unclassified'], isTrue);
-      expect(legacy['inflow']['total'], isNull);
-      expect(legacy['inflow']['per_currency'], isEmpty);
+      // The owner's rule: an imported bank leg is ordinary money in/out —
+      // counted, never reported as an unclassified gap.
+      expect(legacy['legacy_flow_unclassified'], isFalse);
+      expect(legacy['inflow']['per_currency'], result['inflow']['per_currency']);
       expect(legacy['expense_scoped']['total'], '23.00');
       expect(
         legacy['outflow']['per_currency'],

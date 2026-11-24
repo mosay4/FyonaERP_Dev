@@ -126,8 +126,14 @@ extension BusinessBranchTransfers on BusinessLedger {
     String? notes,
     bool Function()? allowed,
     Map<String, Object?>? actor,
+    bool allowNegative = false,
   }) async {
     final acting = _branch(access, BusinessLedgerAction.transfer);
+    // Sending more than the account holds is the merchant's explicit choice
+    // (the same overdraft authority as a refund beyond the balance).
+    if (allowNegative) {
+      _branch(access, BusinessLedgerAction.authorizeReturnOverdraft);
+    }
     if (!_validBranchPair(acting, fromBranch, toBranch)) {
       throw const BusinessLedgerError(BusinessLedgerProblem.invalidTransfer);
     }
@@ -150,6 +156,8 @@ extension BusinessBranchTransfers on BusinessLedger {
         rate?.to,
         rate?.decimal,
         note,
+        // Only an overdraft changes the fingerprint: older commands replay.
+        if (allowNegative) 'allow_negative',
       ],
       (txn, now) async {
         await _requirePeerPresence(txn, fromBranch, toBranch, access.directory);
@@ -168,7 +176,7 @@ extension BusinessBranchTransfers on BusinessLedger {
         );
         BusinessLedger._amount(credit);
         final debitBalance = BusinessLedger._balance(source, -amountMinor);
-        if (debitBalance < 0) {
+        if (debitBalance < 0 && !allowNegative) {
           throw const BusinessLedgerError(
             BusinessLedgerProblem.insufficientBalance,
           );

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -65,6 +66,32 @@ class _SecureImageState extends ConsumerState<SecureImage> {
       h = (h * 0x01000193) & 0xFFFFFFFF;
     }
     return h.toRadixString(16).padLeft(8, '0');
+  }
+
+  /// The same image whatever its `?v=` stamp: the last version seen is kept
+  /// under this key too, so a picture still shows offline when the saved
+  /// address carries no (or another) version.
+  static String _latestKey(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasQuery) return url;
+    final rest = {
+      for (final e in uri.queryParameters.entries)
+        if (e.key != 'v') e.key: e.value,
+    };
+    return uri
+        .replace(queryParameters: rest.isEmpty ? null : rest)
+        .toString()
+        .replaceFirst(RegExp(r'\?$'), '');
+  }
+
+  static Future<File?> _latestFile(String url) async {
+    if (ChatMediaStore.isChatMedia(url)) return null;
+    try {
+      final dir = await getTemporaryDirectory();
+      return File('${dir.path}/secure_img/latest_${_diskKey(_latestKey(url))}.bin');
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<File?> _diskFile(String url) async {
@@ -184,6 +211,15 @@ class _SecureImageState extends ConsumerState<SecureImage> {
           final diskBytes = await file.readAsBytes();
           if (diskBytes.isNotEmpty) {
             _cache[secureUrl] = diskBytes;
+            // Keep the version-free copy current for offline reads.
+            unawaited(() async {
+              try {
+                final latest = await _latestFile(secureUrl);
+                if (latest != null && !await latest.exists()) {
+                  await latest.writeAsBytes(diskBytes, flush: true);
+                }
+              } catch (_) {}
+            }());
             _inFlight.remove(secureUrl);
             if (!mounted || secureUrl != _secureUrl()) return;
             setState(() {
@@ -215,6 +251,8 @@ class _SecureImageState extends ConsumerState<SecureImage> {
             await file.parent.create(recursive: true);
             await file.writeAsBytes(bytes, flush: true);
           }
+          final latest = await _latestFile(secureUrl);
+          if (latest != null) await latest.writeAsBytes(bytes, flush: true);
         } catch (_) {}
       }
       setState(() {
@@ -223,6 +261,24 @@ class _SecureImageState extends ConsumerState<SecureImage> {
         _loading = false;
       });
     } catch (e) {
+      // Offline (or the server is down): the last copy of this picture.
+      try {
+        final latest = await _latestFile(secureUrl);
+        if (latest != null && await latest.exists()) {
+          final bytes = await latest.readAsBytes();
+          if (bytes.isNotEmpty) {
+            _cache[secureUrl] = bytes;
+            _inFlight.remove(secureUrl);
+            if (!mounted || secureUrl != _secureUrl()) return;
+            setState(() {
+              _bytes = bytes;
+              _error = null;
+              _loading = false;
+            });
+            return;
+          }
+        }
+      } catch (_) {}
       if (!mounted || secureUrl != _secureUrl()) {
         _inFlight.remove(secureUrl);
         return;

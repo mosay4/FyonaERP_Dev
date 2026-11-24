@@ -798,7 +798,13 @@ class BranchesPage extends ConsumerWidget {
   ) async {
     final wasCurrent = BranchScope.branchId == '${b['id']}';
     if (wasCurrent) {
-      await ref.read(branchApiProvider).select();
+      try {
+        await ref.read(branchApiProvider).select();
+      } catch (e) {
+        // Archiving is saved on the device; leaving the archived branch
+        // works the same without internet (the server learns it later).
+        if (!isConnectionError(e)) rethrow;
+      }
       ref.read(branchEpochProvider.notifier).state++;
     }
     ref.invalidate(branchesProvider);

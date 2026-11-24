@@ -9,7 +9,6 @@ import '../../core/router/route_names.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart' hide TextDirection;
 import 'package:flutter/services.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/utils/date_formatter.dart';
@@ -24,6 +23,7 @@ import '../../core/network/api_client.dart';
 import '../../core/services/currency/currency_engine.dart';
 import '../../core/localization/app_localizations.dart';
 import '../../core/help/information_clicker.dart';
+import 'secure_image.dart';
 import 'two_tone_icon.dart';
 import 'two_tone_icons.dart';
 import 'sara_action_dispatcher.dart';
@@ -3305,9 +3305,8 @@ class _UserAvatar extends ConsumerWidget {
               fit: BoxFit.cover, errorBuilder: (_, _, _) => fallback)
           : url == null
           ? null
-          : CachedNetworkImage(imageUrl: url, width: size, height: size, fit: BoxFit.cover,
-              memCacheWidth: 192, fadeInDuration: Duration.zero,
-              placeholder: (_, _) => fallback, errorWidget: (_, _, _) => fallback);
+          : SecureImage(url: url, width: size, height: size, fit: BoxFit.cover,
+              placeholder: fallback, errorBuilder: (_, _, _) => fallback);
       return CircleAvatar(radius: size / 2, backgroundColor: AppColors.primary.withAlpha(20),
           child: picture == null ? fallback : ClipOval(child: picture));
     }

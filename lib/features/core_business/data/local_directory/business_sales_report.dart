@@ -326,12 +326,10 @@ final class _SalesSection {
 
   bool get complete =>
       total.complete && paid.complete && balance.complete && net.complete;
-  List<Map<String, dynamic>>? get chart => !total.complete
-      ? null
-      : [
-          for (final date in byDay.keys.toList()..sort())
-            {'date': date, 'value': byDay[date]!.totalValue},
-        ];
+  List<Map<String, dynamic>> get chart => [
+    for (final date in byDay.keys.toList()..sort())
+      {'date': date, 'value': byDay[date]!.knownValue},
+  ];
 
   Map<String, dynamic> payload() => {
     ...total.payload(),

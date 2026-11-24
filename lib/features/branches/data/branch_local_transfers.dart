@@ -167,6 +167,10 @@ final class BranchLocalTransfers {
       BusinessLedgerAction.transfer,
       BusinessLedgerAction.readInventory,
       if (_can('inventory_cost')) BusinessLedgerAction.readInventoryCost,
+      // The owner (or whoever sees balances) may send beyond the balance
+      // after confirming it in the app's overdraft dialog.
+      if (!directory.member || _can('banks.balances'))
+        BusinessLedgerAction.authorizeReturnOverdraft,
     });
     try {
       final result = await _store().withLedger(
@@ -260,10 +264,6 @@ final class BranchLocalTransfers {
     String? commandId,
   }) async => _run(
     (ledger, access, current, _) async {
-      if (allowNegative) {
-        // The device store never moves money it does not hold.
-        throw Exception('التحويل على هذا الجهاز لا يقبل السحب بالسالب');
-      }
       if (!_can('banks.details')) throw const DirectoryAccessDenied();
       Future<String?> currencyOf(String branch, String id) async {
         for (final row in await ledger.transferAccounts(access, branch)) {
@@ -291,6 +291,7 @@ final class BranchLocalTransfers {
         notes: notes,
         allowed: () => current() && _can('banks.details'),
         actor: _actorInfo(),
+        allowNegative: allowNegative,
       );
     },
     branches: [fromBranchId, toBranchId],

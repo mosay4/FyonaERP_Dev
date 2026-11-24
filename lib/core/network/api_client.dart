@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -392,6 +393,14 @@ final dioProvider = Provider<Dio>((ref) {
         handler.next(e);
       },
     ),
+    // The gateway answers 502/504 (or a bare 503) when the FYONA server
+    // behind it is down. For the app that is the same as no internet: every
+    // screen keeps working from the device and nothing is emptied.
+    InterceptorsWrapper(
+      onError: (e, handler) {
+        handler.next(gatewayDownAsOffline(e));
+      },
+    ),
   ]);
 
   return dio;
@@ -559,4 +568,22 @@ class ApiClient {
       cancelToken: cancelToken,
     );
   }
+}
+
+/// A gateway failure (the server behind the proxy is down) becomes a plain
+/// connection error, so it is handled exactly like being offline.
+DioException gatewayDownAsOffline(DioException e) {
+  if (e.type != DioExceptionType.badResponse) return e;
+  final status = e.response?.statusCode;
+  final body = e.response?.data;
+  final gateway =
+      status == 502 || status == 504 || status == 503 && body is! Map;
+  if (!gateway) return e;
+  return DioException(
+    requestOptions: e.requestOptions,
+    response: e.response,
+    type: DioExceptionType.connectionError,
+    error: const SocketException('FYONA server unreachable'),
+    message: 'server_unreachable',
+  );
 }
