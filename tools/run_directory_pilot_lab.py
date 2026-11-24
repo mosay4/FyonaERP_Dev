@@ -196,6 +196,21 @@ async def qa_private_accounts_only(request, call_next):
             return JSONResponse({'detail': 'غير مصرح بالوصول'}, status_code=403)
     # Keep signup closed without an invite. External OAuth, email mutation
     # and administrative routes are not part of the public sandbox.
+    # Card payment for the user's own subscription (owner's decision: same
+    # Stripe account as production). Admin/webhook payment routes stay shut.
+    if os.environ.get('STRIPE_SECRET_KEY') and path in (
+            '/api/v1/payments/stripe/plans',
+            '/api/v1/payments/stripe/create-checkout-session',
+            '/api/v1/payments/stripe/create-payment-intent',
+            '/api/v1/payments/stripe/setup-intent',
+            '/api/v1/payments/stripe/auto-renew/enable',
+            '/api/v1/payments/stripe/auto-renew/activate',
+            '/api/v1/payments/stripe/auto-renew/disable',
+            '/api/v1/payments/stripe/auto-renew/status',
+            '/api/v1/payments/stripe/confirm',
+            '/api/v1/payments/stripe/return',
+            '/api/v1/payments/stripe/cancel'):
+        return await call_next(request)
     if path.startswith(('/api/v1/admin', '/fyona-admin', '/docs', '/redoc', '/metrics',
                         '/openapi.json', '/api/v1/auth/register', '/api/v1/payments',
                         '/api/v1/auth/verify-registration', '/api/v1/auth/resend',
@@ -425,6 +440,17 @@ def main():
         # The lab may only reach localhost; the egress gateway on localhost
         # (fyona-qa-sara-egress) opens the allow-listed hosts and nothing else.
         env["HTTPS_PROXY"] = "http://127.0.0.1:18990"
+    # Stripe (card payment of the subscription): settings from a private
+    # state file, never from the release or git.
+    stripe_env = root / "stripe.env"
+    if managed and stripe_env.is_file():
+        for line in stripe_env.read_text().splitlines():
+            name, _, value = line.partition("=")
+            if re.fullmatch(r"STRIPE_[A-Z_]+", name) and value:
+                env[name] = value.strip()
+        env.setdefault("HTTPS_PROXY", "http://127.0.0.1:18990")
+        if env["HTTPS_PROXY"] == "http://127.0.0.1:1":
+            env["HTTPS_PROXY"] = "http://127.0.0.1:18990"
     # Voice messages are turned into text on this server (Whisper, offline
     # model folder; no download at run time).
     stt_model = Path("/opt/fyona-directory-qa/sara-stt/model-small")
