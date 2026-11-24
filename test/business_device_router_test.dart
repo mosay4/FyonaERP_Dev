@@ -22,9 +22,9 @@ class _Purchases extends PurchaseApi {
   }
 
   @override
-  Future<Map<String, dynamic>> collectCustomer(String id, Map<String, dynamic> body) async {
-    if ((body['amount'] as num) > 500) throw StateError('المبلغ أكبر من الدين');
-    calls.add('collect:$id:${body['amount']}');
+  Future<Map<String, dynamic>> issuePurchase(Map<String, dynamic> body) async {
+    if ((body['total'] as num) > 500) throw StateError('الرصيد غير كافٍ');
+    calls.add('purchase:${body['total']}');
     return {'id': 'p1'};
   }
 }
@@ -79,11 +79,13 @@ void main() {
   });
 
   test('an operation keeps the app rules: a refusal comes back as data', () async {
-    expect((await call('POST', '/customers/c1/payments', body: {'amount': 200}))['success'], isTrue);
-    final refused = await call('POST', '/customers/c1/payments', body: {'amount': 900});
+    expect((await call('POST', '/invoices/issue-purchase', body: {'total': 200}))['success'], isTrue);
+    final refused = await call('POST', '/invoices/issue-purchase', body: {'total': 900});
     expect(refused['success'], isFalse);
-    expect(refused['message'], contains('أكبر من الدين'));
-    expect(purchases.calls, ['collect:c1:200']);
+    expect(refused['message'], contains('الرصيد غير كافٍ'));
+    expect(purchases.calls, ['purchase:200']);
+    // Collecting a debt has no safe device path yet: Sara offers the screen.
+    expect(BusinessDeviceRouter.supports('POST', '/customers/c1/payments'), isFalse);
   });
 
   test('reconciliation takes actual amounts only; the system side is read here', () async {

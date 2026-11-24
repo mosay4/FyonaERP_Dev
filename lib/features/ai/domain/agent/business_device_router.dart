@@ -1,7 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/services/currency/currency_engine.dart';
+import 'package:uuid/uuid.dart';
+
 import '../../../business_banks/presentation/providers/business_banks_providers.dart';
+import '../../../business_banks/presentation/providers/local_business_banking.dart';
+import '../../../core_business/data/local_directory/directory_database.dart';
+import '../../../core_business/data/local_directory/directory_pilot.dart';
+import '../../../core_business/data/local_ledger/business_money.dart';
+import '../../../core_business/presentation/providers/business_ledger_session.dart';
 import '../../../core_business/data/project_settings_api.dart';
 import '../../../dashboard/presentation/providers/business_dashboard_providers.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
@@ -37,15 +44,11 @@ abstract final class BusinessDeviceRouter {
     ('POST', '/customers', (r, p, q, b) => r(purchaseApiProvider).createCustomer(name: _req(b, 'name'), phone: b['phone']?.toString())),
     ('PUT', '/customers/{id}', (r, p, q, b) => r(purchaseApiProvider).updateCustomer(p['id']!, name: b['name']?.toString(), phone: b['phone']?.toString())),
     ('GET', '/customers/{id}/balance', (r, p, q, b) => r(purchaseApiProvider).customerBalance(p['id']!)),
-    ('GET', '/customers/{id}/operations', (r, p, q, b) => r(purchaseApiProvider).customerOperations(p['id']!)),
-    ('POST', '/customers/{id}/payments', (r, p, q, b) => r(purchaseApiProvider).collectCustomer(p['id']!, b)),
     ('GET', '/suppliers', (r, p, q, b) => r(purchaseApiProvider).searchSuppliers(_s(q, 'search'))),
     ('GET', '/suppliers/{id}', (r, p, q, b) => _find(r(purchaseApiProvider).searchSuppliers(''), p['id']!)),
     ('POST', '/suppliers', (r, p, q, b) => r(purchaseApiProvider).createSupplier(name: _req(b, 'name'), phone: b['phone']?.toString())),
     ('PUT', '/suppliers/{id}', (r, p, q, b) => r(purchaseApiProvider).updateSupplier(p['id']!, name: b['name']?.toString(), phone: b['phone']?.toString())),
     ('GET', '/suppliers/{id}/balance', (r, p, q, b) => r(purchaseApiProvider).supplierBalance(p['id']!)),
-    ('GET', '/suppliers/{id}/operations', (r, p, q, b) => r(purchaseApiProvider).supplierOperations(p['id']!)),
-    ('POST', '/suppliers/{id}/payments', (r, p, q, b) => r(purchaseApiProvider).paySupplier(p['id']!, b)),
 
     // ── invoices ─────────────────────────────────────────────────────────
     ('GET', '/invoices', (r, p, q, b) => r(invoicesApiProvider).list(type: _o(q, 'invoice_type'), search: _o(q, 'search'), perPage: _i(q, 'per_page', 100))),
@@ -75,7 +78,6 @@ abstract final class BusinessDeviceRouter {
     ('GET', '/products/{id}/stats', (r, p, q, b) => r(inventoryApiProvider).productStats(p['id']!, from: _o(q, 'from'), to: _o(q, 'to'), displayCurrency: _o(q, 'display_currency'))),
     ('GET', '/inventory/movements/product/{id}', (r, p, q, b) => r(inventoryApiProvider).productMovements(p['id']!, limit: _i(q, 'limit', 60))),
     ('POST', '/inventory/adjust', (r, p, q, b) => r(inventoryApiProvider).adjustStock(b)),
-    ('POST', '/inventory/transfer', (r, p, q, b) => r(inventoryApiProvider).transferStock(b)),
     ('PUT', '/inventory/warehouse-settings', (r, p, q, b) => _done(r(inventoryApiProvider).setWarehouseSettings(expiryEnabled: b['expiry_enabled'] == true, warnDays: _i(b, 'warn_days', 30)))),
     ('GET', '/categories', (r, p, q, b) => r(inventoryApiProvider).categories()),
     ('POST', '/categories', (r, p, q, b) => r(inventoryApiProvider).createCategory(_req(b, 'name'))),
@@ -84,20 +86,26 @@ abstract final class BusinessDeviceRouter {
     ('DELETE', '/categories/{id}/image', (r, p, q, b) => _done(r(inventoryApiProvider).deleteCategoryImage(p['id']!))),
 
     // ── money: banks, cash, expenses, timeline ───────────────────────────
-    ('GET', '/banking/accounts', (r, p, q, b) => r(businessBanksApiProvider).listAccounts()),
-    ('GET', '/banking/accounts/{id}', (r, p, q, b) => _find(r(businessBanksApiProvider).listAccounts(), p['id']!)),
-    ('GET', '/banking/accounts/{id}/transactions', (r, p, q, b) => r(businessBanksApiProvider).transactions(p['id']!)),
-    ('GET', '/banking/accounts/{id}/statement', (r, p, q, b) => r(businessBanksApiProvider).transactions(p['id']!)),
-    ('POST', '/banking/accounts', (r, p, q, b) => r(businessBanksApiProvider).createAccount(bankName: _req(b, 'bank_name'), accountName: _s(b, 'account_name').isEmpty ? _req(b, 'bank_name') : _s(b, 'account_name'), accountNumber: _s(b, 'account_number'), iban: _o(b, 'iban'), currency: _req(b, 'currency'), accountType: _o(b, 'account_type') ?? 'checking', balance: _d(b, 'balance') ?? 0)),
-    ('PUT', '/banking/accounts/{id}', (r, p, q, b) => r(businessBanksApiProvider).updateAccount(p['id']!, bankName: _o(b, 'bank_name'), accountName: _o(b, 'account_name'), accountNumber: _o(b, 'account_number'), iban: _o(b, 'iban'), currency: _o(b, 'currency'), accountType: _o(b, 'account_type'), isActive: b['is_active'] is bool ? b['is_active'] as bool : null)),
-    ('DELETE', '/banking/accounts/{id}', (r, p, q, b) => r(businessBanksApiProvider).deleteAccount(p['id']!)),
-    ('POST', '/banking/accounts/{id}/deposit', (r, p, q, b) => r(businessBanksApiProvider).deposit(p['id']!, _amount(b), description: _o(b, 'description'))),
-    ('POST', '/banking/accounts/{id}/withdraw', (r, p, q, b) => r(businessBanksApiProvider).withdraw(p['id']!, _amount(b), description: _o(b, 'description'))),
-    ('POST', '/banking/transfer', (r, p, q, b) => r(businessBanksApiProvider).transfer(fromId: _req(b, 'from_account_id'), toId: _req(b, 'to_account_id'), amount: _amount(b), toAmount: _d(b, 'to_amount'), rate: _d(b, 'exchange_rate') ?? _d(b, 'rate'), description: _o(b, 'description'))),
-    ('POST', '/banking/banks/link', (r, p, q, b) => _done(r(businessBanksApiProvider).linkAccounts(_strings(b['account_ids'])))),
-    ('POST', '/banking/banks/unlink', (r, p, q, b) => _done(r(businessBanksApiProvider).unlinkAccounts(_strings(b['account_ids'])))),
-    ('GET', '/expenses', (r, p, q, b) => r(businessFinanceApiProvider).listExpenses()),
-    ('POST', '/expenses', (r, p, q, b) => r(businessFinanceApiProvider).withdraw(_req(b, 'bank_account_id'), _amount(b), description: _o(b, 'description'), isExpense: true, category: _o(b, 'category'))),
+    // Banks/cash: the same local banking the banks screen reads, and the
+    // same notifier its buttons call (which writes the device ledger).
+    ('GET', '/banking/accounts', (r, p, q, b) => _bankAccounts(r)),
+    ('GET', '/banking/accounts/{id}', (r, p, q, b) => _find(_bankAccounts(r), p['id']!)),
+    ('GET', '/banking/accounts/{id}/transactions', (r, p, q, b) async {
+      final local = r(localBusinessBankingProvider);
+      return local != null ? local.history([p['id']!]) : r(businessBanksApiProvider).transactions(p['id']!);
+    }),
+    ('POST', '/banking/accounts', (r, p, q, b) => _done(r(businessBanksProvider.notifier).addAccount(bankName: _req(b, 'bank_name'), accountName: _s(b, 'account_name').isEmpty ? _req(b, 'bank_name') : _s(b, 'account_name'), accountNumber: _s(b, 'account_number'), iban: _o(b, 'iban'), currency: _req(b, 'currency'), accountType: _o(b, 'account_type') ?? 'checking', balance: _d(b, 'balance') ?? 0, decimalBalance: _o(b, 'balance')))),
+    ('PUT', '/banking/accounts/{id}', (r, p, q, b) => _done(r(businessBanksProvider.notifier).updateAccount(p['id']!, bankName: _o(b, 'bank_name'), accountName: _o(b, 'account_name'), accountNumber: _o(b, 'account_number'), iban: _o(b, 'iban'), currency: _o(b, 'currency'), accountType: _o(b, 'account_type')))),
+    ('DELETE', '/banking/accounts/{id}', (r, p, q, b) => _done(r(businessBanksProvider.notifier).deleteAccount(p['id']!))),
+    ('POST', '/banking/accounts/{id}/deposit', (r, p, q, b) => _done(r(businessBanksProvider.notifier).deposit(p['id']!, _amount(b), description: _o(b, 'description')))),
+    ('POST', '/banking/accounts/{id}/withdraw', (r, p, q, b) => _done(r(businessBanksProvider.notifier).withdraw(p['id']!, _amount(b), description: _o(b, 'description')))),
+    ('POST', '/banking/transfer', (r, p, q, b) async {
+      final ok = await r(businessBanksProvider.notifier).transfer(fromId: _req(b, 'from_account_id'), toId: _req(b, 'to_account_id'), amount: _amount(b), decimalAmount: _o(b, 'amount'), toAmount: _d(b, 'to_amount'), rate: _d(b, 'exchange_rate') ?? _d(b, 'rate'));
+      if (!ok) throw StateError('لم يتم التحويل. راجع الرصيد والحسابين.');
+      return {'done': true};
+    }),
+    ('GET', '/expenses', (r, p, q, b) => r(businessFinanceApiProvider).listTransactions(kind: 'expense', dateFrom: _o(q, 'date_from'), dateTo: _o(q, 'date_to'))),
+    ('POST', '/expenses', (r, p, q, b) => _expense(r, b)),
     ('GET', '/business/transactions', (r, p, q, b) => r(businessFinanceApiProvider).listTransactions(kind: _o(q, 'kind'), period: _o(q, 'period'), search: _o(q, 'search'), dateFrom: _o(q, 'date_from'), dateTo: _o(q, 'date_to'))),
     ('GET', '/business/transactions/{type}/{id}', (r, p, q, b) => r(businessFinanceApiProvider).getTransaction(p['type']!, p['id']!)),
 
@@ -183,7 +191,9 @@ abstract final class BusinessDeviceRouter {
     required String path,
     Map<String, dynamic>? params,
     Map<String, dynamic>? body,
+    WidgetRef? screen,
   }) async {
+    _screen = screen;
     final hit = _match(method, path);
     if (hit == null) {
       const reason = 'هذه العملية غير متاحة على الجهاز. استخدم مسارًا آخر من الدليل.';
@@ -201,6 +211,34 @@ abstract final class BusinessDeviceRouter {
   static String _reason(Object error) {
     final text = '$error'.replaceFirst(RegExp(r'^[A-Za-z]*(Exception|Error)[: ]*'), '').trim();
     return text.isEmpty || text.length > 400 ? 'رفض التطبيق العملية. راجع البيانات.' : text;
+  }
+
+  /// The chat screen's ref while a request runs (local writes that need
+  /// the screen's session, exactly like the expense sheet).
+  static WidgetRef? _screen;
+
+  static Future<List<dynamic>> _bankAccounts(ProviderReader read) async {
+    final local = read(localBusinessBankingProvider);
+    return local != null ? local.accounts() : read(businessBanksApiProvider).listAccounts();
+  }
+
+  static Future<Object?> _expense(ProviderReader read, Map<String, dynamic> b) async {
+    final account = _req(b, 'bank_account_id');
+    final raw = _s(b, 'amount');
+    _amount(b);
+    final category = _o(b, 'category') ?? 'أخرى';
+    final description = _o(b, 'description') ?? category;
+    final scope = read(businessLocalLedgerScopeProvider);
+    final screen = _screen;
+    if (scope != null && screen != null) {
+      await withBusinessLedger(screen, scope, BusinessLedgerAction.moveMoney, ['expenses'],
+          (ledger, grant) => ledger.move(grant, commandId: const Uuid().v4(), accountId: account,
+              amountMinor: BusinessMoney.minor(raw), withdraw: true,
+              description: description, expenseCategory: category));
+      return {'done': true};
+    }
+    return read(businessFinanceApiProvider).withdraw(account, _amount(b),
+        description: description, isExpense: true, category: category);
   }
 
   // ── reconciliation: actual amounts only; system balances read here ──

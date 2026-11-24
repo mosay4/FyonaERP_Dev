@@ -1151,7 +1151,8 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
             'id': call['id'],
             'result': await BusinessDeviceRouter.handle(ref.read,
                 method: '${call['method'] ?? 'GET'}', path: '${call['path'] ?? ''}',
-                params: call['params'] is Map ? Map<String, dynamic>.from(call['params'] as Map) : null),
+                params: call['params'] is Map ? Map<String, dynamic>.from(call['params'] as Map) : null,
+                screen: ref),
           });
         }
         response = await api.continueBusiness(state: response.state!, results: results,
@@ -1226,7 +1227,8 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
           outcome = await BusinessDeviceRouter.handle(ref.read,
               method: '${deviceCall['method']}', path: '${deviceCall['path']}',
               params: deviceCall['params'] is Map ? Map<String, dynamic>.from(deviceCall['params'] as Map) : null,
-              body: deviceCall['body'] is Map ? Map<String, dynamic>.from(deviceCall['body'] as Map) : null);
+              body: deviceCall['body'] is Map ? Map<String, dynamic>.from(deviceCall['body'] as Map) : null,
+              screen: ref);
         } else {
           final result = await network.post('/business-sara/execute', data: {'token': params['token']});
           final envelope = result.data as Map;
