@@ -498,7 +498,7 @@ class _SwitchGlassCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(5),
                 border: Border.all(color: accent.withValues(alpha: .5)),
               ),
-              child: Icon(Icons.auto_awesome_rounded, size: 12, color: accent),
+              // The card chip, without the sparkle mark.
             ),
           ],
         ),

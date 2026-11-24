@@ -6,8 +6,9 @@ void main() {
   group('LoginPage', () {
     test('FYONA color scheme is correct', () {
       expect(AppColors.primary, const Color(0xFFA01530));
-      expect(AppColors.background, const Color(0xFF0A0A0A));
-      expect(AppColors.surface, const Color(0xFF151515));
+      // Dark theme: soft graphite instead of pure black (owner request).
+      expect(AppColors.background, const Color(0xFF131418));
+      expect(AppColors.surface, const Color(0xFF1B1D22));
     });
 
     test('status colors are defined', () {

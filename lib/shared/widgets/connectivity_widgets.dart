@@ -4,9 +4,11 @@ import '../../core/theme/app_colors.dart';
 import '../../core/localization/app_localizations.dart';
 import '../../core/services/connectivity_service.dart';
 
-/// Animated connectivity badge for app bars: a professional pill/capsule
-/// with a clear Wi-Fi signal icon and a small live status dot.
-/// Green = online, amber = offline/unknown.
+/// Connection badge for the app bars (Personal and Business): a clean Wi-Fi
+/// mark in a round button that matches the bell beside it.
+///  • online  — green arcs that light up one after another, then rest;
+///  • offline — muted arcs crossed by a line in amber, breathing slowly.
+/// Switching state cross-fades with a soft scale.
 class ConnectivityIndicator extends StatefulWidget {
   final bool online;
   final double size;
@@ -18,59 +20,77 @@ class ConnectivityIndicator extends StatefulWidget {
 
 class _ConnectivityIndicatorState extends State<ConnectivityIndicator>
     with TickerProviderStateMixin {
-  late final AnimationController _pulse;
+  /// One reveal of the arcs when the connection (re)appears.
+  late final AnimationController _reveal = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..forward();
+
+  /// Slow breathing while offline only.
+  late final AnimationController _breath = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1800),
+  );
 
   @override
   void initState() {
     super.initState();
-    _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 1300))
-      ..repeat(reverse: true);
+    if (!widget.online) _breath.repeat(reverse: true, count: 6);
+  }
+
+  @override
+  void didUpdateWidget(covariant ConnectivityIndicator old) {
+    super.didUpdateWidget(old);
+    if (old.online == widget.online) return;
+    if (widget.online) {
+      _breath.stop();
+      _breath.value = 0;
+      _reveal.forward(from: 0);
+    } else {
+      _breath.repeat(reverse: true, count: 6);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final online = widget.online;
-    final base = online ? AppColors.success : AppColors.warning;
-    final t = _pulse.value;
     final s = widget.size;
-    final pillH = s + 12.0;
-    final pillW = s + 12.0;
-
-    // Pulse ring behind the wifi icon (subtle, adaptive to both themes).
-    final ring = 0.74 + 0.4 * t;
-
-    return Container(
-      width: pillW,
-      height: pillH,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [base.withAlpha(34), base.withAlpha(12)],
+    final box = s + 12.0;
+    final color = online ? const Color(0xFF2FA866) : const Color(0xFFE0892B);
+    return Semantics(
+      label: online ? 'online' : 'offline',
+      child: Container(
+        width: box,
+        height: box,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppColors.surface,
+          border: Border.all(color: AppColors.border, width: 1),
         ),
-        border: Border.all(color: base.withAlpha(140), width: 1.2),
-        boxShadow: [
-          BoxShadow(color: base.withAlpha(50), blurRadius: 6, offset: const Offset(0, 1)),
-        ],
-      ),
-      alignment: Alignment.center,
-      padding: const EdgeInsets.all(1),
-      child: Transform.scale(
-        scale: ring,
-        child: Container(
-          width: s,
-          height: s,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: base.withAlpha(16),
-            border: Border.all(color: base.withAlpha(90), width: 1),
+        alignment: Alignment.center,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 320),
+          switchInCurve: Curves.easeOutBack,
+          switchOutCurve: Curves.easeIn,
+          transitionBuilder: (child, animation) => FadeTransition(
+            opacity: animation,
+            child: ScaleTransition(
+              scale: Tween(begin: 0.7, end: 1.0).animate(animation),
+              child: child,
+            ),
           ),
-          child: Center(
-            child: Icon(
-              online ? Icons.signal_wifi_4_bar : Icons.signal_wifi_0_bar,
-              size: s - 4,
-              color: base,
+          child: AnimatedBuilder(
+            key: ValueKey(online),
+            animation: Listenable.merge([_reveal, _breath]),
+            builder: (context, _) => CustomPaint(
+              size: Size.square(s),
+              painter: _WifiMark(
+                color: color,
+                online: online,
+                reveal: Curves.easeOut.transform(_reveal.value),
+                breath: _breath.value,
+                track: AppColors.textTertiary.withAlpha(70),
+              ),
             ),
           ),
         ),
@@ -80,9 +100,87 @@ class _ConnectivityIndicatorState extends State<ConnectivityIndicator>
 
   @override
   void dispose() {
-    _pulse.dispose();
+    _reveal.dispose();
+    _breath.dispose();
     super.dispose();
   }
+}
+
+class _WifiMark extends CustomPainter {
+  _WifiMark({
+    required this.color,
+    required this.online,
+    required this.reveal,
+    required this.breath,
+    required this.track,
+  });
+
+  final Color color;
+  final bool online;
+  final double reveal;
+  final double breath;
+  final Color track;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final centre = Offset(w / 2, size.height * 0.80);
+    final stroke = w * 0.105;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = stroke;
+    const sweep = 1.55; // radians of each arc, centred upwards
+    final radii = [w * 0.20, w * 0.38, w * 0.56];
+    for (var i = 0; i < radii.length; i++) {
+      final r = radii[i];
+      final rect = Rect.fromCircle(center: centre, radius: r);
+      final start = -1.5708 - sweep / 2;
+      if (online) {
+        // Each arc lights after the previous one.
+        final t = ((reveal * 3) - i).clamp(0.0, 1.0);
+        canvas.drawArc(rect, start, sweep, false, paint..color = track);
+        if (t > 0) {
+          canvas.drawArc(
+            rect,
+            start + sweep * (1 - t) / 2,
+            sweep * t,
+            false,
+            paint..color = color,
+          );
+        }
+      } else {
+        final alpha = (150 + 80 * breath).round();
+        canvas.drawArc(rect, start, sweep, false,
+            paint..color = color.withAlpha(i == 0 ? alpha : (alpha * 0.55).round()));
+      }
+    }
+    // The dot.
+    canvas.drawCircle(
+      centre,
+      stroke * 0.85,
+      Paint()..color = online ? color : color.withAlpha((170 + 70 * breath).round()),
+    );
+    if (!online) {
+      // A clean strike line.
+      canvas.drawLine(
+        Offset(w * 0.16, size.height * 0.10),
+        Offset(w * 0.84, size.height * 0.86),
+        Paint()
+          ..color = color
+          ..strokeWidth = stroke * 0.9
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _WifiMark old) =>
+      old.reveal != reveal ||
+      old.breath != breath ||
+      old.online != online ||
+      old.color != color ||
+      old.track != track;
 }
 
 /// Modal dialog shown when the user tries to use an internet-required section

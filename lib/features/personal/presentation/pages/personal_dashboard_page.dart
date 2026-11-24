@@ -1050,7 +1050,7 @@ class _SkeletonLoaderState extends State<_SkeletonLoader>
     super.dispose();
   }
 
-  static const _boxColor = Color(0xFF1E1E1E);
+  static const _boxColor = Color(0xFF24272D);
 
   @override
   Widget build(BuildContext context) {

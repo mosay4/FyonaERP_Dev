@@ -32,10 +32,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(refreshed, 0);
       // A full pull refreshes once; the rows stay on screen meanwhile.
+      final top = tester.getTopLeft(find.text('row 0')).dy;
       await tester.drag(find.text('row 0'), const Offset(0, 300));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.text('row 0'), findsOneWidget);
+      // While the dots show, the page stays pulled down (also on bouncing
+      // lists that spring back by themselves).
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.getTopLeft(find.text('row 0')).dy, greaterThan(top + 30));
       await tester.pumpAndSettle();
       expect(refreshed, 1);
       expect(find.text('row 0'), findsOneWidget);

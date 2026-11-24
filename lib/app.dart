@@ -150,7 +150,7 @@ class _ThemeTransitionOverlayState
 
     // dark→light: white smoke; light→dark: black smoke.
     final isLight = target == ThemeMode.light;
-    final smokeColor = isLight ? Colors.white : const Color(0xFF0A0A0A);
+    final smokeColor = isLight ? Colors.white : const Color(0xFF131418);
 
     return Stack(
       children: [

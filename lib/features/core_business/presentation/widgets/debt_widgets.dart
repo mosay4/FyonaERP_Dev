@@ -59,10 +59,10 @@ class DebtStyle {
   static const wine = Color(0xFF8E1029);
   static const pink = Color(0xFFF8E7EB);
   static bool dark(BuildContext c) => Theme.of(c).brightness == Brightness.dark;
-  static Color background(BuildContext c) => dark(c) ? const Color(0xFF17171B) : const Color(0xFFF2F3F6);
+  static Color background(BuildContext c) => dark(c) ? const Color(0xFF131418) : const Color(0xFFF2F3F6);
   static Color surface(BuildContext c) => dark(c) ? const Color(0xFF242128) : const Color(0xFFFCFAFC);
   static Color border(BuildContext c) => dark(c) ? const Color(0xFF53323C) : const Color(0xFFEAD4DA);
-  static Color ink(BuildContext c) => dark(c) ? Colors.white : const Color(0xFF142430);
+  static Color ink(BuildContext c) => dark(c) ? const Color(0xFFE9EAEE) : const Color(0xFF142430);
   static TextStyle text(BuildContext c, {double size = 14, bool bold = false, Color? color}) =>
       TextStyle(fontFamily: 'Cairo', fontSize: size, fontWeight: bold ? FontWeight.w800 : FontWeight.w500, color: color ?? ink(c));
 }
@@ -150,7 +150,13 @@ class DebtPanel extends StatelessWidget {
       boxShadow: decorated ? [BoxShadow(color: DebtStyle.red.withAlpha(12), blurRadius: 12, offset: const Offset(0, 4))] : null,
       gradient: red
           ? const LinearGradient(colors: [DebtStyle.red, DebtStyle.wine])
-          : (pink ? const LinearGradient(colors: [DebtStyle.pink, Color(0xFFFDF3F6)]) : null),
+          : (pink
+              // Dark theme: a calm wine-tinted glass instead of a light pink
+              // block (white text stays readable).
+              ? (DebtStyle.dark(context)
+                  ? const LinearGradient(colors: [Color(0xFF3A1F28), Color(0xFF2A1A20)])
+                  : const LinearGradient(colors: [DebtStyle.pink, Color(0xFFFDF3F6)]))
+              : null),
       color: (red || pink) ? null : DebtStyle.surface(context)),
     child: ClipRRect(borderRadius: BorderRadius.circular(15),
       child: CustomPaint(painter: decorated ? _DebtDecoration(red) : null,

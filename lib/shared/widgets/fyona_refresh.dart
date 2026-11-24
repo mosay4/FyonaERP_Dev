@@ -72,14 +72,22 @@ class _FyonaRefreshState extends State<FyonaRefresh>
   /// The list bounces by itself (iOS-style physics): do not move it again.
   bool _bouncing = false;
 
+  /// How far a bouncing list is itself pulled down right now (it springs
+  /// back on release; the page is held at the resting offset meanwhile).
+  final ValueNotifier<double> _listOver = ValueNotifier(0);
+
   @override
   void dispose() {
     _pull.dispose();
     _wave.dispose();
+    _listOver.dispose();
     super.dispose();
   }
 
   bool _onScroll(ScrollNotification n) {
+    if (n.depth == 0 && n.metrics.axis == Axis.vertical) {
+      _listOver.value = math.max(0, -n.metrics.pixels);
+    }
     if (!widget.notificationPredicate(n) || _refreshing) return false;
     if (n.metrics.axis != Axis.vertical) return false;
     final atTop = n.metrics.extentBefore == 0;
@@ -176,7 +184,7 @@ class _FyonaRefreshState extends State<FyonaRefresh>
     return NotificationListener<ScrollNotification>(
       onNotification: _onScroll,
       child: AnimatedBuilder(
-        animation: Listenable.merge([_pull, _wave]),
+        animation: Listenable.merge([_pull, _wave, _listOver]),
         child: widget.child,
         builder: (context, child) {
           final pull = _pull.value;
@@ -190,7 +198,18 @@ class _FyonaRefreshState extends State<FyonaRefresh>
             clipBehavior: Clip.hardEdge,
             children: [
               Transform.translate(
-                offset: Offset(0, _bouncing ? 0 : shift),
+                // Clamping lists: the page follows the pull. Bouncing lists
+                // move by themselves while pulling; once refreshing, the page
+                // is held at the resting offset as the list springs back, and
+                // only returns (gradually) when the dots have folded away.
+                offset: Offset(
+                  0,
+                  !_bouncing
+                      ? shift
+                      : _refreshing
+                      ? math.max(0, shift - _listOver.value)
+                      : 0,
+                ),
                 child: child,
               ),
               if (pull > 0.01)

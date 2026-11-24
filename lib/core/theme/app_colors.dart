@@ -19,13 +19,14 @@ class AppColors {
 
   // ── Background & Surface (mode-aware) ──
   static Color get background => _isLight ? backgroundLight : _backgroundDark;
-  static const Color _backgroundDark = Color(0xFF0A0A0A);
+  // Soft graphite (not pure black): calmer on the eyes, like pro apps.
+  static const Color _backgroundDark = Color(0xFF131418);
   static Color get surface => _isLight ? surfaceLight : _surfaceDark;
-  static const Color _surfaceDark = Color(0xFF151515);
+  static const Color _surfaceDark = Color(0xFF1B1D22);
   static Color get surfaceVariant => _isLight ? surfaceVariantLight : _surfaceVariantDark;
-  static const Color _surfaceVariantDark = Color(0xFF1E1E1E);
+  static const Color _surfaceVariantDark = Color(0xFF24272D);
   static Color get border => _isLight ? borderLight : _borderDark;
-  static const Color _borderDark = Color(0xFF252525);
+  static const Color _borderDark = Color(0xFF2E3138);
 
   static const Color backgroundLight = Color(0xFFE7EAED);
   static const Color surfaceLight = Color(0xFFF0F2F4);
@@ -34,7 +35,7 @@ class AppColors {
 
   // ── Divider (mode-aware) ──
   static Color get divider => _isLight ? dividerLight : _dividerDark;
-  static const Color _dividerDark = Color(0xFF2A2A2A);
+  static const Color _dividerDark = Color(0xFF2A2D33);
   static const Color dividerLight = Color(0xFFE1E4E6);
 
   // ── Chart & Analytics ──
@@ -54,11 +55,12 @@ class AppColors {
 
   // ── Text (mode-aware) ──
   static Color get textPrimary => _isLight ? textPrimaryLight : _textPrimaryDark;
-  static const Color _textPrimaryDark = Color(0xFFFFFFFF);
+  // Off-white text: high contrast without glare.
+  static const Color _textPrimaryDark = Color(0xFFE9EAEE);
   static Color get textSecondary => _isLight ? textSecondaryLight : _textSecondaryDark;
-  static const Color _textSecondaryDark = Color(0xFFE0E0E0);
+  static const Color _textSecondaryDark = Color(0xFFB6BAC3);
   static Color get textTertiary => _isLight ? textTertiaryLight : _textTertiaryDark;
-  static const Color _textTertiaryDark = Color(0xFFBBBBBB);
+  static const Color _textTertiaryDark = Color(0xFF8E939D);
   static const Color textTertiaryLight = Color(0xFF5F6B72);
   static const Color textDisabled = Color(0xFF999999);
   static const Color textPlaceholder = Color(0xFF777777);
@@ -77,13 +79,13 @@ class AppColors {
 
   static const List<Color> gradientCard = [
     Color(0xFFA01530),
-    Color(0xFF0A0A0A),
+    Color(0xFF131418),
   ];
 
   static const List<Color> gradientDark = [
-    Color(0xFF0A0A0A),
-    Color(0xFF101010),
-    Color(0xFF151515),
+    Color(0xFF131418),
+    Color(0xFF17191D),
+    Color(0xFF1B1D22),
   ];
 
   static const List<Color> gradientSuccess = [

@@ -404,7 +404,7 @@ class _CurrencySelectorState extends ConsumerState<CurrencySelector> {
                       padding: EdgeInsets.symmetric(horizontal: 8),
                       decoration: BoxDecoration(
                         color: _code == e.key
-                            ? Color(0xFF1E1E1E)
+                            ? Color(0xFF24272D)
                             : AppColors.surfaceVariant,
                         borderRadius: AppRadius.smBorder,
                         border: Border.all(
