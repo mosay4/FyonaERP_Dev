@@ -19,6 +19,9 @@ import '../../data/branch_api.dart';
 import '../../data/branch_scope.dart';
 import '../../../../shared/widgets/fyona_text_field.dart';
 import '../../data/branch_epoch.dart';
+import '../../../core_business/data/local_directory/directory_database.dart' show BusinessBranchReset;
+import '../../../core_business/data/local_directory/directory_pilot.dart'
+    show businessLocalLedgerScopeProvider, directoryPilotStoreProvider;
 
 class BranchesPage extends ConsumerWidget {
   const BranchesPage({super.key});
@@ -676,8 +679,14 @@ class BranchesPage extends ConsumerWidget {
       builder: (_) => const _BranchResetProgressDialog(),
     );
     try {
+      // Device-ledger organization: the branch's data lives on the phone and
+      // is cleared here (and on the other devices through the relay).
+      final local = ref.read(businessLocalLedgerScopeProvider);
       await Future.wait([
-        ref.read(branchApiProvider).resetData('${b['id']}'),
+        local != null
+            ? ref.read(directoryPilotStoreProvider).withSync(
+                local, (db) => db.resetBranchData(local, '${b['id']}'))
+            : ref.read(branchApiProvider).resetData('${b['id']}'),
         Future<void>.delayed(const Duration(milliseconds: 1100)),
       ]);
       ref.invalidate(branchesProvider);

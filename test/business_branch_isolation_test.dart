@@ -83,4 +83,28 @@ void main() {
     await db.ledger.deleteCommerceCategory(grant(a), commandId: _id(), id: '${created['id']}');
     expect(await db.ledger.commerceCategories(grant(a)), isEmpty);
   });
+
+  test('resetting a branch clears only that branch', () async {
+    final a = scope(_id()), b = scope(_id());
+    for (final s in [a, b]) {
+      final till = _id();
+      await db.ledger.createAccount(grant(s), commandId: till, bankName: 'الصندوق',
+          accountName: 'كاش', accountNumber: '1', currency: 'SAR', openingMinor: 5000);
+      final c = await db.create(s, _customer, name: 'عميل');
+      await db.ledger.recordOpeningDebt(grant(s),
+          DirectoryPartyReference(scope: s, kind: _customer, id: c.id),
+          commandId: _id(), amountMinor: 1000, currency: 'SAR');
+    }
+    expect(await db.resetBranchData(a, a.branchId), greaterThan(0));
+    expect(await db.ledger.operations(grant(a), allowedKinds: kinds), isEmpty);
+    expect(await db.ledger.accounts(grant(a)), isEmpty);
+    expect(await db.search(a, _customer, ''), isEmpty, reason: 'customers of A');
+    expect(await db.search(b, _customer, ''), hasLength(1));
+    expect(await db.ledger.operations(grant(b), allowedKinds: kinds), isNotEmpty);
+    expect(await db.ledger.accounts(grant(b)), hasLength(1));
+    // The branch keeps working after its reset.
+    await db.ledger.createAccount(grant(a), commandId: _id(), bankName: 'الصندوق',
+        accountName: 'كاش', accountNumber: '1', currency: 'SAR', openingMinor: 0);
+    expect(await db.ledger.accounts(grant(a)), hasLength(1));
+  });
 }

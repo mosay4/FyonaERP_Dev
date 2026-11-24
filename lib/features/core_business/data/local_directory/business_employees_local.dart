@@ -232,3 +232,30 @@ extension BusinessEmployeesLocal on DirectoryDatabase {
     });
   }
 }
+
+/// Resetting a branch (تصفير) clears that branch's own Business data on this
+/// device; the deletions travel to the other devices like any other change.
+/// Its settings and identity stay; other branches are never touched.
+extension BusinessBranchReset on DirectoryDatabase {
+  static const _kept = {
+    'business_commerce_branches',
+    'business_ledger_policy',
+    'business_commerce_catalogue',
+  };
+
+  Future<int> resetBranchData(DirectoryAccess access, String branchId) async {
+    _requireOwnerWorkspace(access);
+    if (!isDirectoryId(branchId)) throw const DirectoryAccessDenied();
+    var removed = 0;
+    await _transaction((txn) async {
+      await txn.execute('PRAGMA defer_foreign_keys = ON');
+      for (final table in _syncTables.keys) {
+        if (_kept.contains(table)) continue;
+        final columns = await txn.rawQuery('PRAGMA table_info($table)');
+        if (!columns.any((c) => c['name'] == 'branch_id')) continue;
+        removed += await txn.delete(table, where: 'branch_id = ?', whereArgs: [branchId]);
+      }
+    });
+    return removed;
+  }
+}

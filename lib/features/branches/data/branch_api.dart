@@ -266,14 +266,16 @@ class BranchApi {
         byId.putIfAbsent('${row['id']}', () => Map<String, dynamic>.from(row));
       }
       final out = await _withPending(byId.values.toList());
-      if (!archived) await _cacheJson(_branchListCacheKey, out);
+      await _cacheJson(archived ? '${_branchListCacheKey}_all' : _branchListCacheKey, out);
       return out;
     } catch (e) {
-      // A cold start without internet shows the very same branches the user
-      // already has, instead of an empty page or a raw library error.
-      if (!archived && isConnectionError(e)) {
-        final cached = await _cachedJson(_branchListCacheKey);
-        if (cached != null) return _withPending(cached);
+      // Without internet the branches page works exactly as online: the
+      // branches the user has (and the ones born here) come from the device.
+      if (isConnectionError(e)) {
+        final cached = (archived ? await _cachedJson('${_branchListCacheKey}_all') : null) ??
+            await _cachedJson(_branchListCacheKey) ??
+            const <Map<String, dynamic>>[];
+        return _withPending(cached);
       }
       rethrow;
     }
@@ -591,7 +593,14 @@ class BranchApi {
         previousToken,
       );
     }
-    final savedToken = await _savedToken(organizationId, branchId, all);
+    var savedToken = await _savedToken(organizationId, branchId, all);
+    // A branch never opened online (or born here): the owner works in it
+    // offline with the organization's own signed context; the relay accepts
+    // the owner's work for any branch of the organization.
+    if (savedToken == null && !all && company['role'] != 'member' &&
+        organizationId == _homeOrganization) {
+      savedToken = await _anySavedBranchToken(organizationId);
+    }
     final Object? permitted = BranchScope.tokenClaims(
       savedToken,
     )?['branch_ids'];
@@ -695,6 +704,23 @@ class BranchApi {
     }
   }
 
+  Future<String?> _anySavedBranchToken(String org) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final prefix = BranchScope.tokenCachePrefix(_owner!);
+      for (final key in prefs.getKeys()) {
+        if (!key.startsWith(prefix)) continue;
+        final where = jsonDecode(key.substring(prefix.length)) as List;
+        if (where[0] != org || where[2] == true) continue;
+        final token = await _savedToken(org, where[1] as String?, false);
+        if (token != null && BranchScope.tokenClaims(token)?['qa_business_ledger'] == true) {
+          return token;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<String?> _savedToken(String org, String? id, bool all) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -758,7 +784,24 @@ class BranchApi {
     final owner = _owner;
     if (owner == null || !_current) return null;
     final rows = await _cachedJson(BranchScope.accessCacheKey(owner));
-    return _current ? rows : null;
+    if (rows == null || !_current) return _current ? rows : null;
+    // Branches born on this device (or renamed/archived here) are selectable
+    // offline like any other branch of the owner's own company.
+    final pending = await _pendingBranchOps();
+    if (pending.isEmpty) return rows;
+    return [
+      for (final company in rows)
+        if (company['organization_id'] == _homeOrganization && company['role'] != 'member')
+          {
+            ...company,
+            'branches': await _withPending([
+              for (final b in (company['branches'] as List? ?? const []))
+                if (b is Map) Map<String, dynamic>.from(b),
+            ]),
+          }
+        else
+          company,
+    ];
   }
 
   Future<List<Map<String, dynamic>>> access() async {

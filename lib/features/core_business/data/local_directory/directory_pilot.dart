@@ -89,12 +89,19 @@ DirectoryAccess? resolveDirectoryPilot({
     final data = jsonDecode(
       utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
     );
+    // The owner of a device-ledger organization opens any of its branches,
+    // also one born offline, with the organization's signed context.
+    final otherBranch = data is Map &&
+        data['branch'] != selectedBranchId &&
+        !member &&
+        data['qa_business_ledger'] == true &&
+        data['qa_directory'] == true;
     if (data is! Map ||
         data['typ'] != 'branch_scope' ||
         data['mode'] != 'branch' ||
         data['sub'] != accountId ||
         data['org'] != organizationId ||
-        data['branch'] != selectedBranchId ||
+        (data['branch'] != selectedBranchId && !otherBranch) ||
         (!isSeedScope(accountId, organizationId, selectedBranchId) &&
             data['qa_directory'] != true)) {
       return null;
@@ -103,7 +110,8 @@ DirectoryAccess? resolveDirectoryPilot({
     final link = data['qa_cash_link'];
     if (financialCutover && link is String && isDirectoryId(link))
       cashLinkId = link;
-    if (data.containsKey('qa_writer_session')) {
+    // Moving stock/money to another branch needs that branch's own session.
+    if (data.containsKey('qa_writer_session') && !otherBranch) {
       final sid = data['qa_writer_session'], exp = data['exp'];
       final peers = data['qa_transfer_branches'];
       if (!financialCutover ||
