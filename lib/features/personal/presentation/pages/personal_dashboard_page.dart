@@ -26,6 +26,9 @@ import '../../../../shared/widgets/receipt/receipt_modal.dart';
 import '../../../../shared/widgets/receipt/receipt_data.dart';
 import '../../../../core/help/information_clicker.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../domain/services/personal_country_cash.dart';
+import '../../di/personal_providers.dart' show personalFinanceServiceProvider;
+import '../../../../shared/providers/current_user_provider.dart';
 
 class PersonalDashboardPage extends ConsumerStatefulWidget {
   const PersonalDashboardPage({super.key});
@@ -59,6 +62,7 @@ class _PersonalDashboardPageState extends ConsumerState<PersonalDashboardPage>
     _prevLoading = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(personalFinanceProvider.notifier).load();
+      _seedCountryCash();
       ref.read(budgetProvider.notifier).load();
       ref.read(recurringProvider.notifier).load();
       // NOTE (navigation-safety): the subscription snapshot is NOT
@@ -74,6 +78,27 @@ class _PersonalDashboardPageState extends ConsumerState<PersonalDashboardPage>
         });
       } catch (_) {}
     });
+  }
+
+  /// Once per session: the cash currencies of the account's country (from
+  /// its phone), for accounts that never passed the old phone screen.
+  static final Set<String> _seededUsers = {};
+  Future<void> _seedCountryCash() async {
+    try {
+      final user = ref.read(currentUserProvider);
+      final uid = ref.read(currentUserIdProvider).trim();
+      if (user == null || uid.isEmpty || !_seededUsers.add(uid)) return;
+      await seedPersonalCountryCash(
+        userId: uid,
+        phone: user.phone,
+        ensure: (currencies, enabled) async {
+          await ref
+              .read(personalFinanceServiceProvider)
+              .ensureCashAccounts(currencies, enabled: enabled);
+          if (mounted) await ref.read(personalFinanceProvider.notifier).load();
+        },
+      );
+    } catch (_) {}
   }
 
   @override
@@ -229,8 +254,11 @@ class _PersonalDashboardPageState extends ConsumerState<PersonalDashboardPage>
                         const SizedBox(height: 16),
                         HomeAccountCard(
                           accounts: accounts,
+                          // The same bank screen as the Banks section,
+                          // opened on this card's currency.
                           onAccountTap: (account) => context.push(
-                            RouteNames.personalAccountDetail.replaceFirst(':id', '${account.id}'),
+                            '${RouteNames.personalBankDetail.replaceFirst(':bankName', Uri.encodeComponent(account.bankName))}'
+                            '?currency=${Uri.encodeComponent(account.currency)}',
                           ),
                         ),
                         const SizedBox(height: 12),

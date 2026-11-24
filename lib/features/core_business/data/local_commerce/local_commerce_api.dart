@@ -100,6 +100,23 @@ final class LocalCommerceBridge {
       } catch (_) {
         stats = const {};
       }
+      // The ledger answers in the requested currency only when the product
+      // is priced in it; otherwise in its own first currency. Convert those
+      // figures so every row really is in the report currency.
+      final statCurrency =
+          '${stats['display_currency'] ?? ''}'.trim().toUpperCase();
+      var unconverted = false;
+      double money(Object? amount) {
+        if (statCurrency.isEmpty || statCurrency == target) return number(amount);
+        final value = number(amount);
+        if (value == 0) return 0;
+        final r = _falconRate?.call(statCurrency, target);
+        if (r == null || !r.isFinite || r <= 0) {
+          unconverted = true;
+          return 0;
+        }
+        return value * r;
+      }
       final costCurrency = p['cost_currency']?.toString();
       final listed = (p['prices'] as List? ?? const [])
           .whereType<Map>()
@@ -113,14 +130,14 @@ final class LocalCommerceBridge {
         'min_stock': number(p['min_stock']),
         'sell_price': listed.isNotEmpty ? number(listed['price']) : priced(p['price'], costCurrency),
         'cost_price': priced(p['avg_cost'] ?? p['cost_price'], costCurrency),
-        'sales': number(stats['sales_total']),
+        'sales': money(stats['sales_total']),
         'qty_sold': number(stats['sales_quantity']),
-        'cogs': number(stats['cogs']),
-        'profit': number(stats['profit']),
-        'purchases': number(stats['purchases_total']),
+        'cogs': money(stats['cogs']),
+        'profit': money(stats['profit']),
+        'purchases': money(stats['purchases_total']),
         'qty_purchased': number(stats['purchases_quantity']),
         'expiry_date': p['expiry_date'],
-        'fx_incomplete': stats['fx_incomplete'] == true,
+        'fx_incomplete': stats['fx_incomplete'] == true || unconverted,
       });
     }
     return (items: items, category: category);

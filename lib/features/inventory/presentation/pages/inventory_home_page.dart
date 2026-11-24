@@ -4,13 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/localization/app_localizations.dart';
-import '../../../../core/responsive/r_api.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
 import '../../../branches/data/branch_scope.dart';
-import '../../../../core/utils/currency_formatter.dart';
-import '../../../../shared/providers/current_user_provider.dart';
 import '../../../../shared/services/notification_service.dart';
 import '../../../../shared/services/scan_sfx.dart';
 import '../../../../shared/widgets/styled_snack.dart';
@@ -19,10 +16,10 @@ import '../providers/inventory_providers.dart';
 
 import '../widgets/falcon_ambient.dart';
 import '../widgets/business_product_image.dart';
+import '../widgets/inventory_list_parts.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/data/local_commerce/local_commerce_api.dart';
 import '../../../core_business/presentation/widgets/business_operation_error.dart';
-import '../../../core_business/data/local_directory/directory_scope.dart';
 import '../../../core_business/presentation/widgets/business_online_gate.dart';
 import '../../../core_business/presentation/providers/local_commerce_navigation.dart';
 import '../providers/warehouse_settings.dart';
@@ -39,7 +36,6 @@ class InventoryHomePage extends ConsumerStatefulWidget {
 
 class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
   final _searchCtrl = TextEditingController();
-  bool _filtersOpen = false;
 
   @override
   void initState() {
@@ -52,7 +48,7 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
   /// (backend stays authoritative for the page itself).
   Future<void> _openInventoryMenu() async {
     final l10n = AppLocalizations.of(context);
-    final ws = ref.read(warehouseSettingsProvider);
+    final ws = ref.read(inventoryWarehouseSettingsProvider);
     final picked = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -79,17 +75,6 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            if (ws.barcode)
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.qr_code_scanner),
-                title: Text(
-                  l10n.translate('invScanBarcode'),
-                  style: const TextStyle(fontFamily: 'Cairo'),
-                ),
-                onTap: () => Navigator.pop(ctx, 'scan'),
-              ),
-
             if (ws.categories)
               ListTile(
                 dense: true,
@@ -115,9 +100,7 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
     );
     if (!mounted || picked == null) return;
 
-    if (picked == 'scan') {
-      _scan();
-    } else if (picked == 'categories') {
+    if (picked == 'categories') {
       context.push('/inventory/categories');
     } else if (picked == 'settings') {
       context.push('/inventory/settings');
@@ -172,14 +155,19 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
     ).push<String>(MaterialPageRoute(builder: (_) => const BarcodeScanPage()));
     if (code == null || code.isEmpty || !mounted ||
         !identical(source, ref.read(inventoryApiProvider))) return;
+    // The scanned code fills the search (searched across all products, so
+    // leave the in-place categories browser).
+    _searchCtrl.text = code;
+    setState(() => _categoriesView = false);
+    ref.read(inventoryCategoryProvider.notifier).state = '';
+    ref.read(inventorySearchProvider.notifier).state = code.trim();
     try {
       final res = await source.resolveBarcode(code);
       final product = res['product'] as Map?;
       final id = product?['id']?.toString();
       if (id != null && mounted && identical(source, ref.read(inventoryApiProvider))) {
-        // Product found → success beep in sync with the navigation.
+        // Product found → success beep as the list narrows to it.
         unawaited(ScanSfx.success());
-        openCommerceRecord(context, RouteNames.inventoryProduct, id);
         return;
       }
     } catch (_) {}
@@ -234,9 +222,7 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
     );
     final products = ref.watch(inventoryProductsProvider(key));
     final allowed = ref.watch(employeeCanProvider('inventory'));
-    final role = ref.watch(currentUserRoleProvider);
     final ws = ref.watch(inventoryWarehouseSettingsProvider);
-    final canSeeCost = role != 'employee' && role != 'staff' && ws.showCost;
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -286,79 +272,18 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: FyonaTextField(
+            child: InventorySearchField(
               controller: _searchCtrl,
               onChanged: (v) =>
                   ref.read(inventorySearchProvider.notifier).state = v.trim(),
-              decoration: InputDecoration(
-                hintText: l10n.translate('invSearchHint'),
-                prefixIcon: const Icon(Icons.search, size: 20),
-              ),
-              style: const TextStyle(fontFamily: 'Cairo'),
+              onScan: ws.barcode ? _scan : null,
             ),
           ),
-          if (ws.categories)
-            _filtersPanel(context, filter)
-          else
-            SizedBox(
-              height: 48,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                children: [
-                  _statusAllChip(context, filter, _filtersExpanded(filter)),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 280),
-                    curve: Curves.easeInOut,
-                    alignment: AlignmentDirectional.centerStart,
-                    child: _filtersExpanded(filter)
-                        ? ClipRect(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (ws.lowStockAlert) ...[
-                                  const SizedBox(width: 8),
-                                  _filterChip(
-                                    'low',
-                                    l10n.translate('invFilterLow'),
-                                    filter,
-                                  ),
-                                ],
-                                const SizedBox(width: 8),
-                                _filterChip(
-                                  'out',
-                                  l10n.translate('invFilterOut'),
-                                  filter,
-                                ),
-                                if (ws.expiry) ...[
-                                  const SizedBox(width: 8),
-                                  _filterChip(
-                                    'expiring',
-                                    l10n.translate('invExpiringSoon'),
-                                    filter,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  _filterChip(
-                                    'expired',
-                                    l10n.translate('invExpired'),
-                                    filter,
-                                  ),
-                                ],
-                              ],
-                            ),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                ],
-              ),
-            ),
+          _filtersBar(context, filter, ws),
           Expanded(
             child: (ws.categories && _categoriesView)
-                ? _categoriesViewBody(context, canSeeCost, ws)
-                : _productsList(context, products, key, canSeeCost, ws),
+                ? _categoriesViewBody(context)
+                : _productsList(context, products, key, ws),
           ),
         ],
       ),
@@ -370,8 +295,7 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
     BuildContext context,
     AsyncValue<List<Map<String, dynamic>>> products,
     InventoryListKey key,
-    bool canSeeCost,
-    dynamic ws,
+    WarehouseSettings ws,
   ) {
     final l10n = AppLocalizations.of(context);
     final scope = ref.watch(businessLocalLedgerScopeProvider);
@@ -402,130 +326,64 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
                 ],
               )
             : ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                padding: const EdgeInsets.fromLTRB(16, 2, 16, 24),
                 itemCount: items.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (_, i) => _ProductCard(
-                  product: items[i],
-                  sourceScope: scope,
-                  showCost: canSeeCost,
-                  showLow: ws.lowStockAlert,
-                   showExpiry: ws.expiry,
-                   warnDays: scope == null ? 30 : ws.expiryWarnDays,
-                ),
+                itemBuilder: (_, i) {
+                  final p = items[i];
+                  return InventoryProductTile(
+                    product: p,
+                    status: inventoryRowStatus(
+                      p,
+                      sourceScope: scope,
+                      showLow: ws.lowStockAlert,
+                      warnDays: scope == null ? 30 : ws.expiryWarnDays,
+                    ),
+                    showExpiry: ws.expiry,
+                    onTap: () => openCommerceRecord(
+                      context,
+                      RouteNames.inventoryProduct,
+                      p['id']?.toString() ?? '',
+                      fromLocal: scope,
+                    ),
+                  );
+                },
               ),
       ),
     );
   }
-
-  /// Whether the bordered filters panel is expanded (categories mode).
-  bool _filtersPanelOpen = true;
 
   /// In-place categories browser: shown instead of the products list when
   /// the user taps «مع التصنيف». Tapping a category opens its dedicated
   /// page. No settings shortcut here (management lives in Settings).
   bool _categoriesView = false;
 
-  /// Bordered filters panel (categories mode): the section row plus the
-  /// full status strip, collapsible upward into a single «عرض الفلاتر»
-  /// button to free list space. Smooth AnimatedSize both ways.
-  Widget _filtersPanel(BuildContext context, String filter) {
+  /// One compact, horizontally scrollable pill row. With categories ON it
+  /// starts with the section pills (بدون تصنيف / مع التصنيف); the status
+  /// pills are hidden while browsing the category tiles (they appear inside
+  /// the opened category instead).
+  Widget _filtersBar(BuildContext context, String filter, WarehouseSettings ws) {
     final l10n = AppLocalizations.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-      child: AnimatedSize(
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeInOut,
-        alignment: Alignment.topCenter,
-        child: _filtersPanelOpen
-            ? Container(
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  border: Border.all(color: AppColors.primary, width: 1.5),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(child: _categoriesBar(context)),
-                        IconButton(
-                          tooltip: l10n.translate('invHideFilters'),
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.keyboard_arrow_up, size: 20),
-                          onPressed: () =>
-                              setState(() => _filtersPanelOpen = false),
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                    ),
-                    _statusStripFull(context, filter),
-                  ],
-                ),
-              )
-            : SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => setState(() => _filtersPanelOpen = true),
-                  icon: const Icon(Icons.keyboard_arrow_down, size: 18),
-                  label: Text(
-                    l10n.translate('invShowFilters'),
-                    style: const TextStyle(
-                      fontFamily: 'Cairo',
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.primary,
-                    backgroundColor: AppColors.primary.withAlpha(14),
-                    side: const BorderSide(
-                      color: AppColors.primary,
-                      width: 1.5,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ),
-      ),
+    final showStatus = !(ws.categories && _categoriesView);
+    final status = showStatus
+        ? inventoryStatusPills(
+            l10n,
+            current: filter,
+            onSelect: (v) => ref.read(inventoryFilterProvider.notifier).state = v,
+            lowStock: ws.lowStockAlert,
+            expiry: ws.expiry,
+          )
+        : const <Widget>[];
+    return InventoryPillBar(
+      pills: [
+        if (ws.categories) ..._sectionPills(context),
+        if (ws.categories && showStatus) null,
+        ...status,
+      ],
     );
   }
 
-  /// Full status strip (no collapsing): shown under the category row when
-  /// the categories feature is ON. Filters the chosen section in place.
-  Widget _statusStripFull(BuildContext context, String filter) {
-    final l10n = AppLocalizations.of(context);
-    final ws = ref.watch(inventoryWarehouseSettingsProvider);
-    return SizedBox(
-      height: 48,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        children: [
-          _filterChip('all', l10n.translate('invFilterAll'), filter),
-          if (ws.lowStockAlert) ...[
-            const SizedBox(width: 8),
-            _filterChip('low', l10n.translate('invFilterLow'), filter),
-          ],
-          const SizedBox(width: 8),
-          _filterChip('out', l10n.translate('invFilterOut'), filter),
-          if (ws.expiry) ...[
-            const SizedBox(width: 8),
-            _filterChip('expiring', l10n.translate('invExpiringSoon'), filter),
-            const SizedBox(width: 8),
-            _filterChip('expired', l10n.translate('invExpired'), filter),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _categoriesBar(BuildContext context) {
+  List<Widget> _sectionPills(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final cats = ref.watch(inventoryCategoriesProvider).asData?.value ?? const [];
     final sel = ref.watch(inventoryCategoryProvider);
@@ -536,127 +394,31 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
         if (c['id'].toString() == sel) catName = (c['name'] ?? '').toString();
       }
     }
-    Widget chip(String label, bool selected, VoidCallback onTap) => Padding(
-      padding: const EdgeInsetsDirectional.only(end: 8),
-      child: ChoiceChip(
-        label: Text(
-          label,
-          style: TextStyle(
-            fontFamily: 'Cairo',
-            fontSize: 12,
-            color: selected ? Colors.white : AppColors.textPrimary,
-          ),
-        ),
-        selected: selected,
-        selectedColor: AppColors.primary,
-        backgroundColor: AppColors.surface,
-        side: BorderSide(color: AppColors.border),
-        showCheckmark: false,
-        onSelected: (_) => onTap(),
+    return [
+      InventoryPill(
+        label: l10n.translate('invNoCategory'),
+        selected: sel == '__none__',
+        onTap: () {
+          // «بدون تصنيف»: exactly one section filter — closes the
+          // categories view and shows uncategorized products immediately.
+          setState(() => _categoriesView = false);
+          ref.read(inventoryCategoryProvider.notifier).state =
+              sel == '__none__' ? '' : '__none__';
+        },
       ),
-    );
-    return SizedBox(
-      height: 44,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        children: [
-          chip(l10n.translate('invNoCategory'), sel == '__none__', () {
-            // «بدون تصنيف»: exactly one section filter — closes the
-            // categories view and shows uncategorized products immediately.
-            setState(() => _categoriesView = false);
-            ref.read(inventoryCategoryProvider.notifier).state =
-                sel == '__none__' ? '' : '__none__';
-          }),
-          chip(
-            isCat ? catName : l10n.translate('invWithCategory'),
-            isCat || _categoriesView,
-            () {
-              // «مع التصنيف»: exactly one section filter — clears
-              // «بدون تصنيف» and browses categories in place (no popup).
-              // Tapping again clears back to all products.
-              final catProv = ref.read(inventoryCategoryProvider.notifier);
-              if (_categoriesView) {
-                setState(() => _categoriesView = false);
-                catProv.state = '';
-              } else {
-                setState(() => _categoriesView = true);
-                catProv.state = '';
-              }
-            },
-          ),
-        ],
+      InventoryPill(
+        icon: Icons.category_outlined,
+        label: isCat ? catName : l10n.translate('invWithCategory'),
+        selected: isCat || _categoriesView,
+        onTap: () {
+          // «مع التصنيف»: exactly one section filter — clears
+          // «بدون تصنيف» and browses categories in place (no popup).
+          // Tapping again clears back to all products.
+          setState(() => _categoriesView = !_categoriesView);
+          ref.read(inventoryCategoryProvider.notifier).state = '';
+        },
       ),
-    );
-  }
-
-  /// The extra status filters stay visible while expanded OR while a
-  /// non-"all" filter is active (so the active choice is never hidden).
-  bool _filtersExpanded(String current) => _filtersOpen || current != 'all';
-
-  Widget _statusAllChip(BuildContext context, String current, bool expanded) {
-    final l10n = AppLocalizations.of(context);
-    final selected = current == 'all';
-    final c = selected ? Colors.white : AppColors.textPrimary;
-    return ChoiceChip(
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            l10n.translate('invFilterAll'),
-            style: TextStyle(
-              fontFamily: 'Cairo',
-              fontSize: 13,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              color: c,
-            ),
-          ),
-          const SizedBox(width: 2),
-          InkWell(
-            onTap: () => setState(() => _filtersOpen = !_filtersOpen),
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.all(2),
-              child: AnimatedRotation(
-                turns: expanded ? 0.5 : 0,
-                duration: const Duration(milliseconds: 250),
-                curve: Curves.easeInOut,
-                child: Icon(Icons.chevron_right, size: 18, color: c),
-              ),
-            ),
-          ),
-        ],
-      ),
-      selected: selected,
-      selectedColor: AppColors.primary,
-      backgroundColor: AppColors.surface,
-      side: BorderSide(color: AppColors.border),
-      showCheckmark: false,
-      onSelected: (_) =>
-          ref.read(inventoryFilterProvider.notifier).state = 'all',
-    );
-  }
-
-  Widget _filterChip(String value, String label, String current) {
-    final selected = value == current;
-    return ChoiceChip(
-      label: Text(
-        label,
-        style: TextStyle(
-          fontFamily: 'Cairo',
-          fontSize: 13,
-          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-          color: selected ? Colors.white : AppColors.textPrimary,
-        ),
-      ),
-      selected: selected,
-      onSelected: (_) =>
-          ref.read(inventoryFilterProvider.notifier).state = value,
-      selectedColor: AppColors.primary,
-      backgroundColor: AppColors.surface,
-      side: BorderSide(color: AppColors.border),
-      showCheckmark: false,
-    );
+    ];
   }
 
   /// Shared empty / failed categories state: respectful message + the
@@ -670,7 +432,7 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
     return ListView(
       children: [
         const SizedBox(height: 64),
-        Icon(Icons.category_outlined, size: 56, color: AppColors.textSecondary),
+        Icon(Icons.category_outlined, size: 48, color: AppColors.textSecondary),
         const SizedBox(height: 10),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -687,27 +449,9 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
         const SizedBox(height: 16),
         if (!BranchScope.readOnly && ref.watch(employeeCanProvider('inventory.add')))
           Center(
-            child: OutlinedButton.icon(
+            child: InventorySmallAction(
               onPressed: _addCategory,
-              icon: const Icon(Icons.add, size: 18),
-              label: Text(
-                l10n.translate('invCreateFirstCategory'),
-                style: const TextStyle(
-                  fontFamily: 'Cairo',
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.danger,
-                side: const BorderSide(color: AppColors.danger, width: 1.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 11,
-                ),
-              ),
+              label: l10n.translate('invCreateFirstCategory'),
             ),
           ),
         if (showRetry) ...[
@@ -784,18 +528,14 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
   /// Categories replace the products list in place. The grid shows
   /// categories only (no «all» tile); tapping one opens its dedicated
   /// page. No settings shortcut here (management lives in Settings).
-  Widget _categoriesViewBody(
-    BuildContext context,
-    bool canSeeCost,
-    dynamic ws,
-  ) {
+  Widget _categoriesViewBody(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final api = ref.watch(inventoryApiProvider);
     final catsAsync = ref.watch(inventoryCategoriesProvider);
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
           child: Align(
             alignment: AlignmentDirectional.centerStart,
             child: Text(
@@ -828,19 +568,20 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
               child: cats.isEmpty
                    ? _noCategoriesBody(context, l10n)
                   : GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
+                            crossAxisCount: 3,
                             mainAxisSpacing: 10,
                             crossAxisSpacing: 10,
-                            childAspectRatio: 1.35,
+                            childAspectRatio: 0.92,
                           ),
                       itemCount: cats.length,
                       itemBuilder: (_, i) {
                         final c = cats[i];
                         return _CategoryTile(
                           name: (c['name'] ?? '').toString(),
+                          count: c['products_count'] as num?,
                           imageUrl: (c['image'] ?? '').toString().isEmpty
                               ? null
                               : (c['image'] ?? '').toString(),
@@ -864,245 +605,85 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
 class _CategoryTile extends StatelessWidget {
   final String name;
   final String? imageUrl;
+  final num? count;
   final VoidCallback onTap;
-  const _CategoryTile({required this.name, this.imageUrl, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          border: Border.all(color: AppColors.border),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceVariant.withAlpha(90),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: (imageUrl != null && imageUrl!.isNotEmpty)
-                  ? BusinessProductImage(
-                      url: imageUrl,
-                      width: 52,
-                      height: 52,
-                      fit: BoxFit.cover,
-                    )
-                  : Icon(
-                      Icons.category_outlined,
-                      size: 24,
-                      color: AppColors.primary,
-                    ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontFamily: 'Cairo',
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ProductCard extends ConsumerWidget {
-  final Map<String, dynamic> product;
-  final DirectoryAccess? sourceScope;
-  final bool showCost;
-  final bool showLow;
-  final bool showExpiry;
-  final int warnDays;
-  const _ProductCard({
-    required this.product,
-    required this.sourceScope,
-    required this.showCost,
-    this.showLow = true,
-    this.showExpiry = false,
-    this.warnDays = 30,
+  const _CategoryTile({
+    required this.name,
+    this.imageUrl,
+    this.count,
+    required this.onTap,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final l10n = AppLocalizations.of(context);
-    final id = product['id']?.toString() ?? '';
-    final stock = (product['stock'] as num?)?.toDouble() ?? 0;
-    final minStock = (product['min_stock'] as num?)?.toDouble() ?? 0;
-    final isService = product['is_service'] == true;
-    final low = showLow && !isService && stock > 0 && stock <= minStock;
-    final exStr = (product['expiry_date'] ?? '').toString();
-    final exd = exStr.isNotEmpty ? DateTime.tryParse(exStr) : null;
-    final now = DateTime.now();
-    final day = sourceScope == null ? now : DateTime(now.year, now.month, now.day);
-    final expired = exd != null && exd.isBefore(day);
-    final soon =
-        exd != null && !expired && exd.difference(day).inDays <= warnDays;
-    final out = !isService && stock <= 0;
-    final price = product['price'];
-    final cost = product['cost_price'];
-    final costCur = (product['cost_currency'] ?? '').toString();
-    final prices =
-        (product['prices'] as List?)?.whereType<Map>().toList() ?? const [];
-    final sellCur = prices.isNotEmpty
-        ? (prices.first['currency'] ?? '').toString()
-        : costCur;
-    return GestureDetector(
-      onTap: () => openCommerceRecord(context, RouteNames.inventoryProduct, id,
-          fromLocal: sourceScope),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          border: Border.all(color: AppColors.border),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            _Thumb(url: product['image']?.toString()),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          (product['name'] ?? '').toString(),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: R.fontSize(context, 14),
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                      if (low)
-                        _badge(l10n.translate('invLow'), AppColors.warning),
-                      if (out)
-                        _badge(l10n.translate('invOut'), AppColors.danger),
-                      if (showExpiry)
-                        if (expired)
-                          _badge(l10n.translate('invExpired'), AppColors.danger)
-                        else if (soon)
-                          _badge(
-                            l10n.translate('invExpiringSoon'),
-                            AppColors.warning,
-                          ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${l10n.translate('invQtyNow')}: ${_fmt(stock)} ${product['unit'] ?? ''}',
-                    style: TextStyle(
-                      fontFamily: 'Cairo',
-                      fontSize: R.fontSize(context, 12),
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 2,
-                    children: [
-                      Text(
-                        '${l10n.translate('invSellPrice')}: ${fmtNum(price)} ${_sym(sellCur)}',
-                        style: TextStyle(
-                          fontFamily: 'Cairo',
-                          fontSize: R.fontSize(context, 12),
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      if (showCost)
-                        Text(
-                          '${l10n.translate('invLastPurchase')}: ${fmtNum(cost)} ${_sym(costCur)}',
-                          style: TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: R.fontSize(context, 11),
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_left, color: AppColors.textSecondary),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _badge(String text, Color color) => Container(
-    margin: const EdgeInsetsDirectional.only(start: 6),
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(
-      color: color.withAlpha(28),
-      borderRadius: BorderRadius.circular(6),
-    ),
-    child: Text(
-      text,
-      style: TextStyle(
-        fontFamily: 'Cairo',
-        fontSize: 10,
-        fontWeight: FontWeight.w700,
-        color: color,
-      ),
-    ),
-  );
-}
-
-class _Thumb extends StatelessWidget {
-  final String? url;
-  const _Thumb({this.url});
-  @override
   Widget build(BuildContext context) {
-    final hasImage = url != null && url!.isNotEmpty;
-    return Container(
-      width: 48,
-      height: 48,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: AppColors.surfaceVariant.withAlpha(90),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.border),
+    final l10n = AppLocalizations.of(context);
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: AppColors.border),
+        borderRadius: BorderRadius.circular(14),
       ),
-      child: hasImage
-          ? BusinessProductImage(url: url, width: 48, height: 48, fit: BoxFit.cover)
-          : Icon(
-              Icons.inventory_2_outlined,
-              size: 22,
-              color: AppColors.textSecondary,
-            ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: inventoryAccentTint,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: (imageUrl != null && imageUrl!.isNotEmpty)
+                    ? BusinessProductImage(
+                        url: imageUrl,
+                        width: 52,
+                        height: 52,
+                        fit: BoxFit.cover,
+                      )
+                    : Icon(
+                        Icons.category_outlined,
+                        size: 24,
+                        color: inventoryAccent,
+                      ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'Cairo',
+                  fontSize: 13,
+                  height: 1.3,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              if (count != null)
+                Text(
+                  l10n.translate(
+                    'invCatProductsCount',
+                    params: {'n': '${count!.toInt()}'},
+                  ),
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: 11,
+                    height: 1.3,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
-}
-
-String _sym(String code) =>
-    code.isEmpty ? '' : currencySymbol(code.toUpperCase());
-
-String _fmt(dynamic v) {
-  final d = v is num ? v.toDouble() : double.tryParse('$v') ?? 0;
-  return d == d.roundToDouble() ? d.round().toString() : d.toStringAsFixed(2);
 }

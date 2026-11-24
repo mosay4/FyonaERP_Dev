@@ -62,3 +62,26 @@ def test_one_order_quantity_and_an_honest_status():
     assert data["stagnant_value_share"] == round(760 / (3 * 40 + 40 * 19), 4)
     # Something that sells is out, and 86% of the stock value is idle.
     assert fs._verdict(fs._flags_from(data, "inventory"), "inventory") == "watch"
+
+
+def test_product_scope_keeps_unit_and_category():
+    data, _ = fs.device_dataset(ITEMS, "SAR", "product", "p1", "مواد غذائية")
+    assert data["unit"] == "كيس" and data["category_name"] == "مواد غذائية"
+
+
+def test_category_scope_uses_only_the_rows_sent():
+    # The phone sends only the category's current (non-deleted) products.
+    data, title = fs.device_dataset(ITEMS[:2], "SAR", "category", "c1", "بقالة")
+    assert title == "التصنيف" and data["category_name"] == "بقالة"
+    assert data["products_count"] == 2 and data["total_sales"] == 5000
+
+
+@pytest.mark.asyncio
+async def test_analyze_product_scope_from_the_phone(monkeypatch):
+    async def no_ai(*a, **k):
+        return None
+    monkeypatch.setattr(fs, "_call_ai", no_ai)
+    report = await fs.analyze(None, None, "product", "p1", "ar", "SAR",
+                              device=fs.device_dataset(ITEMS, "SAR", "product", "p1"))
+    assert report["stats"]["name"] == "أرز بسمتي"
+    assert report["status_line"] and report.get("suggested_order_qty") is not None

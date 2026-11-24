@@ -24,8 +24,11 @@ import '../../../personal/presentation/pages/bank_detail_report_pdf.dart';
 class BusinessBankDetailPage extends ConsumerStatefulWidget {
   final String bankName;
   final String? groupId;
+
+  /// Opened from a home account card: that account's currency first.
+  final String? initialCurrency;
   const BusinessBankDetailPage({super.key, required this.bankName,
-      this.groupId});
+      this.groupId, this.initialCurrency});
   @override
   ConsumerState<BusinessBankDetailPage> createState() =>
       _BusinessBankDetailPageState();
@@ -302,6 +305,7 @@ class _BusinessBankDetailPageState
     ];
 
     return BankDetailView(
+      initialCurrency: widget.initialCurrency,
       bankName: isBizCashAccount(widget.bankName)
           ? l10n.translate('cashAccount')
           : widget.bankName,

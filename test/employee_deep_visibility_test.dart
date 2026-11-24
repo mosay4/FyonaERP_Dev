@@ -95,7 +95,8 @@ void main() {
         'inventory.edit': false,
         'inventory.delete': false,
       });
-      expect(find.text('Product'), findsOneWidget);
+      // Header + the base unit row (each unit row names the product).
+      expect(find.text('Product'), findsNWidgets(2));
       expect(find.byIcon(Icons.edit_outlined), findsNothing);
       expect(find.byIcon(Icons.delete_outline), findsNothing);
       expect(find.byIcon(Icons.tune), findsNothing);

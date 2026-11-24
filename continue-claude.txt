@@ -161,6 +161,29 @@ TESTS / TOOLS
      (_bankNameFixed). Currency flags in bank rows + home card badges.
    - Bank detail screens + bank PDF redesigned (see git log).
 
+17. ROUND 9 (24-11-2026)
+   - backend main.py: media-transit router was mounted on /api/v1 (404 for
+     the app's /business/media-transit) — fixed + test_media_transit_route.
+   - BranchPictures (lib/features/branches/data/branch_pictures.dart):
+     device store of branch pictures (docs/branch_pictures + index.json),
+     synced from cachedAccess()+savedList() (never a request of its own),
+     BranchPicture widget used by drawer, Sara, branches page, transfer
+     picker. Sync provider watched in the app shell.
+   - LiquidGlassNavBar v2: backdrop lights (CustomPainter) under blurred
+     glass, gradient rim, glass lens; lights drift one cycle per tab change.
+   - Employee phone: mobile_numbering.dart (lengths + operator prefixes).
+   - FyonaRefresh: minimum 1.1 s show + finishes the ripple.
+   NOTE: another Claude session (SSH) worked on this repo in parallel the
+   same day (ran tests, Telegram 1294/1295) — coordinate before big runs.
+
+18. ROUND 10 (24-11-2026)
+   - Home bank cards → the new bank screen (/banks/detail?bankName=&currency=
+     and personalBankDetail?currency=); BankDetailView.initialCurrency.
+   - Personal cash seeding by phone country on Personal open
+     (personal_country_cash.dart) — the new sign-up skipped phone_entry_page.
+   - Inventory/categories redesign; product details units with prices;
+     product statistics + Falcon product/category scopes (see git log).
+
 OPEN ITEMS (need owner decision or next round)
 1) 10 known failing tests remain (tools/ci/known_failures.txt), both
    deliberate product changes by the previous developer — owner decision:

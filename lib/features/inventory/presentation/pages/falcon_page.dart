@@ -236,6 +236,13 @@ class _FalconPageState extends ConsumerState<FalconPage>
         _loading = false;
       });
       _scrollToChatEnd(false);
+      // The kept report may predate edits/sales: re-read the figures in
+      // place (old report stays visible, no intro replay).
+      if (s.report != null && _reportCurrency != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _analyze(keepOld: true);
+        });
+      }
       return;
     }
     // Fresh session: the intro clock is ALREADY running from initState —
@@ -328,7 +335,10 @@ class _FalconPageState extends ConsumerState<FalconPage>
           .read(inventoryApiProvider)
           .falconAnalyze(widget.scope, widget.refId,
               reportCurrency: _reportCurrency);
-      if (mounted && requestScope == BranchScope.token) {
+      // An empty answer never wipes a report already on screen.
+      if (mounted &&
+          requestScope == BranchScope.token &&
+          (r.isNotEmpty || !keepOld)) {
         setState(() {
           _report = r;
           _dataVersion++;
@@ -970,7 +980,7 @@ class _FalconPageState extends ConsumerState<FalconPage>
         : <String, dynamic>{};
     return [
       // ── Scope title (the logo lives ONLY in the header slot) ──
-      Text(widget.title,
+      Text(_scopeTitle(stats),
           textAlign: TextAlign.center,
           style: TextStyle(
               fontFamily: 'Cairo',
@@ -1105,6 +1115,18 @@ class _FalconPageState extends ConsumerState<FalconPage>
     ];
   }
 
+  /// The page title, or the product / category name the analysis carries
+  /// (a category or product opened without a title).
+  String _scopeTitle(Map<String, dynamic> stats) {
+    if (widget.title.trim().isNotEmpty) return widget.title;
+    final name = switch (widget.scope) {
+      'product' => stats['name'],
+      'category' => stats['category_name'],
+      _ => null,
+    };
+    return (name ?? '').toString();
+  }
+
   Widget _branchBreakdown(BuildContext context, AppLocalizations l10n, Map stats) {
     final ar = l10n.locale.languageCode == 'ar';
     final rows = (stats['branch_summaries'] as List? ?? []).whereType<Map>();
@@ -1228,15 +1250,28 @@ class _FalconPageState extends ConsumerState<FalconPage>
     double numOf(dynamic v) =>
         (v is num) ? v.toDouble() : (double.tryParse('$v') ?? 0);
     final profit = numOf(stats['total_profit']);
-    final tiles = [
+    final product = widget.scope == 'product';
+    final unit = (stats['unit'] ?? '').toString();
+    final stock = numOf(stats['stock']);
+    // (label, value, icon, color, unit suffix — null = money)
+    final tiles = <(String, double, IconData, Color, String?)>[
       (l10n.translate('falconKSales'), numOf(stats['total_sales']),
-          Icons.point_of_sale_rounded, AppColors.primary),
+          Icons.point_of_sale_rounded, AppColors.primary, null),
       (l10n.translate('falconKProfit'), profit, Icons.trending_up_rounded,
-          profit < 0 ? AppColors.danger : AppColors.success),
-      (l10n.translate('falconKInventory'), numOf(stats['inventory_value']),
-          Icons.inventory_2_rounded, AppColors.warning),
-      (l10n.translate('falconKCogs'), numOf(stats['total_cogs']),
-          Icons.shopping_bag_rounded, AppColors.textSecondary),
+          profit < 0 ? AppColors.danger : AppColors.success, null),
+      if (product) ...[
+        // One product: how much is left and how much was sold read better
+        // than a cost-of-goods total.
+        (l10n.translate('falconKStock'), stock, Icons.warehouse_rounded,
+            stock <= 0 ? AppColors.danger : AppColors.warning, unit),
+        (l10n.translate('falconKSoldQty'), numOf(stats['sales_quantity']),
+            Icons.shopping_bag_rounded, AppColors.info, unit),
+      ] else ...[
+        (l10n.translate('falconKInventory'), numOf(stats['inventory_value']),
+            Icons.inventory_2_rounded, AppColors.warning, null),
+        (l10n.translate('falconKCogs'), numOf(stats['total_cogs']),
+            Icons.shopping_bag_rounded, AppColors.textSecondary, null),
+      ],
     ];
     return _Reveal(
       key: const ValueKey('numbers'),
@@ -1306,7 +1341,10 @@ class _FalconPageState extends ConsumerState<FalconPage>
                             tween: Tween(begin: 0, end: t.$2),
                             duration: const Duration(milliseconds: 700),
                             curve: Curves.easeOut,
-                            builder: (c, v, _) => Text(_money(v),
+                            builder: (c, v, _) => Text(
+                                t.$5 == null
+                                    ? _money(v)
+                                    : '${fmtNum(v)} ${t.$5}'.trim(),
                                 style: TextStyle(
                                     fontFamily: 'Cairo',
                                     fontSize: 14,

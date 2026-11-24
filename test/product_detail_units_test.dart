@@ -84,7 +84,8 @@ void main() {
     tester,
   ) async {
     await pump(tester, extra: false);
-    expect(find.text('زبادي'), findsOneWidget);
+    // The header + the base unit row (each unit row names the product).
+    expect(find.text('زبادي'), findsNWidgets(2));
     // Available quantity of the base unit is shown in the units box.
     expect(find.text('74 قطعة'), findsWidgets);
     // Extra unit box is hidden while «الخيارات الإضافية» is off.
@@ -169,5 +170,19 @@ void main() {
     expect(find.textContaining('معامل التحويل'), findsNothing);
     // The technical family label is internal-only.
     expect(find.text('العدد والتغليف'), findsNothing);
+  });
+
+  testWidgets('sale prices live inside each unit row; no «أسعار البيع» card', (
+    tester,
+  ) async {
+    await pump(tester, extra: true);
+    expect(find.text('أسعار البيع'), findsNothing);
+    // Base unit: its own sale and purchase price with the currency.
+    expect(find.text('30 USD'), findsOneWidget);
+    expect(find.text('10 USD'), findsOneWidget);
+    // Extra unit «باكيت»: its own prices, in the product currency.
+    expect(find.text('200 USD'), findsOneWidget);
+    expect(find.text('80 USD'), findsOneWidget);
+    expect(find.text('سعر البيع'), findsNWidgets(2));
   });
 }

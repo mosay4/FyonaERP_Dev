@@ -26,12 +26,76 @@ import '../../data/inventory_api.dart';
 /// Simple product page: picture + the few key numbers, then a short section
 /// for units/barcodes and clear actions (تعديل / زود / نقص / تعديل الكمية /
 /// عرض الحركات). No accounting jargon.
-class ProductDetailPage extends ConsumerWidget {
+class ProductDetailPage extends StatefulWidget {
   final String id;
   final LocalCommerceTarget? localTarget;
   const ProductDetailPage({super.key, required this.id, this.localTarget});
 
+  @override
+  State<ProductDetailPage> createState() => _ProductDetailPageState();
+}
+
+/// The record this page was opened for, kept for the page's whole life.
+///
+/// go_router serialises its page stack whenever it re-parses the current
+/// location (`router.refresh()` after an auth / branch-epoch change, which
+/// happens when the app comes back from the background). The in-memory
+/// [LocalCommerceTarget] cannot be serialised, so the SAME page (same page
+/// key, same State) is rebuilt with no target and an empty id. Reading that
+/// «product» returned an empty map → an empty card (icon only, «بدون», 0).
+/// The page therefore keeps the record it was opened for; the target's own
+/// scope check still runs on every build, so no permission is widened.
+class _ProductDetailPageState extends State<ProductDetailPage> {
+  late String _id = widget.id;
+  late LocalCommerceTarget? _target = widget.localTarget;
+  final _memo = _ProductMemo();
+
+  @override
+  void didUpdateWidget(covariant ProductDetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!productRecordReplaces(
+        widget.id, widget.localTarget, _id, _target)) {
+      return;
+    }
+    _id = widget.id;
+    _target = widget.localTarget;
+    _memo.product = null;
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      _ProductDetailView(id: _id, localTarget: _target, memo: _memo);
+}
+
+/// True when a rebuilt route really points at ANOTHER record. A rebuild that
+/// lost its id or its in-memory target (router re-parse) keeps the old one.
+bool productRecordReplaces(String id, LocalCommerceTarget? target,
+    String currentId, LocalCommerceTarget? currentTarget) {
+  if (id.isEmpty) return false;
+  if (target == null && currentTarget != null) return false;
+  return id != currentId || !identical(target, currentTarget);
+}
+
+/// The last product actually read for this page: a re-read (resume, sync,
+/// edit) never replaces it with an empty card.
+final class _ProductMemo {
+  Map<String, dynamic>? product;
+}
+
+class _ProductDetailView extends ConsumerWidget {
+  final String id;
+  final LocalCommerceTarget? localTarget;
+  final _ProductMemo memo;
+  const _ProductDetailView(
+      {required this.id, this.localTarget, required this.memo});
+
   InventoryProductKey get _record => (id: id, target: localTarget);
+
+  bool _isProduct(Map<String, dynamic>? p) =>
+      p != null &&
+      p.isNotEmpty &&
+      (p['id'] == null || '${p['id']}' == id) &&
+      (p['name'] ?? '').toString().isNotEmpty;
 
   bool _isCurrent(WidgetRef ref, InventoryApi source) {
     final target = localTarget;
@@ -123,31 +187,50 @@ class ProductDetailPage extends ConsumerWidget {
           ),
         ],
       ),
-      body: async.when(
-        loading: () => target != null ? const SizedBox.shrink()
-            : const Center(child: CircularProgressIndicator()),
-        error: (_, __) => Center(
-            child: Text(l10n.translate('invLoadError'),
-                style: const TextStyle(fontFamily: 'Cairo'))),
-        data: (p) => ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-          children: [
-            _header(context, p, ws.productImages),
-            const SizedBox(height: 16),
-            _actions(context, ref, p),
-            const SizedBox(height: 16),
-            // Units & quantities — the base unit is ALWAYS shown; extra units
-            // get their own box only when «الخيارات الإضافية» is enabled.
-            _unitsCard(context, ref, p, canSeeCost),
-            const SizedBox(height: 16),
-            _lotsCard(context, ref, p, canSeeCost, ws.productImages),
-            if (ws.multiCurrency) ...[
-              _pricesCard(context, ref),
-              const SizedBox(height: 16),
-            ],
-          ],
-        ),
-      ),
+      body: () {
+        // Keep the last real product while a re-read runs or fails; a read
+        // that finds nothing never blanks a product already on screen.
+        final fresh = async.valueOrNull;
+        if (_isProduct(fresh)) memo.product = fresh;
+        final shown = memo.product;
+        if (shown != null) return _body(context, ref, shown, ws, canSeeCost);
+        return async.when(
+          loading: () => target != null
+              ? const SizedBox.shrink()
+              : const Center(child: CircularProgressIndicator()),
+          error: (_, _) => Center(
+              child: Text(l10n.translate('invLoadError'),
+                  style: const TextStyle(fontFamily: 'Cairo'))),
+          data: (_) => Center(
+              child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(l10n.translate('invProductNotFound'),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontFamily: 'Cairo', color: AppColors.textSecondary)),
+          )),
+        );
+      }(),
+    );
+  }
+
+  Widget _body(BuildContext context, WidgetRef ref, Map<String, dynamic> p,
+      WarehouseSettings ws, bool canSeeCost) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      children: [
+        _header(context, p, ws.productImages),
+        const SizedBox(height: 16),
+        _actions(context, ref, p),
+        const SizedBox(height: 16),
+        // Units & quantities — the base unit is ALWAYS shown; extra units
+        // get their own row only when «الخيارات الإضافية» is enabled. Each
+        // unit carries its own sale price(s): a price differs per unit, so
+        // there is no separate «أسعار البيع» card.
+        _unitsCard(context, ref, p, canSeeCost, ws.productImages),
+        const SizedBox(height: 16),
+        _lotsCard(context, ref, p, canSeeCost, ws.productImages),
+      ],
     );
   }
 
@@ -568,13 +651,38 @@ class ProductDetailPage extends ConsumerWidget {
   }
 
   Widget _unitsCard(BuildContext context, WidgetRef ref,
-      Map<String, dynamic> p, bool showCost) {
+      Map<String, dynamic> p, bool showCost, bool showImage) {
     final l10n = AppLocalizations.of(context);
     final units = ref.watch(productUnitsProvider(_record));
     final extraOn = ref.watch(warehouseSettingsProvider).extraOptions;
     final stock = (p['stock'] as num?)?.toDouble() ?? 0;
     final baseUnit = '${p['unit'] ?? ''}';
-    final curSymbol = currencySymbol('${p['cost_currency'] ?? ''}');
+    final productName = '${p['name'] ?? ''}';
+    final image = showImage ? p['image']?.toString() : null;
+    // The base unit's prices, one per currency the product is priced in.
+    final listed = [
+      for (final row in (p['prices'] as List? ?? const []).whereType<Map>())
+        if ('${row['currency'] ?? ''}'.isNotEmpty) row,
+    ];
+    final mainCurrency = '${p['cost_currency'] ?? ''}'.isNotEmpty
+        ? '${p['cost_currency']}'
+        : listed.isNotEmpty
+            ? '${listed.first['currency']}'
+            : '';
+    final baseSale = <_UnitPrice>[
+      for (final row in listed)
+        if (row['price'] != null) (row['price'], '${row['currency']}'),
+    ];
+    final basePurchase = <_UnitPrice>[
+      for (final row in listed)
+        if (row['buy_price'] != null) (row['buy_price'], '${row['currency']}'),
+    ];
+    if (baseSale.isEmpty && p['price'] != null && asDoubleValue(p['price']) != 0) {
+      baseSale.add((p['price'], mainCurrency));
+    }
+    if (basePurchase.isEmpty && p['cost_price'] != null) {
+      basePurchase.add((p['cost_price'], mainCurrency));
+    }
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -585,29 +693,35 @@ class ProductDetailPage extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(l10n.translate('invUnitDetails'),
-              style: const TextStyle(
-                  fontFamily: 'Cairo',
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
+          Row(children: [
+            const Icon(Icons.straighten_rounded,
+                size: 18, color: AppColors.primary),
+            const SizedBox(width: 6),
+            Text(l10n.translate('invUnitDetails'),
+                style: const TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800)),
+          ]),
+          const SizedBox(height: 10),
           // The BASE unit is ALWAYS shown (its quantity now lives here instead
           // of the header).
           _unitBox(context, l10n,
+              productName: productName,
+              image: image,
               name: baseUnit,
               factor: 1,
               qtyText: '${_fmt(stock)} $baseUnit'.trim(),
               baseUnit: baseUnit,
-              sale: p['price'],
-              purchase: p['cost_price'],
-              curSymbol: curSymbol,
-              showCost: showCost,
+              sale: baseSale,
+              purchase: showCost ? basePurchase : const [],
               showFactor: false),
-          // Extra units: one independent box each — rendered ONLY when the
+          // Extra units: one row each — rendered ONLY when the
           // «الخيارات الإضافية» inventory setting is enabled. The data always
           // exists; turning the setting off never deletes it.
           if (extraOn)
             units.when(
+              skipLoadingOnReload: true,
               loading: () => const Padding(
                   padding: EdgeInsets.all(8),
                   child: Center(
@@ -615,7 +729,7 @@ class ProductDetailPage extends ConsumerWidget {
                           width: 20,
                           height: 20,
                           child: CircularProgressIndicator(strokeWidth: 2)))),
-              error: (_, __) => const SizedBox.shrink(),
+              error: (_, _) => const SizedBox.shrink(),
               data: (d) {
                 final list =
                     (d['units'] as List?)?.whereType<Map>() ?? const [];
@@ -627,6 +741,8 @@ class ProductDetailPage extends ConsumerWidget {
                   children: [
                     for (final u in extras)
                       _unitBox(context, l10n,
+                          productName: productName,
+                          image: image,
                           name: '${u['name'] ?? ''}',
                           factor: ((u['factor'] ?? 1) as num).toDouble(),
                           qtyText: productUnitAvailableText(
@@ -635,10 +751,14 @@ class ProductDetailPage extends ConsumerWidget {
                               '${u['name'] ?? ''}',
                               baseUnit),
                           baseUnit: baseUnit,
-                          sale: u['sale_price'],
-                          purchase: u['purchase_price'],
-                          curSymbol: curSymbol,
-                          showCost: showCost),
+                          sale: [
+                            if (u['sale_price'] != null)
+                              (u['sale_price'], mainCurrency),
+                          ],
+                          purchase: [
+                            if (showCost && u['purchase_price'] != null)
+                              (u['purchase_price'], mainCurrency),
+                          ]),
                   ],
                 );
               },
@@ -648,184 +768,201 @@ class ProductDetailPage extends ConsumerWidget {
     );
   }
 
-  /// One independent box for a unit: its real name, a plain-language
-  /// equivalence («1 باكيت = 8 قطع»), the available quantity IN THAT UNIT,
-  /// and its saved sale/purchase prices (with the currency). Technical group
-  /// labels stay internal (compatibility) and are never shown.
+  /// One unit row: an icon, the product name, the unit's real name with a
+  /// plain-language equivalence («1 باكيت = 8 قطعة»), the available
+  /// quantity IN THAT UNIT, then its own sale price(s) and — when visible —
+  /// its purchase price, each with its currency.
   Widget _unitBox(
     BuildContext context,
     AppLocalizations l10n, {
+    required String productName,
+    String? image,
     required String name,
     required double factor,
     required String qtyText,
     required String baseUnit,
-    dynamic sale,
-    dynamic purchase,
-    required String curSymbol,
-    required bool showCost,
+    required List<_UnitPrice> sale,
+    required List<_UnitPrice> purchase,
     bool showFactor = true,
   }) {
-    final showSale = sale != null;
-    final showPurchase = purchase != null && showCost;
-    final hasPrices = showSale || showPurchase;
+    final hasImage = image != null && image.isNotEmpty;
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: AppColors.surfaceVariant.withAlpha(90),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.primary.withAlpha(40)),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                    color: AppColors.primary.withAlpha(18),
-                    borderRadius: BorderRadius.circular(9)),
-                child: const Icon(Icons.inventory_2_outlined,
-                    size: 17, color: AppColors.primary),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(name.isEmpty ? l10n.translate('invNone') : name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: R.fontSize(context, 13.5),
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textPrimary)),
-                    if (showFactor)
-                      Text(
-                          '1 $name = ${_fmt(factor)} $baseUnit',
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                      color: AppColors.primary.withAlpha(20),
+                      borderRadius: BorderRadius.circular(11)),
+                  child: hasImage
+                      ? BusinessProductImage(
+                          url: image, width: 42, height: 42, fit: BoxFit.cover)
+                      : const Icon(Icons.inventory_2_outlined,
+                          size: 21, color: AppColors.primary),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(productName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                               fontFamily: 'Cairo',
-                              fontSize: R.fontSize(context, 11),
+                              fontSize: R.fontSize(context, 13.5),
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textPrimary)),
+                      const SizedBox(height: 2),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 2,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 1),
+                            decoration: BoxDecoration(
+                                color: AppColors.primary.withAlpha(22),
+                                borderRadius: BorderRadius.circular(6)),
+                            child: Text(
+                                name.isEmpty ? l10n.translate('invNone') : name,
+                                maxLines: 1,
+                                style: TextStyle(
+                                    fontFamily: 'Cairo',
+                                    fontSize: R.fontSize(context, 11.5),
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.primary)),
+                          ),
+                          Text(
+                              showFactor
+                                  ? '1 $name = ${_fmt(factor)} $baseUnit'
+                                  : l10n.translate('invBaseUnit'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontFamily: 'Cairo',
+                                  fontSize: R.fontSize(context, 11),
+                                  color: AppColors.textSecondary)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  constraints: const BoxConstraints(maxWidth: 130),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      border: Border.all(color: AppColors.border),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(l10n.translate('invAvailQty'),
+                          style: TextStyle(
+                              fontFamily: 'Cairo',
+                              fontSize: R.fontSize(context, 9.5),
                               color: AppColors.textSecondary)),
-                  ],
+                      Text(qtyText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontFamily: 'Cairo',
+                              fontSize: R.fontSize(context, 12.5),
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textPrimary)),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                    color: AppColors.primary.withAlpha(14),
-                    borderRadius: BorderRadius.circular(9)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(l10n.translate('invAvailQty'),
-                        style: TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: R.fontSize(context, 9),
-                            color: AppColors.textSecondary)),
-                    Text(qtyText,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: R.fontSize(context, 12.5),
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.primary)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (hasPrices) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                if (showSale)
-                  _unitPriceChip(
-                      context,
-                      l10n.translate('invSellPrice'),
-                      '${fmtNum(sale)} $curSymbol'.trim(),
-                      AppColors.primary),
-                if (showPurchase)
-                  _unitPriceChip(
-                      context,
-                      l10n.translate('invPurchasePrice'),
-                      '${fmtNum(purchase)} $curSymbol'.trim(),
-                      AppColors.textSecondary),
               ],
             ),
-          ],
+          ),
+          Container(height: 1, color: AppColors.primary.withAlpha(28)),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: _unitPrices(context, l10n,
+                      label: l10n.translate('invSellPrice'),
+                      icon: Icons.sell_outlined,
+                      prices: sale,
+                      color: AppColors.success,
+                      strong: true),
+                ),
+                if (purchase.isNotEmpty) ...[
+                  Container(width: 1, color: AppColors.primary.withAlpha(28)),
+                  Expanded(
+                    child: _unitPrices(context, l10n,
+                        label: l10n.translate('invPurchasePrice'),
+                        icon: Icons.shopping_cart_outlined,
+                        prices: purchase,
+                        color: AppColors.textSecondary,
+                        strong: false),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _unitPriceChip(
-      BuildContext context, String label, String value, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-          color: color.withAlpha(18),
-          borderRadius: BorderRadius.circular(8)),
-      child: Text('$label: $value',
-          style: TextStyle(
-              fontFamily: 'Cairo',
-              fontSize: R.fontSize(context, 11),
-              fontWeight: FontWeight.w700,
-              color: color)),
-    );
-  }
-
-  Widget _pricesCard(BuildContext context, WidgetRef ref) {
-    final l10n = AppLocalizations.of(context);
-    final prices = ref.watch(productPricesProvider(_record));
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(14),
-      ),
+  Widget _unitPrices(BuildContext context, AppLocalizations l10n,
+      {required String label,
+      required IconData icon,
+      required List<_UnitPrice> prices,
+      required Color color,
+      required bool strong}) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(l10n.translate('invPrices'),
-              style: const TextStyle(
-                  fontFamily: 'Cairo',
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          prices.when(
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
-            data: (list) => list.isEmpty
-                ? Text(l10n.translate('invNone'),
-                    style: TextStyle(
-                        fontFamily: 'Cairo', color: AppColors.textSecondary))
-                : Column(
-                    children: [
-                      for (final p in list)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 3),
-                          child: Text(
-                              '${fmtNum(p['price'])} ${currencyName('${p['currency']}')}',
-                              style: const TextStyle(
-                                  fontFamily: 'Cairo',
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700)),
-                        ),
-                    ],
-                  ),
-          ),
+          Row(children: [
+            Icon(icon, size: 13, color: color),
+            const SizedBox(width: 4),
+            Text(label,
+                style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: R.fontSize(context, 10.5),
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textSecondary)),
+          ]),
+          const SizedBox(height: 2),
+          if (prices.isEmpty)
+            Text(l10n.translate('invNone'),
+                style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: R.fontSize(context, 12.5),
+                    color: AppColors.textSecondary))
+          else
+            for (final price in prices)
+              Text('${fmtNum(price.$1)} ${currencySymbol(price.$2)}'.trim(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontFamily: 'Cairo',
+                      fontSize: R.fontSize(context, strong ? 15 : 13),
+                      fontWeight: strong ? FontWeight.w800 : FontWeight.w700,
+                      color: strong ? color : AppColors.textPrimary)),
         ],
       ),
     );
@@ -1081,6 +1218,9 @@ class ProductDetailPage extends ConsumerWidget {
     amount.dispose();
   }
 }
+
+/// One price of a unit: the amount and its currency code.
+typedef _UnitPrice = (Object? amount, String currency);
 
 String _fmt(dynamic v) {
   final d = v is num ? v.toDouble() : double.tryParse('$v') ?? 0;

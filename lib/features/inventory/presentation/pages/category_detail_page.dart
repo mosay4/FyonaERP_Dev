@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +22,9 @@ import '../../../core_business/presentation/providers/local_commerce_navigation.
 import '../../../core_business/presentation/widgets/business_operation_error.dart';
 import '../../../core_business/presentation/widgets/business_online_gate.dart';
 import '../widgets/product_picker.dart';
+import '../widgets/inventory_list_parts.dart';
+import '../../../purchases/presentation/pages/barcode_scan_page.dart';
+import '../../../../shared/services/scan_sfx.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:uuid/uuid.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
@@ -422,13 +427,70 @@ class _CategoryDetailPageState extends ConsumerState<CategoryDetailPage> {
     }
   }
 
+  /// Category-local search + status filter (client-side over the rows
+  /// already loaded above — no extra reads, no spinner).
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+  String _filter = 'all';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _scan() async {
+    if (!_active) return;
+    final code = await Navigator.of(context)
+        .push<String>(MaterialPageRoute(builder: (_) => const BarcodeScanPage()));
+    if (code == null || code.isEmpty || !_active) return;
+    _searchCtrl.text = code;
+    setState(() => _query = code.trim());
+    final hit = _products.any((p) => _matches(p, code.trim().toLowerCase()));
+    unawaited(hit ? ScanSfx.success() : ScanSfx.error());
+  }
+
+  bool _matches(Map<String, dynamic> p, String q) {
+    if (q.isEmpty) return true;
+    for (final k in const ['name', 'barcode', 'sku']) {
+      if ('${p[k] ?? ''}'.toLowerCase().contains(q)) return true;
+    }
+    return false;
+  }
+
+  bool _passesStatus(InventoryRowStatus st) => switch (_filter) {
+    'low' => st.low,
+    'out' => st.out,
+    'expiring' => st.soon,
+    'expired' => st.expired,
+    _ => true,
+  };
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final canRead = ref.watch(employeeCanProvider('inventory')) &&
         _canRead(ref.watch(inventoryApiProvider));
     final c = canRead ? _cat : null;
-    final img = (c?['image'] ?? '').toString();
+    final canEdit = !BranchScope.readOnly &&
+        ref.watch(employeeCanProvider('inventory.edit'));
+    final canDelete = !BranchScope.readOnly &&
+        ref.watch(employeeCanProvider('inventory.delete'));
+    final canFalcon = ref.watch(employeeCanProvider('falcon'));
+    final ws = ref.watch(inventoryWarehouseSettingsProvider);
+    final scope = widget.localTarget?.scope;
+    final warnDays = scope == null ? 30 : ws.expiryWarnDays;
+    final filter = inventoryStatusAvailable(_filter,
+            lowStock: ws.lowStockAlert, expiry: ws.expiry)
+        ? _filter
+        : 'all';
+    final q = _query.toLowerCase();
+    final rows = <(Map<String, dynamic>, InventoryRowStatus)>[
+      for (final p in _products)
+        if (_matches(p, q))
+          (p, inventoryRowStatus(p, sourceScope: scope,
+              showLow: ws.lowStockAlert, warnDays: warnDays)),
+    ].where((r) => filter == 'all' || _passesStatus(r.$2)).toList();
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -457,299 +519,352 @@ class _CategoryDetailPageState extends ConsumerState<CategoryDetailPage> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          border: Border.all(color: AppColors.border),
-                          borderRadius: BorderRadius.circular(14),
+                      _header(context, c,
+                          canEdit: canEdit,
+                          canDelete: canDelete,
+                          canFalcon: canFalcon),
+                      if (_products.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        InventorySearchField(
+                          controller: _searchCtrl,
+                          onChanged: (v) => setState(() => _query = v.trim()),
+                          onScan: ws.barcode ? _scan : null,
                         ),
-                        child: Column(
-                          children: [
-                            // Small square showing the whole logo (no crop).
-                            Container(
-                              width: 120,
-                              height: 120,
-                              clipBehavior: Clip.antiAlias,
-                              decoration: BoxDecoration(
-                                color: AppColors.surfaceVariant.withAlpha(90),
-                                borderRadius: BorderRadius.circular(16),
-                                border:
-                                    Border.all(color: AppColors.border),
-                              ),
-                              child: img.isNotEmpty
-                                   ? BusinessProductImage(
-                                      url: img,
-                                      width: 120,
-                                      height: 120,
-                                      fit: BoxFit.contain)
-                                  : Icon(Icons.category_outlined,
-                                      size: 48,
-                                      color: AppColors.textSecondary),
-                            ),
-                            const SizedBox(height: 10),
-                            Text((c['name'] ?? '').toString(),
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                    fontFamily: 'Cairo',
-                                    fontSize: 17,
-                                     fontWeight: FontWeight.w800)),
-                            const SizedBox(height: 10),
-                            Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceEvenly,
-                              children: [
-                                if (!BranchScope.readOnly && ref.watch(employeeCanProvider('inventory.edit'))) IconButton(
-                                  tooltip: l10n
-                                      .translate('invCategoryImage'),
-                                  icon: const Icon(
-                                      Icons.add_a_photo_outlined),
-                                  onPressed: _changeImage,
-                                ),
-                                if (!BranchScope.readOnly && ref.watch(employeeCanProvider('inventory.edit'))) IconButton(
-                                  tooltip:
-                                      l10n.translate('invManage'),
-                                  icon:
-                                      const Icon(Icons.edit_outlined),
-                                  onPressed: _rename,
-                                ),
-                                if (ref.watch(employeeCanProvider('falcon')))
-                                  IconButton(
-                                    tooltip:
-                                        l10n.translate('invFalcon'),
-                                    icon: const FalconIcon(size: 20),
-                                     onPressed: () async {
-                                       if (!_active) return;
-                                       if (_source is LocalInventoryApi) {
-                                         showFyonaSnack(context, l10n.translate('invLocalFalconUnavailable'), success: false);
-                                         return;
-                                       }
-                                       if (!await ensureBusinessOnline(context) ||
-                                           !_active) {
-                                        return;
-                                      }
-                                      context.push(
-                                          '/inventory/falcon?scope=category&id=${widget.id}');
-                                    },
-                                  ),
-                                if (!BranchScope.readOnly && ref.watch(employeeCanProvider('inventory.delete'))) IconButton(
-                                  tooltip: l10n.translate('delete'),
-                                  icon: const Icon(
-                                      Icons.delete_outline,
-                                      color: AppColors.danger),
-                                  onPressed: _delete,
-                                ),
-                              ],
-                            ),
-                          ],
+                        // Status pills filter only this category's products.
+                        InventoryPillBar(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          pills: inventoryStatusPills(
+                            l10n,
+                            current: filter,
+                            onSelect: (v) => setState(() => _filter = v),
+                            lowStock: ws.lowStockAlert,
+                            expiry: ws.expiry,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 16),
+                      ] else
+                        const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
                             child: Text(
-                                '${l10n.translate('invCategoryProducts')} (${_products.length})',
-                                style: const TextStyle(
+                                '${l10n.translate('invCategoryProducts')} (${rows.length})',
+                                style: TextStyle(
                                     fontFamily: 'Cairo',
                                     fontSize: 14,
+                                    color: AppColors.textPrimary,
                                     fontWeight: FontWeight.w800)),
                           ),
-                          if (!BranchScope.readOnly && ref.watch(employeeCanProvider('inventory.edit'))) TextButton(
-                            onPressed: _products.isEmpty
-                                ? null
-                                : () => setState(() {
-                                      _selecting = !_selecting;
-                                      _selRemove.clear();
-                                    }),
+                          if (canEdit && _products.isNotEmpty) TextButton(
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              foregroundColor: inventoryAccent,
+                            ),
+                            onPressed: () => setState(() {
+                              _selecting = !_selecting;
+                              _selRemove.clear();
+                            }),
                             child: Text(
                                 l10n.translate(_selecting
                                     ? 'cancel'
                                     : 'invSelect'),
                                 style: const TextStyle(
-                                    fontFamily: 'Cairo')),
+                                    fontFamily: 'Cairo',
+                                    fontWeight: FontWeight.w700)),
                           ),
-                          if (!BranchScope.readOnly && ref.watch(employeeCanProvider('inventory.edit')))
-                          IconButton(
-                            tooltip: _selecting
-                                ? l10n.translate('invRemoveCount', params: {'n': '${_selRemove.length}'})
-                                : l10n.translate('invAddToCategory'),
-                            icon: Icon(_selecting ? Icons.delete_outline : Icons.add_circle_outline,
-                                color: _selecting ? AppColors.danger : null),
-                            onPressed: _selecting
-                                ? (_selRemove.isEmpty ? null : _removeSelected)
-                                : _addProducts,
-                          ),
+                          if (canEdit) ...[
+                            const SizedBox(width: 4),
+                            IconButton.filledTonal(
+                              tooltip: _selecting
+                                  ? l10n.translate('invRemoveCount', params: {'n': '${_selRemove.length}'})
+                                  : l10n.translate('invAddToCategory'),
+                              visualDensity: VisualDensity.compact,
+                              style: IconButton.styleFrom(
+                                backgroundColor: _selecting
+                                    ? AppColors.danger.withAlpha(26)
+                                    : inventoryAccentTint,
+                                foregroundColor: _selecting
+                                    ? AppColors.danger
+                                    : inventoryAccent,
+                              ),
+                              icon: Icon(
+                                  _selecting ? Icons.delete_outline : Icons.add,
+                                  size: 20),
+                              onPressed: _selecting
+                                  ? (_selRemove.isEmpty ? null : _removeSelected)
+                                  : _addProducts,
+                            ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 8),
                       if (_products.isEmpty)
                         Padding(
                           padding:
-                              const EdgeInsets.symmetric(vertical: 48),
+                              const EdgeInsets.symmetric(vertical: 40),
                           child: Column(
                             children: [
                               Icon(Icons.inventory_2_outlined,
-                                  size: 56,
+                                  size: 48,
                                   color: AppColors.textSecondary),
-                              const SizedBox(height: 12),
+                              const SizedBox(height: 10),
                               Text(
                                   l10n.translate(
                                       'invNoProductsInCategory'),
                                   textAlign: TextAlign.center,
                                   style: const TextStyle(
                                       fontFamily: 'Cairo',
-                                      fontSize: 15,
+                                      fontSize: 14,
                                       fontWeight: FontWeight.w700)),
-                              const SizedBox(height: 16),
-                              if (!BranchScope.readOnly && ref.watch(employeeCanProvider('inventory.edit')))
-                              OutlinedButton.icon(
-                                onPressed: _addProducts,
-                                icon: const Icon(Icons.add, size: 16),
-                                label: Text(
-                                    l10n.translate(
-                                        'invAddProductsToCategory'),
-                                    style: const TextStyle(
-                                        fontFamily: 'Cairo',
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700)),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: AppColors.danger,
-                                  side: const BorderSide(
-                                      color: AppColors.danger,
-                                      width: 1.5),
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(12)),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 8),
+                              const SizedBox(height: 14),
+                              if (canEdit)
+                                InventorySmallAction(
+                                  onPressed: _addProducts,
+                                  label: l10n.translate(
+                                      'invAddProductsToCategory'),
                                 ),
-                              ),
                             ],
                           ),
                         )
+                      else if (rows.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 40),
+                          child: Text(
+                            l10n.translate('invNoMatchingProducts'),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontFamily: 'Cairo',
+                              fontSize: 13,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        )
                       else
-                        for (final p in _products)
-                          _ProductRow(
+                        for (final (p, st) in rows)
+                          Padding(
                             key: ValueKey(p['id'].toString()),
-                            product: p,
-                            selecting: _selecting,
-                            selected: _selRemove
-                                .contains(p['id'].toString()),
-                            onToggle: () => setState(() {
-                              final pid = p['id'].toString();
-                              if (_selRemove.contains(pid)) {
-                                _selRemove.remove(pid);
-                              } else {
-                                _selRemove.add(pid);
-                              }
-                            }),
-                            onEnterSelect: () => setState(() {
-                              _selecting = true;
-                              _selRemove.add(p['id'].toString());
-                            }),
-                            onRemove: () =>
-                                _removeOne(p['id'].toString()),
-                             onOpen: () async {
-                               if (!_active) return;
-                               await openCommerceRecord(context, RouteNames.inventoryProduct, '${p['id']}',
-                                 fromLocal: widget.localTarget?.scope);
-                               if (_active) await _load();
-                             },
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _productRow(p, st, ws.expiry),
                           ),
                     ],
                   ),
                 ),
     );
   }
+
+  Widget _productRow(
+      Map<String, dynamic> p, InventoryRowStatus st, bool showExpiry) {
+    final l10n = AppLocalizations.of(context);
+    final pid = p['id'].toString();
+    final selected = _selRemove.contains(pid);
+    void toggle() => setState(() {
+          if (!_selRemove.remove(pid)) _selRemove.add(pid);
+        });
+    final canEdit = !BranchScope.readOnly &&
+        ref.watch(employeeCanProvider('inventory.edit'));
+    return InventoryProductTile(
+      product: p,
+      status: st,
+      showExpiry: showExpiry,
+      selected: _selecting && selected,
+      onLongPress: _selecting || !canEdit
+          ? null
+          : () => setState(() {
+                _selecting = true;
+                _selRemove.add(pid);
+              }),
+      onTap: _selecting
+          ? toggle
+          : () async {
+              if (!_active) return;
+              await openCommerceRecord(context, RouteNames.inventoryProduct, pid,
+                  fromLocal: widget.localTarget?.scope);
+              if (_active) await _load();
+            },
+      // Same slot, constraints and button in both modes: only paint
+      // and callback change. Selection cannot resize/reflow the row.
+      trailing: !canEdit
+          ? null
+          : IconButton(
+              tooltip: l10n.translate(
+                  _selecting ? 'invSelect' : 'invRemoveFromCategory'),
+              visualDensity: VisualDensity.compact,
+              icon: Icon(
+                  _selecting
+                      ? (selected
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked)
+                      : Icons.close,
+                  size: 20,
+                  color: _selecting
+                      ? inventoryAccent
+                      : AppColors.textSecondary),
+              onPressed: _selecting ? toggle : () => _removeOne(pid),
+            ),
+    );
+  }
+
+  Widget _header(BuildContext context, Map<String, dynamic> c,
+      {required bool canEdit,
+      required bool canDelete,
+      required bool canFalcon}) {
+    final l10n = AppLocalizations.of(context);
+    final img = (c['image'] ?? '').toString();
+    final actions = <Widget>[
+      if (canEdit)
+        _HeaderAction(
+          icon: Icons.edit_outlined,
+          label: l10n.translate('edit'),
+          tooltip: l10n.translate('invManage'),
+          onTap: _rename,
+        ),
+      if (canEdit)
+        _HeaderAction(
+          icon: Icons.add_a_photo_outlined,
+          label: l10n.translate('invCatActionImage'),
+          tooltip: l10n.translate('invCategoryImage'),
+          onTap: _changeImage,
+        ),
+      if (canFalcon)
+        _HeaderAction(
+          iconWidget: const FalconIcon(size: 18),
+          label: l10n.translate('invCatActionFalcon'),
+          tooltip: l10n.translate('invFalcon'),
+          onTap: () async {
+            if (!_active) return;
+            if (!await ensureBusinessOnline(context) || !_active) {
+              return;
+            }
+            context.push('/inventory/falcon?scope=category&id=${widget.id}');
+          },
+        ),
+      if (canDelete)
+        _HeaderAction(
+          icon: Icons.delete_outline,
+          label: l10n.translate('delete'),
+          tooltip: l10n.translate('delete'),
+          color: AppColors.danger,
+          onTap: _delete,
+        ),
+    ];
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              // Small square showing the whole logo (no crop).
+              Container(
+                width: 60,
+                height: 60,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: inventoryAccentTint,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: img.isNotEmpty
+                    ? BusinessProductImage(
+                        url: img, width: 60, height: 60, fit: BoxFit.contain)
+                    : Icon(Icons.category_outlined,
+                        size: 28, color: inventoryAccent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text((c['name'] ?? '').toString(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontFamily: 'Cairo',
+                            fontSize: 16,
+                            height: 1.3,
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 2),
+                    Text(
+                        l10n.translate('invCatProductsCount',
+                            params: {'n': '${_products.length}'}),
+                        style: TextStyle(
+                            fontFamily: 'Cairo',
+                            fontSize: 12,
+                            color: AppColors.textSecondary)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (actions.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                for (var i = 0; i < actions.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 8),
+                  Expanded(child: actions[i]),
+                ],
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
-class _ProductRow extends StatelessWidget {
-  final Map<String, dynamic> product;
-  final bool selecting;
-  final bool selected;
-  final VoidCallback onToggle;
-  final VoidCallback onEnterSelect;
-  final VoidCallback onRemove;
-  final VoidCallback onOpen;
-  const _ProductRow(
-      {super.key, required this.product,
-      required this.selecting,
-      required this.selected,
-      required this.onToggle,
-      required this.onEnterSelect,
-      required this.onRemove,
-      required this.onOpen});
+/// Equal-size labeled action of the category header.
+class _HeaderAction extends StatelessWidget {
+  final IconData? icon;
+  final Widget? iconWidget;
+  final String label;
+  final String tooltip;
+  final Color? color;
+  final VoidCallback onTap;
+  const _HeaderAction({
+    this.icon,
+    this.iconWidget,
+    required this.label,
+    required this.tooltip,
+    this.color,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final img = (product['image'] ?? '').toString();
-    final stock =
-        (product['stock'] as num?)?.toDouble() ?? 0;
-    final stockTxt = stock == stock.roundToDouble()
-        ? stock.round().toString()
-        : stock.toStringAsFixed(2);
-    return GestureDetector(
-      onLongPress: selecting ? null : onEnterSelect,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(
-          color: selected
-              ? Color.alphaBlend(AppColors.primary.withAlpha(22), AppColors.surface)
-              : AppColors.surface,
-          border: Border.all(
-              color: selected
-                  ? AppColors.primary
-                  : AppColors.border),
+    final fg = color ?? AppColors.textPrimary;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: color != null ? color!.withAlpha(20) : AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
           borderRadius: BorderRadius.circular(12),
-        ),
-        child: Material(
-          type: MaterialType.transparency,
-          child: ListTile(
-          dense: true,
-          leading: Container(
-            width: 44,
-            height: 44,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceVariant.withAlpha(90),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: img.isNotEmpty
-                 ? BusinessProductImage(
-                    url: img, width: 44, height: 44, fit: BoxFit.cover)
-                : Icon(Icons.inventory_2_outlined,
-                    size: 22, color: AppColors.textSecondary),
-          ),
-          title: Text((product['name'] ?? '').toString(),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontFamily: 'Cairo', fontWeight: FontWeight.w600)),
-          subtitle: Text(
-              '${l10n.translate('invQtyNow')}: $stockTxt ${(product['unit'] ?? '').toString()}',
-              style: TextStyle(
-                  fontFamily: 'Cairo',
-                  fontSize: 12,
-                  color: AppColors.textSecondary)),
-          // Same slot, constraints and button in both modes: only paint
-          // and callback change. Selection cannot resize/reflow the row.
-          trailing: SizedBox(
-            width: 40,
-            height: 40,
-            child: IconButton(
-                  tooltip: l10n.translate(selecting ? 'invSelect' : 'invRemoveFromCategory'),
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(selecting
-                      ? (selected ? Icons.check_circle : Icons.radio_button_unchecked)
-                      : Icons.close,
-                      size: 20, color: selecting ? AppColors.primary : AppColors.danger),
-                  onPressed: selecting ? onToggle : onRemove,
+          onTap: onTap,
+          child: SizedBox(
+            height: 54,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                iconWidget ?? Icon(icon, size: 19, color: fg),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: 11,
+                    height: 1.2,
+                    fontWeight: FontWeight.w700,
+                    color: fg,
+                  ),
                 ),
-          ),
-          onTap: selecting ? onToggle : onOpen,
+              ],
+            ),
           ),
         ),
       ),

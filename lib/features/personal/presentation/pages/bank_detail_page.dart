@@ -38,7 +38,11 @@ String _accountTypeLabel(AppLocalizations l10n, String type) {
 /// shared [BankDetailView] (also used by Business banks).
 class BankDetailPage extends ConsumerStatefulWidget {
   final String bankName;
-  const BankDetailPage({super.key, required this.bankName});
+
+  /// Opened from a home account card: that account's currency first.
+  final String? initialCurrency;
+  const BankDetailPage({super.key, required this.bankName,
+      this.initialCurrency});
   @override
   ConsumerState<BankDetailPage> createState() => _BankDetailPageState();
 }
@@ -126,6 +130,7 @@ class _BankDetailPageState extends ConsumerState<BankDetailPage> {
     ];
 
     return BankDetailView(
+      initialCurrency: widget.initialCurrency,
       bankName: _displayName,
       accounts: accounts,
       movements: movements,

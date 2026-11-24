@@ -26,13 +26,21 @@ extension BusinessProductStatistics on BusinessLedger {
     return _directory._transaction((txn) async {
       final card = (await txn.query(
         _commerceProducts,
-        columns: ['cost_currency'],
+        columns: ['cost_currency', 'name', 'unit', 'min_stock_4', 'is_service'],
         where: 'branch_id = ? AND id = ? AND deleted_us IS NULL',
         whereArgs: [branch, product],
       )).singleOrNull;
       if (card == null) {
         throw const BusinessLedgerError(BusinessLedgerProblem.invalidProduct);
       }
+      // The stock on hand NOW (not limited to the chosen period), so the
+      // statistics screen shows the quantity beside what was sold.
+      final onHand = (await txn.query(
+        _commerceStock,
+        columns: ['quantity_milli'],
+        where: 'branch_id = ? AND product_id = ?',
+        whereArgs: [branch, product],
+      )).singleOrNull;
       final currencies = [
         for (final row in await txn.query(
           _commercePrices,
@@ -116,6 +124,13 @@ extension BusinessProductStatistics on BusinessLedger {
         }
       }
       return {
+        'name': card['name'],
+        'unit': card['unit'],
+        'is_service': card['is_service'] == 1,
+        'stock': onHand == null
+            ? 0
+            : _commerceDecimal(onHand, 'quantity_milli', 1000),
+        'min_stock': _commerceDecimal(card, 'min_stock_4', 10000),
         'display_currency': display,
         'priced_currencies': currencies,
         'fx_incomplete':

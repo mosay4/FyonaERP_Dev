@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 import '../services/section_scope.dart';
 import 'package:flutter/material.dart';
@@ -266,6 +267,11 @@ bool _isSegmentBoundary(String route, int kLen) {
 final goRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
     navigatorKey: _rootNavigatorKey,
+    // Pages opened with an in-memory `extra` (device records such as a
+    // product, an invoice or an account) keep it when the router refreshes
+    // (e.g. coming back from the background): without a codec go_router
+    // drops non-JSON extras and the page reopens empty.
+    extraCodec: const _MemoryExtraCodec(),
     initialLocation: RouteNames.splash,
     debugLogDiagnostics: false,
     redirect: (context, state) async {
@@ -748,6 +754,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               return BusinessBankDetailPage(
                 bankName: state.uri.queryParameters['bankName'] ?? '',
                 groupId: state.uri.queryParameters['groupId'],
+                initialCurrency: state.uri.queryParameters['currency'],
               );
             },
           ),
@@ -1529,6 +1536,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             name: 'personalBankDetail',
             builder: (_, state) => BankDetailPage(
               bankName: state.pathParameters['bankName'] ?? '',
+              initialCurrency: state.uri.queryParameters['currency'],
             ),
           ),
           GoRoute(
@@ -2436,5 +2444,62 @@ class _BudgetDetailFallback extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+
+/// Keeps non-JSON route extras in memory under a token; JSON values pass
+/// through unchanged. Bounded so it never grows without limit.
+class _MemoryExtraCodec extends Codec<Object?, Object?> {
+  const _MemoryExtraCodec();
+  static final Map<String, Object?> _store = {};
+  static int _next = 0;
+  static const _key = '__fyona_extra';
+
+  @override
+  Converter<Object?, Object?> get encoder => const _ExtraEncoder();
+  @override
+  Converter<Object?, Object?> get decoder => const _ExtraDecoder();
+
+  static bool _plain(Object? value) {
+    if (value == null || value is num || value is String || value is bool) {
+      return true;
+    }
+    if (value is List) return value.every(_plain);
+    if (value is Map) {
+      return value.keys.every((k) => k is String) && value.values.every(_plain);
+    }
+    return false;
+  }
+}
+
+class _ExtraEncoder extends Converter<Object?, Object?> {
+  const _ExtraEncoder();
+  @override
+  Object? convert(Object? input) {
+    if (_MemoryExtraCodec._plain(input)) return input;
+    for (final entry in _MemoryExtraCodec._store.entries) {
+      if (identical(entry.value, input)) {
+        return {_MemoryExtraCodec._key: entry.key};
+      }
+    }
+    final token = 'e${_MemoryExtraCodec._next++}';
+    _MemoryExtraCodec._store[token] = input;
+    if (_MemoryExtraCodec._store.length > 300) {
+      _MemoryExtraCodec._store.remove(_MemoryExtraCodec._store.keys.first);
+    }
+    return {_MemoryExtraCodec._key: token};
+  }
+}
+
+class _ExtraDecoder extends Converter<Object?, Object?> {
+  const _ExtraDecoder();
+  @override
+  Object? convert(Object? input) {
+    if (input is Map && input.length == 1 &&
+        input[_MemoryExtraCodec._key] is String) {
+      return _MemoryExtraCodec._store[input[_MemoryExtraCodec._key]];
+    }
+    return input;
   }
 }

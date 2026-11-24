@@ -12,6 +12,7 @@ import '../../../core_business/presentation/widgets/business_operation_error.dar
 import '../../data/inventory_api.dart';
 import '../providers/inventory_providers.dart';
 import '../widgets/business_product_image.dart';
+import '../widgets/inventory_list_parts.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 
 /// Simple category management (create / rename / delete). Only shown when the
@@ -138,7 +139,11 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
         actions: [
           if (!BranchScope.readOnly &&
               ref.watch(employeeCanProvider('inventory.add')))
-            IconButton(onPressed: _add, icon: const Icon(Icons.add)),
+            IconButton(
+              tooltip: l10n.translate('invAddCategory'),
+              onPressed: _add,
+              icon: const Icon(Icons.add),
+            ),
         ],
       ),
       body: !allowed
@@ -157,34 +162,16 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
               padding: const EdgeInsets.all(16),
               children: [
                 for (final c in _items)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      border: Border.all(color: AppColors.border),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
                     child: Material(
-                      color: Colors.transparent,
-                      child: ListTile(
-                        leading: _CatThumb(
-                          url: (c['image'] ?? '').toString().isEmpty
-                              ? null
-                              : (c['image'] ?? '').toString(),
-                        ),
-                        title: Text(
-                          (c['name'] ?? '').toString(),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontFamily: 'Cairo',
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        trailing: Icon(
-                          Icons.chevron_left,
-                          color: AppColors.textSecondary,
-                        ),
+                      color: AppColors.surface,
+                      shape: RoundedRectangleBorder(
+                        side: BorderSide(color: AppColors.border),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
                         onTap: () async {
                           if (!_active) return;
                           await openCommerceRecord(
@@ -194,6 +181,68 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
                           );
                           if (_active) await _load();
                         },
+                        child: Padding(
+                          padding: const EdgeInsetsDirectional.fromSTEB(
+                            8,
+                            8,
+                            4,
+                            8,
+                          ),
+                          child: Row(
+                            children: [
+                              _CatThumb(
+                                url: (c['image'] ?? '').toString().isEmpty
+                                    ? null
+                                    : (c['image'] ?? '').toString(),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      (c['name'] ?? '').toString(),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontFamily: 'Cairo',
+                                        fontSize: 14,
+                                        height: 1.3,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textPrimary,
+                                      ),
+                                    ),
+                                    if (c['products_count'] is num)
+                                      Text(
+                                        l10n.translate(
+                                          'invCatProductsCount',
+                                          params: {
+                                            'n':
+                                                '${(c['products_count'] as num).toInt()}',
+                                          },
+                                        ),
+                                        style: TextStyle(
+                                          fontFamily: 'Cairo',
+                                          fontSize: 11,
+                                          height: 1.3,
+                                          color: AppColors.textSecondary,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              SizedBox(
+                                width: 40,
+                                height: 40,
+                                child: Icon(
+                                  Icons.chevron_left,
+                                  size: 20,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -204,7 +253,7 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
                       children: [
                         Icon(
                           Icons.category_outlined,
-                          size: 56,
+                          size: 48,
                           color: AppColors.textSecondary,
                         ),
                         const SizedBox(height: 10),
@@ -225,30 +274,9 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
                         const SizedBox(height: 16),
                         if (!BranchScope.readOnly &&
                             ref.watch(employeeCanProvider('inventory.add')))
-                          OutlinedButton.icon(
+                          InventorySmallAction(
                             onPressed: _add,
-                            icon: const Icon(Icons.add, size: 18),
-                            label: Text(
-                              l10n.translate('invAddCategory'),
-                              style: const TextStyle(
-                                fontFamily: 'Cairo',
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppColors.danger,
-                              side: const BorderSide(
-                                color: AppColors.danger,
-                                width: 1.5,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24,
-                                vertical: 12,
-                              ),
-                            ),
+                            label: l10n.translate('invAddCategory'),
                           ),
                       ],
                     ),
@@ -265,25 +293,24 @@ class _CatThumb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 44,
-      height: 44,
+      width: 48,
+      height: 48,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: AppColors.surfaceVariant.withAlpha(90),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.border),
+        color: inventoryAccentTint,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: (url != null && url!.isNotEmpty)
           ? BusinessProductImage(
               url: url,
-              width: 44,
-              height: 44,
+              width: 48,
+              height: 48,
               fit: BoxFit.cover,
             )
           : Icon(
               Icons.category_outlined,
               size: 22,
-              color: AppColors.textSecondary,
+              color: inventoryAccent,
             ),
     );
   }

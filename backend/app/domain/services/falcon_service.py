@@ -266,7 +266,8 @@ def device_dataset(items: list, report_currency: Optional[str], scope: str,
         stock, qty = _f(p.get("stock")), _f(p.get("qty_sold"))
         data = {
             "report_currency": rep, "unified": False, "unverified_fx": unverified,
-            "name": p.get("name") or "",
+            "name": p.get("name") or "", "unit": p.get("unit") or "",
+            "category_name": (category_name or "")[:120],
             "total_sales": p.get("sales", 0.0), "total_cogs": p.get("cogs", 0.0),
             "total_profit": p.get("profit", 0.0),
             "inventory_value": round(_f(p.get("cost_price")) * stock, 4),

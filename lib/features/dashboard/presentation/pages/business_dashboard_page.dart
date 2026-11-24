@@ -72,17 +72,16 @@ class BusinessDashboardPage extends ConsumerWidget {
                               ref.read(localBusinessBankingProvider),
                             ))
                           return;
-                        if (local == null) {
-                          context.push('/banks/account/${account.id}');
-                        } else if (local.isCurrent) {
-                          context.push(
-                            LocalBankAccountTarget.path,
-                            extra: LocalBankAccountTarget(
-                              local.scope,
-                              account.id,
-                            ),
-                          );
+                        if (local != null && !local.isCurrent) return;
+                        if (!ref.read(employeeCanProvider('banks.details'))) {
+                          return;
                         }
+                        // The same bank screen as the Banks section, opened
+                        // on this card's currency.
+                        context.push(
+                          '/banks/detail?bankName=${Uri.encodeComponent(account.bankName)}'
+                          '&currency=${Uri.encodeComponent(account.currency)}',
+                        );
                       },
                     ),
                     loading: () => const HomeAccountCard(accounts: []),

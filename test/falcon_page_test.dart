@@ -403,10 +403,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    // Restored conversation, NO intro replay, NO re-analysis.
+    // Restored conversation, NO intro replay. The kept report is re-read
+    // once in place (latest product edits/sales), never blanked meanwhile.
     expect(find.text('ج1 محفوظة'), findsOneWidget);
     expect(find.byType(FalconIntroScene), findsNothing);
-    expect(analyzeHits, 0);
+    expect(analyzeHits, 1);
+    expect(find.text('ok'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget); // input still pinned
     expect(tester.takeException(), isNull);
   });

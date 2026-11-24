@@ -52,6 +52,10 @@ class BankDetailView extends StatefulWidget {
   final String? failureText;
   final VoidCallback? onRetry;
 
+  /// The currency shown first (e.g. the account card tapped on the home
+  /// screen); the user can switch freely.
+  final String? initialCurrency;
+
   const BankDetailView({
     super.key,
     required this.bankName,
@@ -67,6 +71,7 @@ class BankDetailView extends StatefulWidget {
     this.movementsLoading = false,
     this.failureText,
     this.onRetry,
+    this.initialCurrency,
   });
 
   @override
@@ -77,7 +82,7 @@ class _BankDetailViewState extends State<BankDetailView> {
   int _month = DateTime.now().month;
   int _year = DateTime.now().year;
   String _query = '';
-  String? _picked;
+  late String? _picked = widget.initialCurrency?.trim().toUpperCase();
 
   List<String> get _currencies =>
       bankCurrencies(widget.accounts, widget.movements, widget.walletCurrency);
