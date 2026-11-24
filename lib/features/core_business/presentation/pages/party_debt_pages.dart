@@ -20,6 +20,7 @@ import '../widgets/local_directory_actions.dart';
 import '../providers/business_ledger_session.dart';
 import '../../../personal/data/merchant_api.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 DirectoryAccess _localScope(
   WidgetRef ref,
@@ -345,7 +346,7 @@ class _PartyDebtsPageState extends ConsumerState<PartyDebtsPage>
               ),
               retry: _load,
             )
-          : RefreshIndicator(
+          : FyonaRefresh(
               onRefresh: _load,
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -804,7 +805,7 @@ class _PartySectionsPageState extends ConsumerState<PartySectionsPage> {
               ),
               retry: _load,
             )
-          : RefreshIndicator(
+          : FyonaRefresh(
               onRefresh: _load,
               child: _groups.isEmpty
                   ? ListView(
@@ -1138,7 +1139,7 @@ class _PartySectionPageState extends ConsumerState<PartySectionPage>
               ),
               retry: _load,
             )
-          : RefreshIndicator(
+          : FyonaRefresh(
               onRefresh: _load,
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),

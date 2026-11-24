@@ -23,6 +23,7 @@ import '../../../core_business/presentation/providers/biz_payment_pref.dart';
 import '../../../reports/data/business_report_rates.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'branch_inventory_picker_page.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 typedef _TransferSelection = ({String? org, String? branch, bool all, int epoch, bool device});
 
@@ -146,7 +147,7 @@ class _BranchTransfersPageState extends ConsumerState<BranchTransfersPage> {
                 }
                 final rows = snap.data ?? const [];
                 if (rows.isEmpty) return _empty(l10n);
-                return RefreshIndicator(
+                return FyonaRefresh(
                   onRefresh: () async => _reload(),
                   child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),

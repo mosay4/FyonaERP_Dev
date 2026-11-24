@@ -15,6 +15,7 @@ import '../providers/returns_providers.dart';
 import '../../../core_business/presentation/providers/local_commerce_navigation.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/presentation/widgets/business_operation_error.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Business → «المرتجعات»: two clear choices (customer / supplier return)
 /// plus the previous returns list. Simple, merchant-friendly Arabic.
@@ -175,7 +176,7 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
               ),
             ),
             Expanded(
-              child: RefreshIndicator(
+              child: FyonaRefresh(
                 color: AppColors.primary,
                 onRefresh: () async {
                   ref.invalidate(returnsListProvider(_kind));

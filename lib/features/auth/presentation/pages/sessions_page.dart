@@ -21,6 +21,7 @@ import '../../../../shared/widgets/two_tone_icon.dart';
 import '../../../../shared/widgets/two_tone_icons.dart';
 import '../../../../core/localization/app_localizations.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Fixed card order: THIS device first, then the primary, then the rest by
 /// newest. Pure (unit-tested) so the current device is always on top and
@@ -452,7 +453,7 @@ class _SessionsPageState extends ConsumerState<SessionsPage> {
                     ],
                   ),
                 )
-                : RefreshIndicator(
+                : FyonaRefresh(
                   onRefresh: _loadSessions,
                   child: ListView(
                     padding: EdgeInsets.all(isPhone ? AppSpacing.md : AppSpacing.lg),

@@ -24,6 +24,7 @@ import '../../domain/services/personal_finance_service.dart';
 import 'package:fyona_flutter/core/responsive/r_api.dart';
 import '../../../../core/localization/app_localizations.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class PersonalDebtsPage extends ConsumerStatefulWidget {
   final String? debtId;
@@ -156,7 +157,7 @@ class _PersonalDebtsPageState extends ConsumerState<PersonalDebtsPage> with Sing
               opacity: _fadeAnim,
               child: SlideTransition(
                 position: _slideAnim,
-                child: RefreshIndicator(
+                child: FyonaRefresh(
                   onRefresh: () async => _load(),
                   color: AppColors.primary,
                   backgroundColor: AppColors.surface,

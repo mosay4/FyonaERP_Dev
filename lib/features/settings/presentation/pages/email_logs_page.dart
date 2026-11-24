@@ -11,6 +11,7 @@ import '../../../email/presentation/providers/email_providers.dart';
 import '../../../../shared/widgets/two_tone_icon.dart';
 import '../../../../shared/widgets/two_tone_icons.dart';
 import '../../../../core/localization/app_localizations.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class EmailLogsPage extends ConsumerStatefulWidget {
   const EmailLogsPage({super.key});
@@ -36,7 +37,7 @@ class _EmailLogsPageState extends ConsumerState<EmailLogsPage> {
             ),
           ],
         ),
-        body: RefreshIndicator(
+        body: FyonaRefresh(
           onRefresh: () async => ref.invalidate(emailLogListProvider),
           child: logsAsync.when(
             loading: () => const LoadingShimmer(),

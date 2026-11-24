@@ -9,6 +9,7 @@ import '../../../../core/router/route_names.dart';
 import '../../../../shared/widgets/dots_loader.dart';
 import '../../data/models/personal_models.dart';
 import '../providers/personal_providers.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class PersonalBudgetPage extends ConsumerStatefulWidget {
   const PersonalBudgetPage({super.key});
@@ -49,7 +50,7 @@ class _PersonalBudgetPageState extends ConsumerState<PersonalBudgetPage> {
   Widget build(BuildContext context) {
     final st = ref.watch(budgetProvider);
 
-    return RefreshIndicator(
+    return FyonaRefresh(
       onRefresh: () async => _load(),
       color: AppColors.primary,
       backgroundColor: AppColors.surface,

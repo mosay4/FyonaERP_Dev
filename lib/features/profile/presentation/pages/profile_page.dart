@@ -1125,23 +1125,42 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
+  /// The account's code is shown at once like the rest of the profile:
+  /// kept in memory and on the device, refreshed quietly from the server.
+  static final Map<String, String> _savedCodes = {};
   String? _myCode;
   bool _codeLoaded = false;
 
+  String get _codeKey => 'profile_my_code_${ref.read(currentUserProvider)?.id ?? ''}';
+
   Future<void> _loadMyCode() async {
+    final key = _codeKey;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(key);
+      if (saved != null && saved.isNotEmpty && mounted && _myCode == null) {
+        _savedCodes[key] = saved;
+        setState(() => _myCode = saved);
+      }
+    } catch (_) {}
     try {
       final c = await ref.read(merchantApiProvider).myCode();
-      if (mounted) setState(() => _myCode = c.isEmpty ? null : c);
+      if (c.isNotEmpty) {
+        _savedCodes[key] = c;
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(key, c);
+        } catch (_) {}
+      }
+      if (mounted && c.isNotEmpty && c != _myCode) setState(() => _myCode = c);
     } catch (_) {}
-    if (mounted) setState(() => _codeLoaded = true);
   }
 
   Widget _buildCodeRow() {
     if (!_codeLoaded) {
       _codeLoaded = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _loadMyCode();
-      });
+      _myCode ??= _savedCodes[_codeKey];
+      _loadMyCode();
     }
     final l10n = AppLocalizations.of(context);
     if (_myCode == null || _myCode!.isEmpty) return const SizedBox.shrink();

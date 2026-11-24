@@ -11,6 +11,7 @@ import '../../di/notifications_providers.dart';
 import '../../data/models/notification_models.dart';
 import '../../../../core/localization/app_localizations.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class ReminderListPage extends ConsumerStatefulWidget {
   ReminderListPage({super.key});
@@ -36,7 +37,7 @@ class _ReminderListPageState extends ConsumerState<ReminderListPage> {
           onPressed: () => _showReminderDialog(),
           child: Icon(Icons.add),
         ),
-        body: RefreshIndicator(
+        body: FyonaRefresh(
           onRefresh: () async {
             ref.invalidate(remindersProvider);
           },

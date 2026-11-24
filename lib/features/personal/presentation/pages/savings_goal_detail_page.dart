@@ -21,6 +21,7 @@ import 'package:fyona_flutter/core/services/currency/currency_engine.dart';
 import '../../../../shared/widgets/receipt/receipt.dart';
 import '../providers/receipt_design_provider.dart';
 import 'goal_report_pdf.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Shared goal artwork (see [GoalIcons]) so the list and detail pages match.
 const _iconChoices = GoalIcons.choices;
@@ -58,7 +59,7 @@ class _SavingsGoalDetailPageState extends ConsumerState<SavingsGoalDetailPage> {
 
     return stateData.isLoading
           ? Center(child: DotsLoader())
-          : RefreshIndicator(
+          : FyonaRefresh(
               color: AppColors.primary,
               backgroundColor: AppColors.surface,
               onRefresh: () async => await ref.read(personalFinanceProvider.notifier).load(),

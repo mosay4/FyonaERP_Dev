@@ -7,7 +7,7 @@ import '../../../../../shared/widgets/two_tone_icon.dart';
 import '../../../../../shared/widgets/two_tone_icons.dart';
 import '../../../data/models/personal_models.dart';
 import '../../../../../core/responsive/r_api.dart';
-import '../../../../../core/utils/currency_formatter.dart' show currencyLabel, fmtNum;
+import '../../../../../core/utils/currency_formatter.dart' show currencyFlagEmoji, currencyLabel, fmtNum;
 import '../../../../../shared/widgets/app_icon_badge.dart';
 import '../../../../../shared/widgets/account_type_bar.dart';
 import '../../../domain/services/personal_finance_service.dart';
@@ -687,5 +687,7 @@ String _accountTypeKey(String type) {
 String _currencyDisplay(String currency, AppLocalizations l10n) {
   // Compact badge → the short ISO code (YER_OLD, YER_NEW, SAR, USD, …) so a
   // long name can never crowd or wrap next to the balance.
-  return currencyLabel(currency, locale: l10n.locale.languageCode);
+  final flag = currencyFlagEmoji(currency);
+  final label = currencyLabel(currency, locale: l10n.locale.languageCode);
+  return flag.isEmpty ? label : '$flag $label';
 }

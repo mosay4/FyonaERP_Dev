@@ -25,6 +25,7 @@ import '../../../../shared/widgets/currency_selector.dart';
 import '../../../../shared/widgets/receipt/receipt_modal.dart';
 import '../../../../shared/widgets/receipt/receipt_data.dart';
 import '../../../../core/help/information_clicker.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class PersonalDashboardPage extends ConsumerStatefulWidget {
   const PersonalDashboardPage({super.key});
@@ -214,7 +215,7 @@ class _PersonalDashboardPageState extends ConsumerState<PersonalDashboardPage>
           child: Column(
             children: [
               Expanded(
-                child: RefreshIndicator(
+                child: FyonaRefresh(
                   onRefresh: _onRefresh,
                   color: AppColors.primary,
                   backgroundColor: AppColors.surface,

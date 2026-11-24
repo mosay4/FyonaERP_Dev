@@ -19,6 +19,7 @@ import '../providers/receipt_design_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import 'account_tree_report_pdf.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class PersonalAccountTreePage extends ConsumerStatefulWidget {
   const PersonalAccountTreePage({super.key});
@@ -233,7 +234,7 @@ class _PersonalAccountTreePageState extends ConsumerState<PersonalAccountTreePag
 
     return st.isLoading
           ? Center(child: DotsLoader())
-          : RefreshIndicator(
+          : FyonaRefresh(
               onRefresh: () async => _load(),
               color: AppColors.primary,
               backgroundColor: AppColors.surface,

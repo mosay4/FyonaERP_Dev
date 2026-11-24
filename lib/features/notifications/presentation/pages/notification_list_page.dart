@@ -19,6 +19,7 @@ import 'package:fyona_flutter/core/router/role_config.dart';
 import 'package:fyona_flutter/features/auth/presentation/providers/auth_provider.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/localization/app_localizations.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class NotificationListPage extends ConsumerStatefulWidget {
   final String? notifId;
@@ -97,7 +98,7 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage>
         appBar: AppBar(
           title: Text(AppLocalizations.of(context).translate('notifications')),
         ),
-        body: RefreshIndicator(
+        body: FyonaRefresh(
           onRefresh: () async {
             ref.invalidate(notificationListProvider);
             ref.invalidate(unreadCountProvider);

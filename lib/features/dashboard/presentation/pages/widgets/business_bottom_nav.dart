@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../../core/localization/app_localizations.dart';
-import '../../../../../core/responsive/r_api.dart';
+import '../../../../../shared/widgets/liquid_glass_nav_bar.dart';
 import '../../../../../core/router/route_names.dart';
 import '../../../../../core/theme/app_colors.dart';
 import 'business_icon_theme.dart';
@@ -188,113 +188,19 @@ class _BusinessBottomNavState extends ConsumerState<BusinessBottomNav> {
         ? 3
         : 0;
     final currentIndex = visible.indexWhere((e) => e.$1 == currentOriginal);
-    final bottomPad = MediaQuery.of(context).padding.bottom;
     final l10n = AppLocalizations.of(context);
-    return Container(
-      height: 68 + bottomPad,
-      padding: EdgeInsets.only(bottom: bottomPad),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
-      ),
-      child: Row(
-        children: List.generate(visible.length, (vi) {
-          final originalIndex = visible[vi].$1;
-          final item = visible[vi].$2;
-          final isActive = vi == currentIndex;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => _onTap(context, ref, originalIndex),
-              behavior: HitTestBehavior.opaque,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeInOut,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      AnimatedScale(
-                        scale: isActive ? 1.08 : 1.0,
-                        duration: const Duration(milliseconds: 240),
-                        curve: Curves.easeOutBack,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 240),
-                          curve: Curves.easeOutCubic,
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
-                            color: isActive
-                                ? bizIconChip(context)
-                                : Colors.transparent,
-                            boxShadow: isActive
-                                ? [
-                                    BoxShadow(
-                                      color: bizIconRed(context).withAlpha(35),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 3),
-                                    ),
-                                  ]
-                                : null,
-                          ),
-                          alignment: Alignment.center,
-                          child: Stack(
-                            alignment: Alignment.center,
-                            clipBehavior: Clip.none,
-                            children: [
-                              Icon(
-                                item.icon,
-                                size: 18,
-                                color: isActive
-                                    ? bizIconRed(context)
-                                    : AppColors.textSecondary,
-                              ),
-                              if (originalIndex == 2 && unread > 0)
-                                Positioned(
-                                  top: -2,
-                                  right: -2,
-                                  child: Container(
-                                    width: 10,
-                                    height: 10,
-                                    decoration: BoxDecoration(
-                                      color: AppColors.danger,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: AppColors.surface,
-                                        width: 1.4,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 200),
-                        style: TextStyle(
-                          fontFamily: 'Cairo',
-                          fontSize: R.fontSize(context, 10),
-                          fontWeight: isActive
-                              ? FontWeight.w700
-                              : FontWeight.w500,
-                          color: isActive
-                              ? bizIconRed(context)
-                              : AppColors.textSecondary,
-                        ),
-                        child: Text(l10n.translate(item.labelKey)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          );
-        }),
-      ),
+    return LiquidGlassNavBar(
+      currentIndex: currentIndex,
+      accent: bizIconRed(context),
+      onTap: (vi) => _onTap(context, ref, visible[vi].$1),
+      items: [
+        for (final (originalIndex, item) in visible)
+          LiquidGlassNavItem(
+            label: l10n.translate(item.labelKey),
+            badge: originalIndex == 2 && unread > 0,
+            icon: (active, color) => Icon(item.icon, size: 20, color: color),
+          ),
+      ],
     );
   }
 }

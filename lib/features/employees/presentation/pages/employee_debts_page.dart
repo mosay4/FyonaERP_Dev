@@ -13,6 +13,7 @@ import '../../../core_business/data/local_directory/directory_scope.dart';
 import '../providers/employee_providers.dart';
 import '../providers/employee_device_finance_provider.dart';
 import 'employee_payment_page.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class EmployeeDebtsPage extends ConsumerStatefulWidget {
   const EmployeeDebtsPage({
@@ -264,7 +265,7 @@ class _EmployeeDebtsPageState extends ConsumerState<EmployeeDebtsPage> {
           ? Center(
               child: Text(EmployeeApi.message(const DirectoryAccessDenied())),
             )
-          : RefreshIndicator(
+          : FyonaRefresh(
               onRefresh: local == null
                   ? _load
                   : () async {

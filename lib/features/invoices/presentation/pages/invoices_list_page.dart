@@ -16,6 +16,7 @@ import '../../../core_business/data/local_directory/directory_scope.dart';
 import '../../data/invoices_api.dart';
 import '../../../core_business/presentation/providers/local_commerce_navigation.dart';
 import '../../../core_business/presentation/widgets/business_operation_error.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Unified Business «الفواتير» center: a buy/sell filter, search by invoice
 /// number / customer name / phone, and a precise date filter. No "new
@@ -243,7 +244,7 @@ class _InvoicesListPageState extends ConsumerState<InvoicesListPage> {
             ]),
           ),
           Expanded(
-            child: RefreshIndicator(
+            child: FyonaRefresh(
               color: AppColors.primary,
               onRefresh: _load,
                child: _loading || !identical(_loadingSource, source)

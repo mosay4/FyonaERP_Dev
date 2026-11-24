@@ -20,6 +20,7 @@ import '../../data/branch_scope.dart';
 import '../../../../shared/widgets/fyona_text_field.dart';
 import '../../data/branch_epoch.dart';
 import '../../../core_business/data/local_directory/directory_database.dart' show BusinessBranchReset;
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart'
     show businessLocalLedgerScopeProvider, directoryPilotStoreProvider;
 
@@ -85,7 +86,7 @@ class BranchesPage extends ConsumerWidget {
         data: (rows) {
           final active = rows.where((b) => b['is_archived'] != true).toList();
           final archived = rows.where((b) => b['is_archived'] == true).toList();
-          return RefreshIndicator(
+          return FyonaRefresh(
             onRefresh: () async => ref.invalidate(branchesProvider),
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),

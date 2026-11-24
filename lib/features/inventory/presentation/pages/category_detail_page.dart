@@ -22,6 +22,7 @@ import '../../../core_business/presentation/widgets/business_online_gate.dart';
 import '../widgets/product_picker.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:uuid/uuid.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Full category page: picture + full name + its own action buttons, then
 /// its products — or a full empty state («لا توجد منتجات في هذا القسم»)
@@ -451,7 +452,7 @@ class _CategoryDetailPageState extends ConsumerState<CategoryDetailPage> {
                    child: Text(_error == null ? l10n.translate('invLoadError')
                        : businessOperationError(l10n, _error!, fallback: 'invLoadError'),
                       style: const TextStyle(fontFamily: 'Cairo')))
-              : RefreshIndicator(
+              : FyonaRefresh(
                   onRefresh: _load,
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),

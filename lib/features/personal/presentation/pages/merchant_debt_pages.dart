@@ -25,6 +25,7 @@ import '../../../employees/presentation/providers/employee_providers.dart';
 import '../../data/merchant_api.dart';
 import '../providers/merchant_unread_provider.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Personal-side commercial-debt screens per the «Debt References» PDFs:
 /// merchant overview (total + currency switcher + individual/sections tabs),
@@ -396,7 +397,7 @@ class _DebtNotificationsPageState extends ConsumerState<DebtNotificationsPage>
                 color: AppColors.textSecondary)),
       );
     }
-    return RefreshIndicator(
+    return FyonaRefresh(
       onRefresh: _load,
       child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
@@ -806,7 +807,7 @@ class _MerchantDebtOverviewPageState
                     Expanded(
                       child: TabBarView(children: [
                         // ── الديون الفردية: فلاتر + إجمالي + سجلات ──
-                        RefreshIndicator(
+                        FyonaRefresh(
                           onRefresh: _load,
                           child: ListView(
                             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -867,7 +868,7 @@ class _MerchantDebtOverviewPageState
                           ),
                         ),
                         // ── الأقسام ──
-                        RefreshIndicator(
+                        FyonaRefresh(
                           onRefresh: _load,
                           child: groups.isEmpty
                               ? ListView(children: [
@@ -1258,7 +1259,7 @@ class _DebtSectionPageState extends ConsumerState<DebtSectionPage> {
                   message: debtFriendlyError(
                       _error ?? '', (k) => l10n.translate(k)),
                   retry: _load)
-              : RefreshIndicator(
+              : FyonaRefresh(
                   onRefresh: _load,
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -1494,7 +1495,7 @@ class _DebtOperationDetailPageState
                   retry: _load)
               : local != null && d == null
               ? const SizedBox.shrink()
-              : RefreshIndicator(
+              : FyonaRefresh(
                   onRefresh: _load,
                   child: CustomScrollView(slivers: [
                     SliverPadding(

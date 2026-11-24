@@ -28,6 +28,7 @@ import '../../../../core/services/currency/currency_engine.dart';
 import '../../../../core/services/connectivity_service.dart';
 import '../../../../core/utils/subscription_identity.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 IconData _iconFromName(String? name) => switch (name) {
   'business' => Icons.business,
@@ -191,7 +192,7 @@ class _PlansPageState extends ConsumerState<PlansPage> {
         ),
       ),
       body: SafeArea(
-        child: RefreshIndicator(
+        child: FyonaRefresh(
           color: AppColors.primary,
           onRefresh: _refreshPlans,
           child: ListView(

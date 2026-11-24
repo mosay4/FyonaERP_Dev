@@ -7,6 +7,7 @@ import '../providers/employee_providers.dart';
 import '../providers/employee_device_finance_provider.dart';
 import '../widgets/employee_avatar.dart';
 import 'employment_invitation_page.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class JobRequestsPage extends ConsumerStatefulWidget {
   const JobRequestsPage({super.key, this.inviteId});
@@ -58,7 +59,7 @@ class _JobRequestsPageState extends ConsumerState<JobRequestsPage> {
           skipLoadingOnRefresh: ref.watch(employeeDeviceSelectionProvider) == null,
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => Center(child: Text(EmployeeApi.message(e))),
-          data: (items) => RefreshIndicator(
+          data: (items) => FyonaRefresh(
             onRefresh: () async {
               ref.invalidate(myInvitationsProvider);
               await ref.read(myInvitationsProvider.future);

@@ -20,6 +20,7 @@ import '../../../branches/data/branch_scope.dart';
 import '../providers/inventory_providers.dart';
 import '../widgets/falcon_ambient.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// «تحليل الصقر» — premium visual analyst for Business. The backend computes
 /// every number (and converts them to the chosen report currency); the model
@@ -725,7 +726,7 @@ class _FalconPageState extends ConsumerState<FalconPage>
               children: [
                 _header(context, l10n),
                 Expanded(
-                  child: RefreshIndicator(
+                  child: FyonaRefresh(
                     onRefresh: () => _analyze(keepOld: _report.isNotEmpty),
                     child: ListView(
                       controller: _scroll,

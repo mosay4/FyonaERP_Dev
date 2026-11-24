@@ -11,6 +11,7 @@ import '../../../../shared/widgets/two_tone_icons.dart';
 import '../../../../shared/widgets/dots_loader.dart';
 import '../../data/models/personal_models.dart';
 import '../providers/personal_providers.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class PersonalCategoriesPage extends ConsumerStatefulWidget {
   const PersonalCategoriesPage({super.key});
@@ -44,7 +45,7 @@ class _PersonalCategoriesPageState extends ConsumerState<PersonalCategoriesPage>
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final st = ref.watch(categoryProvider);
-    return RefreshIndicator(
+    return FyonaRefresh(
       onRefresh: () => ref.read(categoryProvider.notifier).load(),
       child: CustomScrollView(
         slivers: [

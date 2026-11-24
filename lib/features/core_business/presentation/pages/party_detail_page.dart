@@ -34,6 +34,7 @@ import '../widgets/party_tracking.dart';
 import '../providers/business_party_sharing_provider.dart';
 import '../widgets/local_directory_actions.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Supplier / customer detail: party info, per-currency balance, and the
 /// single clear action (pay supplier / collect from customer).
@@ -1721,7 +1722,7 @@ class _PartyDetailPageState extends ConsumerState<PartyDetailPage> {
               ),
               retry: _load,
             )
-          : RefreshIndicator(
+          : FyonaRefresh(
               onRefresh: _load,
               child: ListView(
                 padding: const EdgeInsets.all(16),

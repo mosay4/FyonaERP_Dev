@@ -15,6 +15,7 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/business_widgets.dart';
 import '../providers/sale_providers.dart';
 import '../../domain/sale_totals.dart' show parseMoney;
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Minimal sale-invoices home (the «الفواتير» button target): search +
 /// list with status badges. Detail lives on the view page.
@@ -84,7 +85,7 @@ class _SaleInvoicesPageState extends ConsumerState<SaleInvoicesPage> {
               onChanged: (v) => setState(() => _query = v.trim()),
             ),
             Expanded(
-              child: RefreshIndicator(
+              child: FyonaRefresh(
                 color: AppColors.primary,
                 onRefresh: () async {
                   ref.invalidate(saleInvoicesProvider);

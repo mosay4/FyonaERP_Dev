@@ -10,6 +10,7 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/date_formatter.dart';
 import '../../data/models/personal_models.dart';
 import '../providers/personal_providers.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 String _recurringFreqKey(String frequency) {
   switch (frequency) {
@@ -213,7 +214,7 @@ class _PersonalRecurringPageState extends ConsumerState<PersonalRecurringPage> w
         child: Text(AppLocalizations.of(context).translate('noTransactions'), style: TextStyle(fontFamily: 'Cairo', color: AppColors.textSecondary)),
       );
     }
-    return RefreshIndicator(
+    return FyonaRefresh(
       onRefresh: () => ref.read(recurringProvider.notifier).load(),
       child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),

@@ -21,6 +21,7 @@ import 'package:fyona_flutter/core/services/currency/enabled_currencies_service.
 import 'package:fyona_flutter/shared/providers/current_user_provider.dart';
 import '../../../../core/localization/app_localizations.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 
 
@@ -301,7 +302,9 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
 
     return st.isLoading
           ? Center(child: DotsLoader())
-          : CustomScrollView(
+          : FyonaRefresh(
+              onRefresh: () => ref.read(personalFinanceProvider.notifier).load(),
+              child: CustomScrollView(
               physics: BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
               slivers: [
                 SliverPadding(padding: EdgeInsets.fromLTRB(20, 16, 20, 100), sliver: SliverList.list(children: [
@@ -347,6 +350,7 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
                   ],
                 ])),
               ],
+            ),
             );
   }
 

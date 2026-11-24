@@ -38,6 +38,7 @@ import '../../../core_business/data/local_directory/directory_scope.dart';
 import '../../../core_business/data/local_ledger/business_money.dart';
 import '../../../core_business/presentation/widgets/business_operation_error.dart';
 import '../../../purchases/presentation/providers/purchase_providers.dart' show purchaseAccountsProvider;
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Whether the "delete bank completely" action is offered for [bankName].
 /// Cash can never be deleted as a whole in ANY locale spelling — users may
@@ -71,6 +72,10 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
   final GlobalKey _transferKey = GlobalKey();
 
   final _nameCtrl = TextEditingController();
+
+  /// Only «add a currency to this bank» fixes the bank name; a new bank's
+  /// name stays editable however often the user leaves and returns.
+  bool _bankNameFixed = false;
   final _balanceCtrl = TextEditingController();
   String _selectedCurrency = '';
   String _selectedType = 'checking';
@@ -168,6 +173,7 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
 
   void _resetForm() {
     _nameCtrl.clear();
+    _bankNameFixed = false;
     _balanceCtrl.clear();
     // No preselected currency: the field shows the "choose currency" hint
     // until the user picks one (edit mode fills the current value).
@@ -183,6 +189,7 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
   void _addCurrencyToBank(String bankName) {
     _resetForm();
     _nameCtrl.text = bankName;
+    _bankNameFixed = true;
     _editingId = null;
     _formSource = ref.read(businessBanksProvider.notifier);
     setState(() {
@@ -625,7 +632,7 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
 
     return state.isLoading
         ? const Center(child: DotsLoader())
-        : RefreshIndicator(
+        : FyonaRefresh(
             color: AppColors.primary,
             backgroundColor: AppColors.surface,
             onRefresh: () async =>
@@ -774,7 +781,7 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
                          _editingAccount = null;
                          _openingBalanceField = null;
                          _bankCommand = null;
-                        _nameCtrl.clear();
+                        _nameCtrl.clear(); _bankNameFixed = false;
                         _balanceCtrl.clear();
                         _selectedCurrency = '';
                         _selectedType = 'checking';
@@ -1059,7 +1066,7 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
             controller: _nameCtrl,
             label: l10n.translate('bankNameLabel'),
             prefixIcon: TwoToneIcons.bank,
-            readOnly: _editingId == null && _nameCtrl.text.isNotEmpty,
+            readOnly: _editingId == null && _bankNameFixed,
           ),
           SizedBox(height: 12),
           _InputField(
@@ -2302,15 +2309,22 @@ class _AccountRow extends ConsumerWidget {
           Container(
             width: 34,
             height: 34,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               color: AppColors.primary.withAlpha(20),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: TwoToneIcon(
-              data: TwoToneIcons.transfer,
-              size: 16,
-              outlineColor: AppColors.primary,
-            ),
+            // The currency's country flag (neutral icon when it has none).
+            child: currencyFlagEmoji(account.currency).isNotEmpty
+                ? Text(
+                    currencyFlagEmoji(account.currency),
+                    style: const TextStyle(fontSize: 19),
+                  )
+                : TwoToneIcon(
+                    data: TwoToneIcons.transfer,
+                    size: 16,
+                    outlineColor: AppColors.primary,
+                  ),
           ),
           const SizedBox(width: 10),
           Expanded(

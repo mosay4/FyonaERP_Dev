@@ -19,6 +19,7 @@ import '../../../core_business/data/local_commerce/local_commerce_api.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/presentation/providers/business_ledger_session.dart';
 import '../../../core_business/presentation/providers/local_commerce_navigation.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Business → «المعاملات»: a unified, newest-first timeline over the REAL
 /// movements that already exist in the system (invoices, returns,
@@ -377,7 +378,7 @@ class _BusinessTransactionsPageState
             ),
           ),
           Expanded(
-            child: RefreshIndicator.noSpinner(
+            child: FyonaRefresh.noSpinner(
               onRefresh: () => _reload(silent: true),
               child: _loading
                   ? const Center(

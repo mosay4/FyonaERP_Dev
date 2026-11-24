@@ -14,6 +14,7 @@ import '../../../../shared/widgets/charts/app_charts.dart';
 import '../../../../shared/widgets/receipt/receipt.dart';
 import '../providers/personal_providers.dart';
 import '../providers/receipt_design_provider.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class SpendingAnalyticsPage extends ConsumerStatefulWidget {
   const SpendingAnalyticsPage({super.key});
@@ -81,7 +82,7 @@ class _SpendingAnalyticsPageState extends ConsumerState<SpendingAnalyticsPage> {
         ? Center(child: DotsLoader())
         : state.transactions.isEmpty
             ? _EmptyState(l10n: l10n)
-            : RefreshIndicator(
+            : FyonaRefresh(
                 onRefresh: () => ref.read(personalFinanceProvider.notifier).load(),
                 color: AppColors.primary,
                 backgroundColor: AppColors.surface,

@@ -30,6 +30,7 @@ import 'package:fyona_flutter/features/auth/presentation/providers/auth_provider
 import 'package:fyona_flutter/features/auth/presentation/providers/biometric_provider.dart';
 import 'package:fyona_flutter/features/auth/presentation/widgets/app_pin_sheet.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 const _accountTypes = {
   'checking': 'accountTypeChecking',
@@ -64,6 +65,10 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
   final GlobalKey _transferKey = GlobalKey();
 
   final _nameCtrl = TextEditingController();
+
+  /// Only «add a currency to this bank» fixes the bank name; a new bank's
+  /// name stays editable however often the user leaves and returns.
+  bool _bankNameFixed = false;
   final _balanceCtrl = TextEditingController();
   String _selectedCurrency = '';
   String _selectedType = 'checking';
@@ -119,6 +124,7 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
 
   void _resetForm() {
     _nameCtrl.clear();
+    _bankNameFixed = false;
     _balanceCtrl.clear();
     // No preselected currency: the field shows the "choose currency" hint
     // until the user picks one (edit mode fills the current value).
@@ -132,6 +138,7 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
   void _addCurrencyToBank(String bankName) {
     _resetForm();
     _nameCtrl.text = bankName;
+    _bankNameFixed = true;
     _editingId = null;
     setState(() {
       _showForm = true;
@@ -386,7 +393,7 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
 
     return state.isLoading
           ? Center(child: DotsLoader())
-          : RefreshIndicator(
+          : FyonaRefresh(
               color: AppColors.primary,
               backgroundColor: AppColors.surface,
               onRefresh: () async => await ref.read(personalFinanceProvider.notifier).load(),
@@ -457,7 +464,7 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
               _showForm = !_showForm;
               if (_showForm) {
                 _expandedBanks.clear();
-                _editingId = null; _nameCtrl.clear(); _balanceCtrl.clear(); _selectedCurrency = ''; _selectedType = 'checking';
+                _editingId = null; _nameCtrl.clear(); _bankNameFixed = false; _balanceCtrl.clear(); _selectedCurrency = ''; _selectedType = 'checking';
               }
             });
             if (_showForm) _scrollToForm();
@@ -497,7 +504,7 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
           Text(_editingId != null ? l10n.translate('editAccount') : (_nameCtrl.text.isNotEmpty ? l10n.translate('addCurrencyFor', params: {'bank': _nameCtrl.text}) : l10n.translate('addNewAccount')), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 15), fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
         ]),
         SizedBox(height: 20),
-        _InputField(controller: _nameCtrl, label: l10n.translate('bankNameLabel'), prefixIcon: TwoToneIcons.bank, readOnly: _editingId == null && _nameCtrl.text.isNotEmpty),
+        _InputField(controller: _nameCtrl, label: l10n.translate('bankNameLabel'), prefixIcon: TwoToneIcons.bank, readOnly: _editingId == null && _bankNameFixed),
         SizedBox(height: 12),
         _InputField(controller: _balanceCtrl, label: _editingId == null ? l10n.translate('openingBalance') : l10n.translate('balanceLabel'), keyboardType: TextInputType.number, prefixIcon: TwoToneIcons.money, isAmount: true),
         SizedBox(height: 12),
@@ -1149,8 +1156,11 @@ class _AccountRow extends StatelessWidget {
       padding: EdgeInsets.all(10),
       decoration: BoxDecoration(color: AppColors.surfaceVariant, borderRadius: BorderRadius.circular(8)),
       child: Row(children: [
-        Container(width: 34, height: 34, decoration: BoxDecoration(color: AppColors.primary.withAlpha(20), borderRadius: BorderRadius.circular(8)),
-          child: TwoToneIcon(data: TwoToneIcons.transfer, size: 16, outlineColor: AppColors.primary)),
+        Container(width: 34, height: 34, alignment: Alignment.center, decoration: BoxDecoration(color: AppColors.primary.withAlpha(20), borderRadius: BorderRadius.circular(8)),
+          // The currency's country flag (neutral icon when it has none).
+          child: currencyFlagEmoji(account.currency).isNotEmpty
+              ? Text(currencyFlagEmoji(account.currency), style: const TextStyle(fontSize: 19))
+              : TwoToneIcon(data: TwoToneIcons.transfer, size: 16, outlineColor: AppColors.primary)),
         SizedBox(width: 10),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [

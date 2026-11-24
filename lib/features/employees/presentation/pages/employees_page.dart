@@ -12,6 +12,7 @@ import '../widgets/employee_avatar.dart';
 import 'employee_link_page.dart';
 import '../../../core_business/presentation/widgets/business_online_gate.dart';
 import '../../../branches/data/branch_scope.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class EmployeesPage extends ConsumerStatefulWidget {
   const EmployeesPage({super.key});
@@ -139,7 +140,7 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
               ),
             );
           }
-          return RefreshIndicator(
+          return FyonaRefresh(
             onRefresh: () async => ref.invalidate(employeesProvider),
             child: ListView.separated(
               padding: const EdgeInsets.all(16),

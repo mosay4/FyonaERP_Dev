@@ -7,14 +7,15 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/currency/currency_engine.dart';
 import '../../../core_business/data/local_directory/directory_scope.dart';
 import '../../data/reports_api.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 Widget refreshReport({
   required bool local,
   required Future<void> Function() onRefresh,
   required Widget child,
 }) => local
-    ? RefreshIndicator.noSpinner(onRefresh: onRefresh, child: child)
-    : RefreshIndicator(
+    ? FyonaRefresh.noSpinner(onRefresh: onRefresh, child: child)
+    : FyonaRefresh(
         color: AppColors.primary,
         onRefresh: onRefresh,
         child: child,

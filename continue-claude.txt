@@ -136,6 +136,31 @@ TESTS / TOOLS
    - SecureImage keeps a version-free copy (latest_*.bin) used offline;
      drawer + Sara branch avatars use SecureImage.
 
+15. ROUND 7 (24-11-2026)
+   - Transfers between two OTHER branches: BranchLocalTransfers._run
+     actingAs (owner only) — the sender branch records the operation.
+   - Branch photos: SecureImage(deviceKey: 'branch_<id>') keeps a copy in
+     app documents/device_pictures, shown first, refreshed once per launch.
+   - Transfer picker: «منتجات فردية» = all products (default), «التصانيف»
+     only when warehouse setting `categories` is on; ledger
+     transferCategoryOptions + product category_id.
+   - Falcon: _PLAIN_STYLE prompts, plain_arabic() strips/maps field names,
+     max 3 points/section; page: status meter, icon tiles, numbered points.
+   - No-loading: branches page (saved list), notifications (mirror first),
+     plans (cache first), transfers/invoices/employees spinners removed.
+
+16. ROUND 8 (24-11-2026)
+   - LiquidGlassNavBar (lib/shared/widgets/liquid_glass_nav_bar.dart) for
+     both bottom bars: custom glass (blur+gradients) — NOT the
+     liquid_glass_renderer package (1.0 needs experimental flutter_gpu,
+     0.2 needs Impeller-only backdrop shaders).
+   - FyonaRefresh (lib/shared/widgets/fyona_refresh.dart) replaces every
+     RefreshIndicator (drop-in API); business home uses it too.
+   - Profile code cached (static + prefs 'profile_my_code_<user>').
+   - Bank create: name locked only for «add currency to bank»
+     (_bankNameFixed). Currency flags in bank rows + home card badges.
+   - Bank detail screens + bank PDF redesigned (see git log).
+
 OPEN ITEMS (need owner decision or next round)
 1) 10 known failing tests remain (tools/ci/known_failures.txt), both
    deliberate product changes by the previous developer — owner decision:

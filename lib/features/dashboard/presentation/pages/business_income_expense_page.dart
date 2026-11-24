@@ -19,6 +19,7 @@ import '../../../core_business/data/local_directory/directory_database.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/data/local_directory/directory_scope.dart';
 import '../../../core_business/presentation/providers/business_ledger_session.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Business → «المصروف/المدخول»:
 ///   • Shows ONLY the manually created operations from «إضافة دخل» /
@@ -385,7 +386,7 @@ class _BusinessIncomeExpensePageState
             ),
           ),
           Expanded(
-            child: RefreshIndicator(
+            child: FyonaRefresh(
               onRefresh: _reload,
                child: _loading && scope == null
                   ? const Center(

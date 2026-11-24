@@ -17,6 +17,7 @@ import '../providers/personal_providers.dart';
 import '../providers/receipt_design_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../../core/localization/app_localizations.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 final _dateFmt = DateFormat('yyyy/MM/dd');
 final _dayFmt = DateFormat('EEEE');
@@ -103,7 +104,7 @@ class _PersonalReportsPageState extends ConsumerState<PersonalReportsPage> {
 
     return st.isLoading
         ? Center(child: DotsLoader())
-        : RefreshIndicator(
+        : FyonaRefresh(
             onRefresh: () async => _load(),
             color: AppColors.primary,
             backgroundColor: AppColors.surface,

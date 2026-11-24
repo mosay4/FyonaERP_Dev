@@ -27,6 +27,7 @@ import '../../../core_business/presentation/widgets/business_online_gate.dart';
 import '../../../core_business/presentation/providers/local_commerce_navigation.dart';
 import '../providers/warehouse_settings.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// Simple inventory home: search + camera + add + product list with only the
 /// three plain filters. Nothing accounting-heavy is shown.
@@ -386,7 +387,7 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
           style: const TextStyle(fontFamily: 'Cairo'),
         ),
       ),
-      data: (items) => RefreshIndicator(
+      data: (items) => FyonaRefresh(
         onRefresh: () async => ref.invalidate(inventoryProductsProvider(key)),
         child: items.isEmpty
             ? ListView(
@@ -821,7 +822,7 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
                message: businessOperationError(l10n, error, fallback: 'falconCatLoadFail'),
               showRetry: true,
             ),
-            data: (cats) => RefreshIndicator(
+            data: (cats) => FyonaRefresh(
               onRefresh: () async =>
                   ref.invalidate(inventoryCategoriesProvider),
               child: cats.isEmpty

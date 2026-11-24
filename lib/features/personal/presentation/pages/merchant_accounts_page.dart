@@ -13,6 +13,7 @@ import '../../../core_business/presentation/widgets/debt_widgets.dart';
 import '../../../auth/presentation/widgets/app_pin_sheet.dart';
 import '../../data/merchant_api.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 /// «حساباتي مع التجار» — the personal side: incoming invites + linked
 /// merchants. Everything is real data from the backend; nothing is shared
@@ -159,7 +160,7 @@ class _MerchantAccountsPageState extends ConsumerState<MerchantAccountsPage> {
           : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
+          : FyonaRefresh(
               onRefresh: _load,
               child: ListView(
                 padding: const EdgeInsets.all(16),

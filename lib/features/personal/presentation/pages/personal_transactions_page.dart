@@ -19,6 +19,7 @@ import '../../../../shared/widgets/receipt/receipt_modal.dart';
 import '../../../../shared/widgets/receipt/receipt_data.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 String _catLabel(String category, AppLocalizations l10n) {
   final key = personalCategoryKey(category);
@@ -541,7 +542,7 @@ class _PersonalTransactionsPageState extends ConsumerState<PersonalTransactionsP
         child: Text(AppLocalizations.of(context).translate('noTransactions'), style: TextStyle(fontFamily: 'Cairo', color: AppColors.textSecondary)),
       );
     }
-    return RefreshIndicator(
+    return FyonaRefresh(
       onRefresh: () => ref.read(recurringProvider.notifier).load(),
       child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),

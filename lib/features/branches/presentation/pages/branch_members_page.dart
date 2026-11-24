@@ -7,6 +7,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/styled_snack.dart';
 import '../../data/branch_api.dart';
 import '../../data/branch_scope.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class BranchMembersPage extends ConsumerStatefulWidget {
   const BranchMembersPage({super.key});
@@ -92,7 +93,7 @@ class _BranchMembersPageState extends ConsumerState<BranchMembersPage> {
                       fontFamily: 'Cairo', fontSize: 13, color: Colors.grey)),
             ]);
           }
-          return RefreshIndicator(
+          return FyonaRefresh(
             onRefresh: () async => _reload(),
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),

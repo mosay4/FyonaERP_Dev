@@ -9,6 +9,7 @@ import '../../data/branch_api.dart';
 import '../../data/branch_scope.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/features/branches/data/branch_epoch.dart';
+import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 
 class BranchInvitationsPage extends ConsumerStatefulWidget {
   const BranchInvitationsPage({super.key, this.initialInvite});
@@ -170,7 +171,7 @@ class _BranchInvitationsPageState extends ConsumerState<BranchInvitationsPage>
                     fontFamily: 'Cairo', fontSize: 13, color: Colors.grey)),
           ]);
         }
-        return RefreshIndicator(
+        return FyonaRefresh(
           onRefresh: () async => _reload(),
           child: ListView.builder(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
