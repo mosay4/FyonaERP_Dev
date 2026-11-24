@@ -931,11 +931,15 @@ async def falcon_analyze(
     from ...domain.services import falcon_service
 
     try:
+        ref = str(data.ref_id) if data.ref_id else None
+        device = (falcon_service.device_dataset(data.device_items, data.report_currency,
+                                                data.scope, ref, data.device_category)
+                  if data.device_items is not None else None)
         return ok(await falcon_service.analyze(
-            db, UUID(org_id), data.scope,
-            str(data.ref_id) if data.ref_id else None, data.lang,
+            db, UUID(org_id), data.scope, ref, data.lang,
             data.report_currency,
             branch_ids=branch_context.branch_ids if branch_context.all_mode else [branch_context.branch_id],
+            device=device,
         ))
     except HTTPException:
         raise
@@ -953,11 +957,15 @@ async def falcon_chat(
 ):
     from ...domain.services import falcon_service
 
+    ref = str(data.ref_id) if data.ref_id else None
+    device = (falcon_service.device_dataset(data.device_items, data.report_currency,
+                                            data.scope, ref, data.device_category)
+              if data.device_items is not None else None)
     return ok(await falcon_service.chat(
-        db, UUID(org_id), data.scope,
-        str(data.ref_id) if data.ref_id else None,
+        db, UUID(org_id), data.scope, ref,
         data.question, data.history, data.lang, data.report_currency,
         branch_ids=branch_context.branch_ids if branch_context.all_mode else [branch_context.branch_id],
+        device=device,
     ))
 
 

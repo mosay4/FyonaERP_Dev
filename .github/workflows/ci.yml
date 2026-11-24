@@ -140,6 +140,7 @@ jobs:
           backend/tests/unit/test_qa_business_party_sharing.py
           backend/tests/unit/test_sara_tool_contract.py
           backend/tests/unit/test_business_sara_device.py
+          backend/tests/unit/test_falcon_device_dataset.py
 
   android:
     name: Android build

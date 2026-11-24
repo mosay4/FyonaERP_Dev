@@ -283,6 +283,10 @@ class FalconAnalyzeRequest(BaseModel):
     ref_id: Optional[UUID] = None
     lang: str = "ar"
     report_currency: Optional[str] = None
+    # Device-ledger branch: the phone's own per-product figures (already in
+    # report_currency). The server analyses them; it holds no stock data.
+    device_items: Optional[list] = None
+    device_category: Optional[str] = None
 
 
 class FalconChatRequest(BaseModel):
@@ -292,6 +296,10 @@ class FalconChatRequest(BaseModel):
     history: list = []
     lang: str = "ar"
     report_currency: Optional[str] = None
+    # Device-ledger branch: the phone's own per-product figures (already in
+    # report_currency). The server analyses them; it holds no stock data.
+    device_items: Optional[list] = None
+    device_category: Optional[str] = None
 
 
 class InventoryTransferRequest(BaseModel):

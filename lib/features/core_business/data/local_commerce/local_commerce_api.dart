@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import 'package:uuid/enums.dart';
+import '../../../../core/services/currency/currency_engine.dart' show currencyEngineProvider;
 
 import '../../../../core/network/api_client.dart';
 import '../../../branches/data/branch_epoch.dart';
@@ -34,10 +35,12 @@ final class LocalCommerceBridge {
     void Function()? bankChanged,
     void Function()? operationsChanged,
     bool Function()? fullAccess,
+    double? Function(String from, String to)? rate,
   }) : _selected = _scope(),
        _bankChanged = bankChanged,
        _operationsChanged = operationsChanged,
-       _fullAccess = fullAccess ?? _notAllowed;
+       _fullAccess = fullAccess ?? _notAllowed,
+       _falconRate = rate;
 
   final DirectoryPilotStore _store;
   final DirectoryAccess? Function() _scope;
@@ -46,8 +49,81 @@ final class LocalCommerceBridge {
   final void Function()? _bankChanged;
   final void Function()? _operationsChanged;
   final bool Function() _fullAccess;
+  final double? Function(String from, String to)? _falconRate;
 
   static bool _notAllowed() => false;
+
+  /// The Falcon's per-product figures for this branch, in [currency]: the
+  /// same stock, prices and sales/cost/profit the product screens show.
+  Future<({List<Map<String, dynamic>> items, String? category})> falconFigures(
+    String scope,
+    String? refId,
+    String currency,
+  ) async {
+    final target = currency.trim().toUpperCase();
+    final rows = <Map<String, dynamic>>[];
+    String? category;
+    if (scope == 'product' && refId != null) {
+      final p = await product(refId);
+      if (p != null) rows.add(p);
+      category = p?['category_name']?.toString();
+    } else {
+      for (var offset = 0; offset < 1500; offset += 300) {
+        final page = await products(
+          limit: 300,
+          offset: offset,
+          categoryId: scope == 'category' ? refId : null,
+        );
+        rows.addAll(page);
+        if (page.length < 300) break;
+      }
+      if (scope == 'category') {
+        category = rows.firstOrNull?['category_name']?.toString();
+      }
+    }
+    double number(Object? v) => double.tryParse('${v ?? ''}') ?? 0;
+    double priced(Object? amount, String? from) {
+      final value = number(amount);
+      final source = (from ?? '').trim().toUpperCase();
+      if (value == 0 || source.isEmpty || source == target) return value;
+      final r = _falconRate?.call(source, target);
+      return r == null || !r.isFinite || r <= 0 ? 0 : value * r;
+    }
+
+    final items = <Map<String, dynamic>>[];
+    for (final p in rows) {
+      final id = '${p['id']}';
+      Map<String, dynamic> stats;
+      try {
+        stats = await productStats(id, displayCurrency: target);
+      } catch (_) {
+        stats = const {};
+      }
+      final costCurrency = p['cost_currency']?.toString();
+      final listed = (p['prices'] as List? ?? const [])
+          .whereType<Map>()
+          .firstWhere((row) => '${row['currency']}'.toUpperCase() == target,
+              orElse: () => const {});
+      items.add({
+        'id': id,
+        'name': p['name'] ?? p['name_ar'] ?? '',
+        'unit': p['unit'],
+        'stock': number(p['stock']),
+        'min_stock': number(p['min_stock']),
+        'sell_price': listed.isNotEmpty ? number(listed['price']) : priced(p['price'], costCurrency),
+        'cost_price': priced(p['avg_cost'] ?? p['cost_price'], costCurrency),
+        'sales': number(stats['sales_total']),
+        'qty_sold': number(stats['sales_quantity']),
+        'cogs': number(stats['cogs']),
+        'profit': number(stats['profit']),
+        'purchases': number(stats['purchases_total']),
+        'qty_purchased': number(stats['purchases_quantity']),
+        'expiry_date': p['expiry_date'],
+        'fx_incomplete': stats['fx_incomplete'] == true,
+      });
+    }
+    return (items: items, category: category);
+  }
   bool get canAuthorizeReturnOverdraft =>
       _fullAccess() && _current(['banks.balances']);
   bool get canRememberReturnOverdraft =>
@@ -1057,6 +1133,7 @@ final localCommerceBridgeProvider = Provider<LocalCommerceBridge>((ref) {
         alive &&
         (container.read(employeeWorkspaceCompanyProvider) == null ||
             employeeHasFullAccess(container.read(employeePermissionsProvider))),
+    rate: (from, to) => container.read(currencyEngineProvider).getRate(from, to),
   );
 });
 
@@ -1260,7 +1337,42 @@ final class LocalPurchaseApi extends PurchaseApi {
 }
 
 final class LocalInventoryApi extends InventoryApi {
-  LocalInventoryApi(ApiClient _, this._bridge) : super(_deviceOnlyClient);
+  LocalInventoryApi(ApiClient network, this._bridge)
+    : _network = network,
+      super(_deviceOnlyClient);
+
+  /// Only the Falcon's analysis goes to the server (the figures come from
+  /// this phone; the server keeps no stock data).
+  final ApiClient _network;
+
+  Future<Map<String, dynamic>> _falcon(String path, Map<String, dynamic> body,
+      String scope, String? refId, String? reportCurrency) async {
+    final currency = (reportCurrency ?? 'USD').toUpperCase();
+    final figures = await _bridge.falconFigures(scope, refId, currency);
+    final r = await _network.post(path, data: {
+      ...body,
+      'scope': scope,
+      if (refId != null) 'ref_id': refId,
+      'report_currency': currency,
+      'device_items': figures.items,
+      if (figures.category != null) 'device_category': figures.category,
+    });
+    final data = r.data;
+    final inner = data is Map && data['data'] is Map ? data['data'] : data;
+    return inner is Map ? Map<String, dynamic>.from(inner) : <String, dynamic>{};
+  }
+
+  @override
+  Future<Map<String, dynamic>> falconAnalyze(String scope, String? refId,
+          {String? reportCurrency}) =>
+      _falcon('/inventory/falcon/analyze', const {}, scope, refId, reportCurrency);
+
+  @override
+  Future<Map<String, dynamic>> falconChat(String scope, String? refId,
+          String question, List<Map<String, dynamic>> history,
+          {String? reportCurrency}) =>
+      _falcon('/inventory/falcon/chat', {'question': question, 'history': history},
+          scope, refId, reportCurrency);
   final LocalCommerceBridge _bridge;
 
   @override

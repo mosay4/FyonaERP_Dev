@@ -190,10 +190,17 @@ async def _aggregate(
             "expiry_date": p.expiry_date.isoformat() if p.expiry_date else None,
         })
 
+    return _summary(items, rep, len(source_ccys) > 1, unverified)
+
+
+_DEVICE_FIELDS = ("stock", "min_stock", "sell_price", "cost_price", "sales", "qty_sold",
+                  "cogs", "profit", "purchases", "qty_purchased")
+
+
+def _summary(items: list, rep: str, unified: bool, unverified: bool) -> dict:
+    """The inventory/category figures from per-product rows (one shape for
+    the server's own data and a device ledger's)."""
     active = [i for i in items if i["qty_sold"] > 0 or i["stock"] > 0]
-
-    unified = len(source_ccys) > 1
-
     return {
         "report_currency": rep,
         "unified": unified,
@@ -215,7 +222,70 @@ async def _aggregate(
             i for i in active
             if i["sales"] > 0 and i["profit"] / i["sales"] < 0.1
         ][:15],
+        # One order quantity everywhere (report, chat, product page): refill to
+        # twice the alert level or ~1.5 months of the observed sales.
+        "reorder": sorted([
+            {"name": i["name"], "stock": i["stock"], "min_stock": i["min_stock"],
+             "qty_sold": i["qty_sold"], "order_qty": q,
+             "order_cost": round(q * i["cost_price"], 4)}
+            for i in active
+            if i["qty_sold"] > 0 and i["stock"] <= i["min_stock"]
+            for q in [max(0, round(max(i["min_stock"] * 2, i["qty_sold"] / 6.0) - i["stock"]))]
+            if q > 0
+        ], key=lambda r: r["qty_sold"], reverse=True)[:15],
+        "stagnant_value_share": round(
+            sum(i["cost_price"] * i["stock"] for i in active if i["qty_sold"] <= 0 and i["stock"] > 0)
+            / max(sum(i["cost_price"] * i["stock"] for i in active), 1e-9), 4)
+            if any(i["stock"] > 0 for i in active) else 0.0,
     }
+
+
+def device_dataset(items: list, report_currency: Optional[str], scope: str,
+                   ref_id: Optional[str], category_name: Optional[str] = None) -> tuple[dict, str]:
+    """Falcon figures for a device-ledger branch: the phone sends its own
+    per-product rows (same fields as the server's), in the report currency."""
+    rep = (report_currency or "USD").strip().upper()
+    clean = []
+    unverified = False
+    for raw in (items or [])[:3000]:
+        if not isinstance(raw, dict):
+            continue
+        row = {"id": str(raw.get("id") or ""), "name": str(raw.get("name") or "")[:200],
+               "unit": str(raw.get("unit") or "")[:40], "currency": rep,
+               "expiry_date": raw.get("expiry_date") or None}
+        for key in _DEVICE_FIELDS:
+            try:
+                value = float(raw.get(key) or 0)
+            except (TypeError, ValueError):
+                value = 0.0
+            row[key] = round(value, 4) if value == value and abs(value) != float("inf") else 0.0
+        unverified = unverified or raw.get("fx_incomplete") is True
+        clean.append(row)
+    if scope == "product":
+        p = next((i for i in clean if not ref_id or i["id"] == ref_id), None) or {}
+        stock, qty = _f(p.get("stock")), _f(p.get("qty_sold"))
+        data = {
+            "report_currency": rep, "unified": False, "unverified_fx": unverified,
+            "name": p.get("name") or "",
+            "total_sales": p.get("sales", 0.0), "total_cogs": p.get("cogs", 0.0),
+            "total_profit": p.get("profit", 0.0),
+            "inventory_value": round(_f(p.get("cost_price")) * stock, 4),
+            "products_count": 1 if p else 0,
+            "sales_total": p.get("sales", 0.0), "purchases_total": p.get("purchases", 0.0),
+            "cogs": p.get("cogs", 0.0), "profit": p.get("profit", 0.0),
+            "sales_quantity": qty, "stock": stock, "min_stock": _f(p.get("min_stock")),
+            "sell_price": _f(p.get("sell_price")), "cost_price": _f(p.get("cost_price")),
+            "currency": rep, "batches": [],
+        }
+        if qty > 0:
+            target = max(_f(data["min_stock"]) * 2, qty / 6.0)
+            data["suggested_order_qty"] = max(0, round(target - stock))
+        return data, "المنتج"
+    data = _summary(clean, rep, False, unverified)
+    if scope == "category":
+        data["category_name"] = (category_name or "")[:120]
+        return data, "التصنيف"
+    return data, "المخزون"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -418,6 +488,7 @@ def _flags_from(data: dict, scope: str) -> dict:
         "weak_margin": len(data.get("weak_margin") or []),
         "products_count": active,
         "loss": _f(data.get("total_profit")) < 0,
+        "frozen": _f(data.get("stagnant_value_share")),
     }
 
 
@@ -440,7 +511,10 @@ def _verdict(flags: dict, scope: str) -> str:
         return "weak"
     if sales <= 0:
         return "watch"
-    if stagnant >= 3 or low >= 3 or (margin is not None and margin < 0.1):
+    # Lost sales (an item that sells is out) or capital sitting in goods that
+    # do not move are never «good», whatever the margin.
+    if (stagnant >= 3 or low >= 3 or out > 0 or flags.get("frozen", 0) >= 0.3
+            or (margin is not None and margin < 0.1)):
         return "watch"
     if margin is not None and margin >= 0.2 and stagnant == 0 and low == 0 and out == 0:
         return "excellent"
@@ -607,7 +681,10 @@ _SYSTEM = (
     "attention (1-3 نقاط قصيرة جدًا للحوادث الحقيقية فقط)، "
     "recommendations (1-4 توصيات مباشرة قابلة للتنفيذ، كل توصية مربوطة برقم)، "
     "opportunity (سطر واحد لفرصة مدعومة بالأرقام أو نص فارغ). "
-    "اذكر الأرقام داخل الجُمل مثل: بعت 5 قطع والمخزون 32، فلا أنصح بالشراء الآن."
+    "اذكر الأرقام داخل الجُمل مثل: بعت 5 قطع والمخزون 32، فلا أنصح بالشراء الآن. "
+    "كميات الطلب محسوبة مسبقًا في reorder وsuggested_order_qty: استخدمها كما هي ولا تحسب غيرها. "
+    "رتّب حسب الأثر: ما نفد وهو يُباع أولًا، ثم ما تحت الحد الأدنى، ثم رأس المال المجمّد "
+    "في بضاعة لا تتحرك، ثم الهامش الضعيف."
 )
 
 _CHAT_SYSTEM = (
@@ -620,7 +697,9 @@ _CHAT_SYSTEM = (
     "إذا كان السؤال خارج اختصاصك (أي شيء لا يخص التجارة أو المخزون أو "
     "التسويق أو المنتجات أو الأرباح أو الكميات، مثل برمجة أو أخبار أو معلومات "
     "عامة)، اعتذر بلطف باختصار واشرح أنك مختص بمتجر المستخدم وبضاعته وأرباحه، "
-    "واطلب منه سؤالًا ضمن هذا الاختصاص واقترح مثالًا."
+    "واطلب منه سؤالًا ضمن هذا الاختصاص واقترح مثالًا. "
+    "عند سؤال الطلب والكميات استخدم order_qty من reorder وsuggested_order_qty كما هي "
+    "(نفس أرقام التقرير)، واذكر تكلفتها order_cost إن وجدت."
 )
 
 _SPECIALTY_FALLBACK = (
@@ -875,10 +954,11 @@ async def analyze(
     db: AsyncSession, org_id: UUID, scope: str, ref_id: Optional[str], lang: str,
     report_currency: Optional[str] = None,
     branch_ids=None,
+    device=None,
 ) -> dict:
     import json
 
-    data, title = await _dataset(db, org_id, scope, ref_id, report_currency, branch_ids=branch_ids)
+    data, title = device or await _dataset(db, org_id, scope, ref_id, report_currency, branch_ids=branch_ids)
     cur = (data.get("report_currency") or "USD").strip().upper()
     flags = _flags_from(data, scope)
 
@@ -913,8 +993,8 @@ async def analyze(
     # Merchant-type expertise: detect the product/category domain and attach
     # its playbook so pricing/turnover/marketing advice fits THIS goods.
     if scope == "product":
-        cat_name = ""
-        if ref_id:
+        cat_name = data.get("category_name") or ""
+        if ref_id and device is None:
             prod_row = (
                 await db.execute(
                     select(Product).where(
@@ -1023,7 +1103,9 @@ def _compact_scoped_data(data):
     # or accidentally discard the last branches because a top-seller is long.
     keys = ('branch_ids', 'report_currency', 'unverified_fx', 'products_count',
             'inventory_value', 'total_sales', 'total_profit', 'total_cogs', 'total_purchases',
-            'name', 'stock', 'sales_quantity', 'min_stock', 'suggested_order_qty')
+            'name', 'stock', 'sales_quantity', 'min_stock', 'suggested_order_qty',
+            'sell_price', 'cost_price', 'low_stock', 'out_of_stock', 'reorder',
+            'stagnant_value_share')
     compact = {key: data[key] for key in keys if key in data}
     summaries = data.get('branch_summaries', [])
     compact['branch_summaries'] = [{key: value for key, value in row.items() if key != 'top_sellers'} for row in summaries]
@@ -1082,10 +1164,11 @@ async def chat(
     question: str, history: list, lang: str,
     report_currency: Optional[str] = None,
     branch_ids=None,
+    device=None,
 ) -> dict:
     import json
 
-    data, title = await _dataset(db, org_id, scope, ref_id, report_currency, branch_ids=branch_ids)
+    data, title = device or await _dataset(db, org_id, scope, ref_id, report_currency, branch_ids=branch_ids)
     all_summaries = data.get('branch_summaries') or []
     # Resolve only against the signed permitted set, then recompute every metric
     # for the named branch. Never mix an all-branch total into a branch answer.
@@ -1099,8 +1182,8 @@ async def chat(
     # Merchant-type brief for the chat too (same expertise as the report).
     if scope == "product":
         names = [data.get("name") or ""]
-        cat_name = ""
-        if ref_id:
+        cat_name = data.get("category_name") or ""
+        if ref_id and device is None:
             prod_row = (
                 await db.execute(
                     select(Product).where(

@@ -34,6 +34,8 @@ def _is_ledger_write(method: str, path: str) -> bool:
     path = path.rstrip("/")
     if path.startswith("/api/v1/invoices/designs"):
         return False  # the invoice's appearance, not Business data
+    if path.startswith("/api/v1/inventory/falcon/"):
+        return False  # analysis of figures the phone sends; writes nothing
     return path.startswith(_LEDGER_PREFIXES) or bool(_EMPLOYEE_MONEY.match(path))
 
 
