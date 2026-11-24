@@ -35,6 +35,20 @@ String _flagOf(String iso) {
       String.fromCharCode(base + iso.codeUnitAt(1) - 65);
 }
 
+/// The same country sheet as phone entry (flags, codes, search), for any
+/// screen that asks for a phone number.
+Future<PhoneCountry?> showPhoneCountryPicker(
+  BuildContext context, {
+  String initial = 'YE',
+}) => showModalBottomSheet<PhoneCountry>(
+  context: context,
+  backgroundColor: Colors.transparent,
+  isScrollControlled: true,
+  builder: (_) => _CountryPickerSheet(initial: initial),
+);
+
+String phoneCountryFlag(String iso) => _flagOf(iso);
+
 class PhoneEntryPage extends ConsumerStatefulWidget {
   final bool isMandatory;
   const PhoneEntryPage({super.key, this.isMandatory = false});

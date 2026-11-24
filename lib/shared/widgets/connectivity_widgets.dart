@@ -141,21 +141,16 @@ Future<bool> showOfflineDialog(
                 ),
               ),
               const SizedBox(height: 10),
-              // Back — opens previous screen.
+              // Hide — only closes this notice; the screen stays as it is.
               SizedBox(
                 width: double.infinity,
                 height: 52,
                 child: OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.pop(ctx, false);
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (context.mounted) Navigator.of(context).pop();
-                    });
-                  },
-                  icon: const Icon(Icons.arrow_back_ios_new, size: 16),
+                  onPressed: () => Navigator.pop(ctx, false),
+                  icon: const Icon(Icons.close_rounded, size: 18),
                   label: FittedBox(
                     fit: BoxFit.scaleDown,
-                    child: Text(l10n.translate('back'),
+                    child: Text(l10n.translate('offlineDialogHide'),
                         style: TextStyle(fontFamily: 'Cairo', fontSize: 14, fontWeight: FontWeight.w600)),
                   ),
                   style: OutlinedButton.styleFrom(

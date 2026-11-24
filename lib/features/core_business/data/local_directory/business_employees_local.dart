@@ -109,6 +109,8 @@ extension BusinessEmployeesLocal on DirectoryDatabase {
     if (body['salary'] != null) 'salary': '${body['salary']}',
     if (body['salary_currency'] != null) 'salary_currency': body['salary_currency'],
     if (body.containsKey('notes')) 'notes': body['notes'],
+    // The photo picked in the form (a data URI) is kept with the employee.
+    if (body.containsKey('photo_base64')) 'photo_url': body['photo_base64'],
     if (body['permissions'] is Map) 'permissions': jsonEncode(body['permissions']),
     if (body['branch_ids'] is List)
       'branch_ids': jsonEncode([for (final b in body['branch_ids'] as List) '$b']),

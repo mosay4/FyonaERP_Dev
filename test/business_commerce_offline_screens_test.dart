@@ -273,9 +273,12 @@ void main() {
       expect(c.read(directoryPilotAccessProvider)?.branchId, _branch);
       expect(c.read(businessLocalLedgerScopeProvider), isNull);
       expect(c.read(salesApiProvider), isNot(isA<LocalSalesApi>()));
+      // The owner opens another branch of the same organization offline with
+      // the organization's signed context (no cross-branch session).
       await _select(ledger: true, branch: _sibling, claimedBranch: _branch);
       c.read(branchEpochProvider.notifier).state++;
-      expect(c.read(businessLocalLedgerScopeProvider), isNull);
+      expect(c.read(businessLocalLedgerScopeProvider)?.branchId, _sibling);
+      expect(c.read(businessLocalLedgerScopeProvider)?.writerSession, isNull);
       await _select(ledger: true);
       c.read(branchEpochProvider.notifier).state++;
       expect(c.read(businessLocalLedgerScopeProvider)?.branchId, _branch);
@@ -639,10 +642,12 @@ void main() {
               purchaseAccountsProvider,
               returnAccountsProvider,
             ]) {
-              expect(
-                (await lab.container.read(provider.future)).single['bank'],
-                _bankName,
-              );
+              // The new bank, next to the branch's own cash account.
+              final banks = [
+                for (final row in await lab.container.read(provider.future))
+                  row['bank'],
+              ];
+              expect(banks.where((b) => b == _bankName), hasLength(1));
             }
           });
 

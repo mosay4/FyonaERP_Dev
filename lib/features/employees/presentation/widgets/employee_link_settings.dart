@@ -10,6 +10,11 @@ import '../../data/employee_permissions.dart';
 import '../pages/employee_custom_permissions_page.dart';
 import '../providers/employee_providers.dart';
 import 'employee_avatar.dart';
+import '../../../../core/services/connectivity_service.dart' show connectivityServiceProvider;
+import '../../../../core/utils/country_phone_data.dart';
+import '../../../../shared/widgets/connectivity_widgets.dart';
+import '../../../subscription/presentation/pages/phone_entry_page.dart'
+    show showPhoneCountryPicker, phoneCountryFlag;
 
 class EmployeeLinkDraft {
   const EmployeeLinkDraft({
@@ -50,6 +55,9 @@ class EmployeeLinkSettings extends ConsumerStatefulWidget {
 
 class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
   final _input = TextEditingController();
+  /// Search by the 6-digit public code, or by phone with its country code.
+  bool _byPhone = false;
+  PhoneCountry _country = kPhoneCountries.first;
   late Map<String, bool> _permissions = {
     ...defaultEmployeePermissions(),
     ...widget.permissions,
@@ -135,14 +143,34 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
     ),
   );
 
+  String _query() {
+    final digits = _digits(_input.text);
+    if (!_byPhone || digits.isEmpty) return digits;
+    // The country code in front of the national number (without its 0).
+    return '${_country.cc}${digits.replaceFirst(RegExp(r'^0+'), '')}';
+  }
+
   Future<void> _search() async {
-    final query = _digits(_input.text);
+    final query = _query();
     if (query.isEmpty || _searching) return;
+    if (!_byPhone && query.length != 6) {
+      showFyonaSnack(context,
+          _t('الرقم المميز 6 أرقام بالضبط', 'The public code is exactly 6 digits'),
+          success: false);
+      return;
+    }
     FocusScope.of(context).unfocus();
+    // Finding an account needs the internet: the same notice as every
+    // internet-only button.
+    final connectivity = ref.read(connectivityServiceProvider);
+    if (!connectivity.isOnline) {
+      final retry = await showOfflineDialog(context, connectivity: connectivity);
+      if (!retry || !mounted) return;
+    }
     setState(() => _searching = true);
     try {
       final user = await ref.read(employeeApiProvider).lookup(query);
-      if (!mounted || _digits(_input.text) != query) return;
+      if (!mounted || _query() != query) return;
       final warning = user['already_employee'] == true
           ? 'هذا الموظف مضاف عندك من قبل، ما ينفع تضيفه مرتين'
           : user['pending_invitation'] == true
@@ -223,13 +251,35 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
       });
       _emit();
     } catch (e) {
-      if (mounted) {
+      if (mounted && isConnectionError(e)) {
+        setState(() => _searching = false);
+        await showOfflineDialog(context, connectivity: ref.read(connectivityServiceProvider));
+      } else if (mounted) {
         showFyonaSnack(context, EmployeeApi.message(e), success: false);
       }
     } finally {
       if (mounted) setState(() => _searching = false);
     }
   }
+
+  void _setMode(bool byPhone) {
+    if (_byPhone == byPhone) return;
+    setState(() {
+      _byPhone = byPhone;
+      _input.clear();
+      _warning = null;
+      _confirmedCode = null;
+      _confirmedName = null;
+    });
+    _emit();
+  }
+
+  Widget _modeChip(String ar, String en, bool byPhone) => ChoiceChip(
+    label: Text(_t(ar, en), style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w700)),
+    selected: _byPhone == byPhone,
+    onSelected: (_) => _setMode(byPhone),
+    selectedColor: AppColors.primary.withValues(alpha: 0.14),
+  );
 
   Future<void> _custom() async {
     final value = await Navigator.of(context).push<Map<String, bool>>(
@@ -267,6 +317,14 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
           ),
         ),
         const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: [
+            _modeChip('الرقم المميز', 'Public code', false),
+            _modeChip('رقم الهاتف', 'Phone number', true),
+          ],
+        ),
+        const SizedBox(height: 8),
         TextField(
           controller: _input,
           keyboardType: TextInputType.number,
@@ -274,6 +332,7 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
           textDirection: TextDirection.ltr,
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp('[0-9٠-٩۰-۹]')),
+            LengthLimitingTextInputFormatter(_byPhone ? 15 : 6),
           ],
           onSubmitted: (_) => _search(),
           onChanged: (_) {
@@ -286,10 +345,32 @@ class _EmployeeLinkSettingsState extends ConsumerState<EmployeeLinkSettings> {
             _emit();
           },
           decoration: InputDecoration(
-            labelText: _t(
-              'الرقم المميز أو رقم الهاتف',
-              'Public code or phone number',
-            ),
+            labelText: _byPhone
+                ? _t('رقم الهاتف', 'Phone number')
+                : _t('الرقم المميز (6 أرقام)', 'Public code (6 digits)'),
+            hintText: _byPhone ? _country.example : null,
+            // The country code sits in front of the number (left side).
+            prefixIcon: !_byPhone
+                ? null
+                : InkWell(
+                    onTap: () async {
+                      final picked = await showPhoneCountryPicker(context, initial: _country.iso);
+                      if (picked != null && mounted) setState(() => _country = picked);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(phoneCountryFlag(_country.iso), style: const TextStyle(fontSize: 18)),
+                          const SizedBox(width: 6),
+                          Text(_country.cc, textDirection: TextDirection.ltr,
+                              style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w700)),
+                          const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+                        ],
+                      ),
+                    ),
+                  ),
             filled: true,
             fillColor: AppColors.surface,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),

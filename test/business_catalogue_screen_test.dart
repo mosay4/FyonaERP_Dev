@@ -290,20 +290,19 @@ void main() {
       final l10n = AppLocalizations.of(
         tester.element(find.byType(CategoryDetailPage)),
       );
-      final shared = l10n.translate('invSharedCategoryReadOnly');
-      expect(find.text(shared), findsOneWidget);
+      // The branch owns its categories: no shared/read-only banner, and a
+      // rename is saved in this branch's own ledger.
+      expect(find.text(l10n.translate('invSharedCategoryReadOnly')), findsNothing);
       final api = container.read(inventoryApiProvider) as LocalInventoryApi;
-      await expectLater(
-        api.updateCategory(category, 'Forbidden rename'),
-        throwsA(isA<SharedCatalogReadOnly>()),
-      );
-      await tester.tap(find.byTooltip(l10n.translate('delete')));
-      await tester.pump(const Duration(milliseconds: 300));
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(
-        find.descendant(of: find.byType(SnackBar), matching: find.text(shared)),
-        findsOneWidget,
-      );
+      await tester.runAsync(() async {
+        await api.updateCategory(category, 'Renamed here');
+        expect(
+          (await api.categories()).singleWhere((c) => c['id'] == category)['name'],
+          'Renamed here',
+        );
+        await api.updateCategory(category, catName);
+      });
+      await tester.pump();
 
       container.read(inventoryReadable.notifier).state = false;
       await tester.pump();

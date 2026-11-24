@@ -146,14 +146,18 @@ void main() {
       await tester.pumpAndSettle();
       expect(draft?.code, isNull);
       expect(tester.widget<TextField>(input).controller!.text, isEmpty);
+      // A phone number is searched in phone mode, with its country code.
+      await tester.tap(find.text('رقم الهاتف'));
+      await tester.pumpAndSettle();
       await tester.enterText(input, '777123456');
       await tester.tap(find.text('بحث عن الموظف'));
       await tester.pumpAndSettle();
-      expect(find.text('777123456'), findsNWidgets(2)); // input and dialog
+      expect(api.searched, '+967777123456');
+      expect(find.text('+967777123456'), findsOneWidget); // the dialog
       expect(find.text('123456'), findsNothing);
       await tester.tap(find.text('نعم، هذا هو'));
       await tester.pumpAndSettle();
-      expect(draft?.code, '777123456');
+      expect(draft?.code, '+967777123456');
       expect(draft?.ready, isTrue);
       expect(draft?.branchIds, ['b1', 'b2']);
       await tester.tap(find.text('فرع 2'));

@@ -107,4 +107,14 @@ void main() {
         accountName: 'كاش', accountNumber: '1', currency: 'SAR', openingMinor: 0);
     expect(await db.ledger.accounts(grant(a)), hasLength(1));
   });
+
+  test('an employee added offline keeps the photo picked in the form', () async {
+    final a = scope(_id());
+    final photo = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+    final row = await db.createLocalEmployee(a, {'full_name': 'محمد', 'photo_base64': photo});
+    expect(row['photo_url'], photo);
+    final changed = 'data:image/jpeg;base64,/9j/AAAA';
+    await db.updateLocalEmployee(a, '${row['id']}', {'photo_base64': changed});
+    expect((await db.localEmployee(a, '${row['id']}'))?['photo_url'], changed);
+  });
 }
