@@ -728,9 +728,13 @@ class ReportAmount extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The currency name is a quiet tag beside the number — never as loud
+    // as the amount itself (stays small on big hero numbers too).
     final compact = style.copyWith(
-      fontSize: (style.fontSize ?? 14) * .62,
-      fontWeight: FontWeight.w700,
+      fontSize: ((style.fontSize ?? 14) * .42).clamp(9.5, 12.0).toDouble(),
+      fontWeight: FontWeight.w600,
+      color: (style.color ?? AppColors.textPrimary).withAlpha(200),
+      height: 1.2,
     );
     return FittedBox(
       fit: BoxFit.scaleDown,
@@ -750,7 +754,7 @@ class ReportAmount extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
               decoration: BoxDecoration(
-                color: (style.color ?? AppColors.primary).withAlpha(16),
+                color: (style.color ?? AppColors.primary).withAlpha(12),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(

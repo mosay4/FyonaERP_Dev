@@ -618,7 +618,7 @@ void main() {
           await mount();
           await tap(exact('إضافة بنك'));
           await enter('اسم البنك', _bankName);
-          await enter('الرصيد الافتتاحي', '1000');
+          await enter('رصيد البداية', '1000');
           await tap(field('اختر العملة'));
           final selector = find.byType(CurrencySelector);
           await tester.enterText(

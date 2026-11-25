@@ -53,7 +53,6 @@ List<BizSheetItem<String>> bizCurrencySheetItems(Iterable<String> codes) => [
         BizSheetItem<String>(
           value: c,
           title: currencyName(c),
-          subtitle: currencyShort(c),
           leading: bizCurrencyFlag(c),
         ),
     ];

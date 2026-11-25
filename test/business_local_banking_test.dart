@@ -436,7 +436,7 @@ void main() {
         (widget) => widget is TextField && widget.decoration?.hintText == hint,
       );
       await tester.enterText(field('اسم البنك'), 'حساب مضاف من الجهاز');
-      await tester.enterText(field('الرصيد الافتتاحي'), '99.12');
+      await tester.enterText(field('رصيد البداية'), '99.12');
       await tap(field('اختر العملة'));
       final selector = find.byType(CurrencySelector);
       await tap(

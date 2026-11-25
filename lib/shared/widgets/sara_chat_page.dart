@@ -66,38 +66,48 @@ import '../../features/branches/data/branch_pictures.dart';
 import '../../features/ai/presentation/widgets/sara_offline_notice.dart';
 
 /// ── Sara adaptive palette ──────────────────────────────────────────
-/// Dark theme keeps the original blacks exactly as they were.
-/// Light theme uses a calm soft-white with light smoky grays — every text
-/// stays readable.
+/// "Graphite & crimson": a deep graphite studio in dark, a warm paper
+/// white in light. Surfaces are flat with hairline edges (no floating
+/// glass), so the header, the message area and the composer read as one
+/// continuous, edge-to-edge screen.
 bool _saraLight(BuildContext context) =>
     Theme.of(context).brightness == Brightness.light;
 
 Color _saraPageBg(BuildContext context) =>
-    _saraLight(context) ? const Color(0xFFF7F5F6) : const Color(0xFF101115);
+    _saraLight(context) ? const Color(0xFFF4F3F1) : const Color(0xFF0C0D10);
 
-Color _saraCard(BuildContext context) =>
-    _saraLight(context) ? Colors.white : const Color(0xFF1A1A1A);
+/// Header and composer surface (docked bars).
+Color _saraBar(BuildContext context) =>
+    _saraLight(context) ? Colors.white : const Color(0xFF131418);
 
 Color _saraBubble(BuildContext context) =>
-    _saraLight(context) ? Colors.white.withAlpha(232) : const Color(0xFF1B1C21).withAlpha(236);
+    _saraLight(context) ? Colors.white : const Color(0xFF17181D);
 
 Color _saraConfirmBg(BuildContext context) =>
-    _saraLight(context) ? Colors.white : const Color(0xFF1E1E2E);
+    _saraLight(context) ? Colors.white : const Color(0xFF17181D);
 
 Color _saraLine(BuildContext context) =>
-    _saraLight(context) ? const Color(0xFFE6E1E4) : const Color(0xFF2C2E35);
+    _saraLight(context) ? const Color(0xFFE6E3DF) : const Color(0xFF24262D);
+
+/// Readable brand ink for text/icons on Sara's surfaces (lifted in dark).
+Color _saraAccent(BuildContext context) =>
+    _saraLight(context) ? AppColors.primary : const Color(0xFFF0A7B5);
+
+/// Inner field / muted control fill.
+Color _saraField(BuildContext context) =>
+    _saraLight(context) ? const Color(0xFFF2F0EE) : const Color(0xFF1C1D23);
 
 Color _saraText(BuildContext context) =>
-    _saraLight(context) ? const Color(0xFF1B1E23) : const Color(0xFFF0F0F0);
+    _saraLight(context) ? const Color(0xFF17181C) : const Color(0xFFECECEF);
 
 Color _saraSub(BuildContext context) =>
-    _saraLight(context) ? const Color(0xFF6B7280) : const Color(0xFF888888);
+    _saraLight(context) ? const Color(0xFF5F6470) : const Color(0xFF9A9CA6);
 
 Color _saraFaint(BuildContext context) =>
-    _saraLight(context) ? const Color(0xFF9AA1AB) : const Color(0xFF666666);
+    _saraLight(context) ? const Color(0xFF9A9FA8) : const Color(0xFF686B76);
 
 Color _saraAvatarBg(BuildContext context) =>
-    _saraLight(context) ? const Color(0xFFE5E7EB) : const Color(0xFF1E1E1E);
+    _saraLight(context) ? const Color(0xFFE9E6E3) : const Color(0xFF1E1F25);
 
 
 Color _saraCardStrong(BuildContext context) =>
@@ -105,6 +115,22 @@ Color _saraCardStrong(BuildContext context) =>
 
 Color _saraCardSoft(BuildContext context) =>
     _saraLight(context) ? const Color(0xFF6B7280) : Colors.white54;
+
+/// The user's bubbles: one deep crimson ink, lit from the top corner.
+const _saraUserInk = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+    colors: [Color(0xFFB8223F), Color(0xFF9B1735), Color(0xFF7E0F26)]);
+
+/// Bubble corners: the corner next to the group's avatar is the "tail".
+BorderRadius _saraBubbleRadius({required bool user, required bool grouped}) {
+  const r = Radius.circular(18), tail = Radius.circular(5), joint = Radius.circular(8);
+  return user
+      ? BorderRadius.only(topLeft: r, bottomLeft: r, topRight: grouped ? joint : tail, bottomRight: joint)
+      : BorderRadius.only(topRight: r, bottomRight: r, topLeft: grouped ? joint : tail, bottomLeft: joint);
+}
+
+/// Small in-bubble time stamp.
+TextStyle _saraStamp(BuildContext context, {bool onInk = false}) => TextStyle(fontFamily: 'Cairo', fontSize: 10,
+    height: 1.2, color: onInk ? Colors.white.withAlpha(185) : _saraFaint(context));
 
 /// «افتح: <screen>» for a Sara link, from the live screen catalog.
 String? saraRouteLinkLabel(String route, {required bool arabic}) {
@@ -2820,7 +2846,18 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     // message layout, emojis and mixed names render correctly), LTR for
     // English. Previously forced to LTR which mirrored Arabic content.
     final isRtl = Localizations.localeOf(context).languageCode == 'ar';
-    return _SaraIdentityScope(business: widget.accountType == 'business', child: Directionality(
+    final business = widget.accountType == 'business';
+    // Root cause of the old white band under the app's top bar: Sara is
+    // hosted inside the shell, whose own header (HomeHeader) already
+    // consumed the status-bar inset with a SafeArea — but the shell has no
+    // AppBar, so the inset still reached Sara's Scaffold and its AppBar
+    // padded itself down by the status-bar height a second time (an empty
+    // strip in the page colour). Standalone (no ancestor Scaffold) the inset
+    // is kept, so Sara still clears the status bar when pushed full screen.
+    final nested = Scaffold.maybeOf(context) != null;
+    return _SaraIdentityScope(business: business, child: MediaQuery.removePadding(
+      context: context, removeTop: nested,
+      child: Directionality(
       textDirection: isRtl ? ui.TextDirection.rtl : ui.TextDirection.ltr,
         child: Stack(children: [Scaffold(
         backgroundColor: _saraPageBg(context),
@@ -2830,36 +2867,72 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
             Positioned.fill(child: SaraAmbientScene(key: _ambientSceneKey, controller: _ambient,
               activity: _ambientActivity, inputKey: _pendingAudioPath != null ? _ambientAudioKey : _ambientInputKey,
               avatarKey: _headerAvatarKey, userKey: _ambientUserKey, replyKey: _ambientReplyKey,
-              enabled: !_introVisible, business: widget.accountType == 'business')),
+              enabled: !_introVisible, business: business)),
             Column(children: [
               Expanded(child: _buildMessageList()),
-              if (_dynamicSuggestions.isNotEmpty) _buildDynamicSuggestions()
-              else if (widget.suggestedQuestions.isNotEmpty && _messages.length <= 2) _buildSuggestedGrid(),
-              _buildPreviewBar(),
+              // Suggestions, attachment preview and the offline card enter
+              // and leave with a short collapse + fade (never a jump).
+              AnimatedSize(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.bottomCenter,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 220),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  child: _dynamicSuggestions.isNotEmpty
+                      ? KeyedSubtree(key: const ValueKey('sara_dynamic'), child: _buildDynamicSuggestions())
+                      : widget.suggestedQuestions.isNotEmpty && _messages.length <= 2
+                          ? KeyedSubtree(key: const ValueKey('sara_suggested'), child: _buildSuggestedGrid())
+                          : const SizedBox(key: ValueKey('sara_no_suggestions'), width: double.infinity),
+                ),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.bottomCenter,
+                child: _buildPreviewBar(),
+              ),
               if (widget.accountType == 'personal' && _offline)
                 SaraOfflineNotice(onRetry: () {
                   if (_isOnline()) setState(() => _offline = false);
                 }),
               _buildInputBar(),
             ]),
-            Positioned.fill(child: SaraAmbientAccents(controller: _ambient, business: widget.accountType == 'business')),
-            if (_showScrollDown)
-              Positioned(
-                left: 16, bottom: 80,
-                child: GestureDetector(
-                  onTap: () { _autoFollow = true; _scrollDown(); },
-                  child: Container(
-                    width: 38, height: 38,
-                    decoration: BoxDecoration(
-                      color: _saraCard(context),
-                      borderRadius: BorderRadius.circular(19),
-                      border: Border.all(color: _saraLine(context)),
-                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 2))],
+            Positioned.fill(child: SaraAmbientAccents(controller: _ambient, business: business)),
+            PositionedDirectional(
+              start: 14, bottom: 84,
+              child: IgnorePointer(
+                ignoring: !_showScrollDown,
+                child: AnimatedSlide(
+                  offset: _showScrollDown ? Offset.zero : const Offset(0, .5),
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  child: AnimatedOpacity(
+                    opacity: _showScrollDown ? 1 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: Semantics(
+                      button: true,
+                      label: _isEn() ? 'Latest messages' : 'أحدث الرسائل',
+                      child: GestureDetector(
+                        onTap: () { _autoFollow = true; _scrollDown(); },
+                        child: Container(
+                          width: 38, height: 38,
+                          decoration: BoxDecoration(
+                            color: _saraBar(context),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: _saraLine(context)),
+                            boxShadow: [BoxShadow(color: Colors.black.withAlpha(_saraLight(context) ? 22 : 90),
+                                blurRadius: 12, offset: const Offset(0, 4))],
+                          ),
+                          child: Icon(Icons.keyboard_arrow_down_rounded, color: _saraSub(context), size: 22),
+                        ),
+                      ),
                     ),
-                    child: Icon(Icons.keyboard_arrow_down, color: _saraSub(context), size: 20),
                   ),
                 ),
               ),
+            ),
           ],
         ),
       ),
@@ -2869,13 +2942,16 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
           unawaited(_sounds.stop());
         })),
       ]),
-    ));
+    )));
   }
 
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
-      backgroundColor: _saraPageBg(context),
-      toolbarHeight: 84,
+      // A docked, flush header bar: the same surface edge to edge, one
+      // hairline below it, no floating card and no gap above or around it.
+      backgroundColor: _saraBar(context),
+      surfaceTintColor: Colors.transparent,
+      toolbarHeight: 62,
       automaticallyImplyLeading: false,
       elevation: 0,
       scrolledUnderElevation: 0,
@@ -2888,6 +2964,8 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
         onAvatarTap: () => unawaited(_sounds.play(SaraSound.tap)),
         arabic: !_isEn(), hidden: _introVisible, business: widget.accountType == 'business',
         name: widget.assistantName.isEmpty ? null : widget.assistantName),
+      bottom: PreferredSize(preferredSize: const Size.fromHeight(2),
+        child: SaraActivityLine(active: _busy, color: AppColors.primary, track: _saraLine(context))),
       actions: const [],
     );
   }
@@ -2896,8 +2974,13 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     if (_pendingImage == null && _pendingFileName == null) return const SizedBox.shrink();
     final l10n = AppLocalizations.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      color: _saraCard(context),
+      margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+      padding: const EdgeInsets.fromLTRB(6, 6, 4, 6),
+      decoration: BoxDecoration(
+        color: _saraBar(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _saraLine(context), width: .8),
+      ),
       child: Row(children: [
         if (_pendingImage != null)
           ClipRRect(
@@ -2931,18 +3014,27 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
 
   Widget _buildMessageList() {
     final lastUser = _messages.reversed.where((m) => const {MessageRole.user, MessageRole.image, MessageRole.audio}.contains(m.role)).firstOrNull?.id;
+    const userSide = {MessageRole.user, MessageRole.image, MessageRole.audio};
     return ListView.builder(
       controller: _scrollCtrl,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      // Edge to edge: only a slim gutter, the list scrolls under nothing.
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 12),
       itemCount: _messages.length,
       itemBuilder: (_, i) {
         final msg = _messages[i];
         final prev = i > 0 ? _messages[i - 1] : null;
         final showDate = prev == null || !_sameDay(prev.time, msg.time);
+        final fromUser = userSide.contains(msg.role);
+        final grouped = prev != null && _sameDay(prev.time, msg.time) &&
+            (prev.role == msg.role || (fromUser && userSide.contains(prev.role)));
         return Column(children: [
           if (showDate) _DateSeparator(date: msg.time),
           _AnimatedMessage(
-            child: _buildMessageWidget(msg, isGrouped: prev?.role == msg.role && _sameDay(prev!.time, msg.time), anchorUser: msg.id == lastUser),
+            fromUser: fromUser,
+            // Only messages that just arrived make an entrance; history
+            // scrolled back into view is shown at rest.
+            fresh: DateTime.now().difference(msg.time).inSeconds.abs() < 4 || msg.role == MessageRole.typing,
+            child: _buildMessageWidget(msg, isGrouped: grouped, anchorUser: msg.id == lastUser),
           ),
         ]);
       },
@@ -3022,45 +3114,66 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     }
   }
 
+  /// One suggestion chip, the same everywhere (start-up questions and the
+  /// follow-ups Sara proposes): a soft pill with a small spark.
+  Widget _suggestionChip(String q, VoidCallback onSend, {bool primary = false}) {
+    final light = _saraLight(context);
+    return Listener(
+      onPointerDown: (event) {
+        if (!_busy) _ambient.suggestion(_ambientPoint(event.position));
+      },
+      child: Opacity(
+        opacity: _busy ? .5 : 1,
+        child: _SaraPressable(
+          onTap: () { if (!_busy) onSend(); },
+          builder: (active) => AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.fromLTRB(10, 6, 12, 6),
+            decoration: BoxDecoration(
+              color: active ? AppColors.primary.withAlpha(light ? 22 : 50) : _saraBar(context),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: active || primary ? _saraAccent(context).withAlpha(light ? 70 : 95) : _saraLine(context),
+                width: .8),
+              boxShadow: [BoxShadow(color: Colors.black.withAlpha(light ? 8 : 30), blurRadius: 8, offset: const Offset(0, 2))],
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.auto_awesome_rounded, size: 13, color: _saraAccent(context)),
+              const SizedBox(width: 6),
+              Flexible(child: Text(q, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.w600, color: _saraText(context)))),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSuggestedGrid() {
     final qs = widget.suggestedQuestions;
     if (qs.isEmpty) return const SizedBox.shrink();
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       child: Wrap(
         spacing: 6, runSpacing: 6,
-        children: qs.map((q) => Listener(onPointerDown: (event) {
-          if (!_busy) _ambient.suggestion(_ambientPoint(event.position));
-        }, child: SaraPressable(child: ActionChip(
-          label: Text(q, style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.w600,
-              color: _saraLight(context) ? AppColors.primary : const Color(0xFFF1B5C0))),
-          backgroundColor: _saraBubble(context),
-          side: BorderSide(color: AppColors.primary.withAlpha(_saraLight(context) ? 45 : 80), width: 0.7),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-          onPressed: _busy ? null : () => _send(text: q),
-        )))).toList(),
+        alignment: WrapAlignment.center,
+        children: qs.map((q) => _suggestionChip(q, () => _send(text: q), primary: true)).toList(),
       ),
     );
   }
 
   Widget _buildDynamicSuggestions() {
     if (_dynamicSuggestions.isEmpty) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
-      child: SingleChildScrollView(
+    return SizedBox(
+      height: 44,
+      child: ListView(
         scrollDirection: Axis.horizontal,
-        child: Row(children: _dynamicSuggestions.map((q) => Padding(
-          padding: const EdgeInsetsDirectional.only(end: 8),
-          child: Listener(onPointerDown: (event) {
-            if (!_busy) _ambient.suggestion(_ambientPoint(event.position));
-          }, child: ActionChip(
-            label: Text(q, style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: _saraSub(context))),
-            backgroundColor: _saraCard(context),
-            side: BorderSide(color: _saraLine(context), width: 0.7),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-            onPressed: _busy ? null : () { setState(() => _dynamicSuggestions = []); _send(text: q); },
-          )),
-        )).toList()),
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+        children: _dynamicSuggestions.map((q) => Padding(
+          padding: const EdgeInsetsDirectional.only(end: 6),
+          child: _suggestionChip(q, () { setState(() => _dynamicSuggestions = []); _send(text: q); }),
+        )).toList(),
       ),
     );
   }
@@ -3070,10 +3183,16 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     final hasAttachment = _pendingImage != null || _pendingFileName != null;
     final canSend = (hasText || hasAttachment) && !_busy;
 
+    // Docked composer: the bar's surface runs edge to edge under a single
+    // hairline, flush with the bottom navigation (no floating island).
     return Container(
+      decoration: BoxDecoration(
+        color: _saraBar(context),
+        border: Border(top: BorderSide(color: _saraLine(context), width: .8)),
+      ),
       padding: EdgeInsets.only(
-        left: 12, right: 12, top: 6,
-        bottom: MediaQuery.of(context).padding.bottom + 10,
+        left: 10, right: 10, top: 8,
+        bottom: MediaQuery.of(context).padding.bottom + 8,
       ),
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
@@ -3093,79 +3212,93 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     final focused = _composerFocus.hasFocus;
     Widget tool(IconData icon, VoidCallback onTap, {Color? color, String? tooltip}) => Semantics(
       button: true, label: tooltip,
-      child: InkResponse(onTap: onTap, radius: 22, child: SizedBox(width: 40, height: 40,
-          child: Icon(icon, color: color ?? _saraSub(context), size: 22))));
-    // One floating composer (Gemini-like): attachments, text and voice in a
-    // single soft pill; the send button lights up in the brand gradient.
-    return AnimatedContainer(
+      child: InkResponse(onTap: onTap, radius: 20, child: SizedBox(width: 38, height: 42,
+          child: Icon(icon, color: color ?? _saraSub(context), size: 21))));
+    return Row(
       key: const ValueKey('text_input'),
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-      padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
-      decoration: BoxDecoration(
-        color: light ? Colors.white.withAlpha(242) : const Color(0xFF1B1C21).withAlpha(240),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(
-          color: focused ? AppColors.primary.withAlpha(light ? 45 : 60) : _saraLine(context),
-          width: focused ? 1 : 0.7),
-        boxShadow: [BoxShadow(
-          color: (focused ? AppColors.primary : Colors.black).withAlpha(light ? (focused ? 16 : 10) : (focused ? 30 : 34)),
-          blurRadius: focused ? 26 : 18, offset: const Offset(0, 6))],
-      ),
-      child: Row(
-        key: _ambientInputKey,
-        textDirection: ui.TextDirection.ltr,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          GestureDetector(
+      textDirection: ui.TextDirection.ltr,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        // Send: muted until there is something to send, then it fills with
+        // the crimson ink and springs up slightly.
+        Semantics(
+          button: true, enabled: canSend, label: _isEn() ? 'Send' : 'إرسال',
+          child: GestureDetector(
             onTap: canSend ? () => _send() : null,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              width: 44, height: 44,
-              decoration: BoxDecoration(
-                gradient: canSend ? const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-                    colors: [Color(0xFFC2334F), AppColors.primary, Color(0xFF7A1020)]) : null,
-                color: canSend ? null : (light ? const Color(0xFFF1EDEF) : const Color(0xFF25272D)),
-                shape: BoxShape.circle,
-                boxShadow: canSend ? [BoxShadow(color: AppColors.primary.withAlpha(80), blurRadius: 14, offset: const Offset(0, 4))] : null,
-              ),
-              child: Transform.flip(
-                flipX: true,
-                child: Icon(_busy ? Icons.hourglass_bottom : Icons.send_rounded, color: canSend ? Colors.white : _saraFaint(context), size: 20),
+            child: AnimatedScale(
+              scale: canSend ? 1 : .92,
+              duration: const Duration(milliseconds: 260),
+              curve: canSend ? Curves.easeOutBack : Curves.easeOutCubic,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                width: 44, height: 44,
+                decoration: BoxDecoration(
+                  gradient: canSend ? _saraUserInk : null,
+                  color: canSend ? null : _saraField(context),
+                  shape: BoxShape.circle,
+                  boxShadow: canSend ? [BoxShadow(color: AppColors.primary.withAlpha(light ? 70 : 110), blurRadius: 14, offset: const Offset(0, 4))] : null,
+                ),
+                child: Transform.flip(
+                  flipX: true,
+                  child: Icon(_busy ? Icons.hourglass_bottom : Icons.send_rounded, color: canSend ? Colors.white : _saraFaint(context), size: 20),
+                ),
               ),
             ),
           ),
-          Expanded(
-            child: FyonaTextField(
-              controller: _inputCtrl,
-              focusNode: _composerFocus,
-              onTap: _ambient.touchInput,
-              textAlign: TextAlign.right,
-              textInputAction: TextInputAction.send,
-              maxLines: 5, minLines: 1,
-              textDirection: ui.TextDirection.rtl,
-              onChanged: (value) { _ambient.edit(value); setState(() {}); },
-              onSubmitted: (_) => _send(),
-              decoration: InputDecoration(
-                hintText: widget.inputHint,
-                hintTextDirection: ui.TextDirection.rtl,
-                hintStyle: TextStyle(fontFamily: 'Cairo', fontSize: 14, color: _saraFaint(context)),
-                border: InputBorder.none,
-                // The pill is the field: no theme focus frame inside it.
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                filled: false,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              ),
-              style: TextStyle(fontFamily: 'Cairo', fontSize: 14.5, color: _saraText(context), height: 1.35),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.only(left: 2, right: 4),
+            decoration: BoxDecoration(
+              color: _saraField(context),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: focused ? _saraAccent(context).withAlpha(light ? 90 : 110) : Colors.transparent,
+                width: 1),
+            ),
+            child: Row(
+              key: _ambientInputKey,
+              textDirection: ui.TextDirection.ltr,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                tool(_isRecording ? Icons.stop_rounded : Icons.mic_none_rounded, _isRecording ? _stopRecording : _startRecording,
+                    color: _isRecording ? AppColors.danger : null, tooltip: _isEn() ? 'Voice' : 'رسالة صوتية'),
+                tool(Icons.image_outlined, _pickImage, tooltip: _isEn() ? 'Image' : 'صورة'),
+                Expanded(
+                  child: FyonaTextField(
+                    controller: _inputCtrl,
+                    focusNode: _composerFocus,
+                    onTap: _ambient.touchInput,
+                    textAlign: TextAlign.right,
+                    textInputAction: TextInputAction.send,
+                    maxLines: 5, minLines: 1,
+                    textDirection: ui.TextDirection.rtl,
+                    onChanged: (value) { _ambient.edit(value); setState(() {}); },
+                    onSubmitted: (_) => _send(),
+                    decoration: InputDecoration(
+                      hintText: widget.inputHint,
+                      hintTextDirection: ui.TextDirection.rtl,
+                      hintMaxLines: 1,
+                      hintStyle: TextStyle(fontFamily: 'Cairo', fontSize: 13.5, color: _saraFaint(context)),
+                      border: InputBorder.none,
+                      // The pill is the field: no theme focus frame inside it.
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      filled: false,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.fromLTRB(6, 11, 12, 11),
+                    ),
+                    style: TextStyle(fontFamily: 'Cairo', fontSize: 14.5, color: _saraText(context), height: 1.35),
+                  ),
+                ),
+              ],
             ),
           ),
-          tool(Icons.image_outlined, _pickImage, tooltip: _isEn() ? 'Image' : 'صورة'),
-          tool(_isRecording ? Icons.stop_rounded : Icons.mic, _isRecording ? _stopRecording : _startRecording,
-              color: _isRecording ? AppColors.danger : null, tooltip: _isEn() ? 'Voice' : 'رسالة صوتية'),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -3175,10 +3308,9 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
 
     return Container(
       key: const ValueKey('recording_input'),
-      height: 40,
-      margin: const EdgeInsets.only(bottom: 2),
+      height: 44,
       decoration: BoxDecoration(
-        color: _saraCard(context),
+        color: _saraField(context),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: AppColors.danger.withAlpha(80), width: 0.5),
       ),
@@ -3242,10 +3374,9 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     final secs = (_recordingDuration % 60).toString().padLeft(2, '0');
     return Container(
       key: const ValueKey('audio_preview_input'),
-      height: 40,
-      margin: const EdgeInsets.only(bottom: 2),
+      height: 44,
       decoration: BoxDecoration(
-        color: _saraCard(context),
+        color: _saraField(context),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: AppColors.primary.withAlpha(60), width: 0.5),
       ),
@@ -3436,15 +3567,17 @@ class _DateSeparator extends StatelessWidget {
     else if (diff == 1) label = l10n.translate('yesterday');
     else label = localizedShortDate(context, date);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(children: [
-        Expanded(child: Divider(color: _saraLine(context), height: 1)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text(label, style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: _saraFaint(context))),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Center(child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+        decoration: BoxDecoration(
+          color: _saraBar(context).withAlpha(_saraLight(context) ? 235 : 220),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _saraLine(context), width: .7),
         ),
-        Expanded(child: Divider(color: _saraLine(context), height: 1)),
-      ]),
+        child: Text(label, style: TextStyle(fontFamily: 'Cairo', fontSize: 10.5, fontWeight: FontWeight.w700,
+            letterSpacing: .2, color: _saraSub(context))),
+      )),
     );
   }
 }
@@ -3455,27 +3588,30 @@ class _DateSeparator extends StatelessWidget {
 
 class _AnimatedMessage extends StatefulWidget {
   final Widget child;
-  const _AnimatedMessage({required this.child});
+  final bool fromUser, fresh;
+  const _AnimatedMessage({required this.child, this.fromUser = false, this.fresh = true});
   @override
   State<_AnimatedMessage> createState() => _AnimatedMessageState();
 }
 
 class _AnimatedMessageState extends State<_AnimatedMessage> with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
-  late Animation<double> _anim;
+  late Animation<double> _anim, _fade;
   late Animation<Offset> _slide;
   late Animation<double> _scale;
 
   @override
   void initState() {
     super.initState();
-    // Soft entrance: a short fade + a few pixels of rise + a whisper of
-    // scale. Runs once (never loops) so the chat always settles.
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 340));
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
-    _slide = Tween(begin: const Offset(0, .06), end: Offset.zero).animate(_anim);
-    _scale = Tween(begin: .985, end: 1.0).animate(_anim);
-    _ctrl.forward();
+    // Entrance: the bubble rises from its own side (user from the end,
+    // Sara from the start) with a soft spring-like settle. Runs once,
+    // never loops, so the chat always settles.
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 380));
+    _anim = CurvedAnimation(parent: _ctrl, curve: const Cubic(.2, .9, .25, 1.06));
+    _fade = CurvedAnimation(parent: _ctrl, curve: const Interval(0, .6, curve: Curves.easeOut));
+    _slide = Tween(begin: Offset(widget.fromUser ? .05 : -.05, .18), end: Offset.zero).animate(_anim);
+    _scale = Tween(begin: .94, end: 1.0).animate(_anim);
+    if (widget.fresh) { _ctrl.forward(); } else { _ctrl.value = 1; }
   }
 
   @override
@@ -3489,10 +3625,12 @@ class _AnimatedMessageState extends State<_AnimatedMessage> with SingleTickerPro
 
   @override
   Widget build(BuildContext context) => FadeTransition(
-        opacity: _anim,
+        opacity: _fade,
         child: SlideTransition(
           position: _slide,
-          child: ScaleTransition(scale: _scale, child: widget.child),
+          child: ScaleTransition(
+            alignment: widget.fromUser ? Alignment.bottomRight : Alignment.bottomLeft,
+            scale: _scale, child: widget.child),
         ),
       );
 }
@@ -3583,68 +3721,77 @@ class _UserBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final isRtl = Localizations.localeOf(context).languageCode == 'ar';
     // Message bubbles copy on press — quiet for the Information Clicker.
     return ClickerQuiet(
-      child: Padding(
-      padding: EdgeInsets.only(top: isGrouped ? 1 : 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        textDirection: ui.TextDirection.ltr,
-        children: [
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                GestureDetector(
-                  onLongPress: () {
-                    HapticFeedback.lightImpact();
-                    if (text.isNotEmpty) {
-                      Clipboard.setData(ClipboardData(text: text));
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(l10n.translate('copied'), style: TextStyle(fontFamily: 'Cairo', color: Colors.white)),
-                        duration: Duration(seconds: 1),
-                        backgroundColor: AppColors.primary,
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ));
-                    }
-                  },
-                  child: _SendGlow(
-                    fresh: anchorKey != null && DateTime.now().difference(time).inMilliseconds.abs() < 2500,
-                    child: Container(
-                    key: anchorKey,
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-                          colors: [Color(0xFFB8243F), Color(0xFFA01530), Color(0xFF861127)]),
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(20),
-                        topRight: isGrouped ? const Radius.circular(8) : const Radius.circular(20),
-                        bottomLeft: const Radius.circular(20),
-                        bottomRight: const Radius.circular(6),
-                      ),
-                      boxShadow: [BoxShadow(color: AppColors.primary.withAlpha(45), blurRadius: 14, offset: const Offset(0, 5))],
-                    ),
-                    child: Text(text, style: const TextStyle(fontFamily: 'Cairo', fontSize: 14, color: Colors.white, height: 1.4)),
-                  ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 3),
-                  child: Text(DateFormat('HH:mm').format(time), style: TextStyle(fontFamily: 'Cairo', fontSize: 10, color: _saraFaint(context))),
-                ),
-              ],
+      child: _SaraUserRow(
+        isGrouped: isGrouped, avatarBytes: avatarBytes,
+        child: GestureDetector(
+          onLongPress: () {
+            HapticFeedback.lightImpact();
+            if (text.isNotEmpty) {
+              Clipboard.setData(ClipboardData(text: text));
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(l10n.translate('copied'), style: TextStyle(fontFamily: 'Cairo', color: Colors.white)),
+                duration: Duration(seconds: 1),
+                backgroundColor: AppColors.primary,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ));
+            }
+          },
+          child: _SendGlow(
+            fresh: anchorKey != null && DateTime.now().difference(time).inMilliseconds.abs() < 2500,
+            child: Container(
+              key: anchorKey,
+              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.76),
+              padding: const EdgeInsets.fromLTRB(13, 9, 13, 6),
+              decoration: BoxDecoration(
+                gradient: _saraUserInk,
+                borderRadius: _saraBubbleRadius(user: true, grouped: isGrouped),
+                boxShadow: [BoxShadow(color: AppColors.primary.withAlpha(_saraLight(context) ? 26 : 60), blurRadius: 14, offset: const Offset(0, 3))],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(text, textDirection: isRtl ? ui.TextDirection.rtl : null,
+                      style: const TextStyle(fontFamily: 'Cairo', fontSize: 14.5, color: Colors.white, height: 1.45)),
+                  const SizedBox(height: 2),
+                  Text(DateFormat('HH:mm').format(time), style: _saraStamp(context, onInk: true)),
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 8),
-          _UserAvatar(bytes: avatarBytes, size: 28),
-        ],
-      ),
+        ),
       ),
     );
   }
+}
+
+/// The user's side of the conversation: bubble at the end, the user's
+/// photo (or the branch picture in Business) once at the head of a group.
+class _SaraUserRow extends StatelessWidget {
+  final bool isGrouped;
+  final Uint8List? avatarBytes;
+  final Widget child;
+  const _SaraUserRow({required this.isGrouped, required this.child, this.avatarBytes});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(top: isGrouped ? 2 : 10),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      textDirection: ui.TextDirection.ltr,
+      children: [
+        const SizedBox(width: 40),
+        Flexible(child: Align(alignment: Alignment.centerRight, child: child)),
+        const SizedBox(width: 6),
+        isGrouped ? const SizedBox(width: 26) : _UserAvatar(bytes: avatarBytes, size: 26),
+      ],
+    ),
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3664,77 +3811,55 @@ class _ImageBubble extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     // Message bubbles copy on press — quiet for the Information Clicker.
     return ClickerQuiet(
-      child: Padding(
-      padding: EdgeInsets.only(top: isGrouped ? 1 : 6),
-      child: Align(
-        alignment: Alignment.centerRight,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          textDirection: ui.TextDirection.ltr,
-          children: [
-            Flexible(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  GestureDetector(
-                    onLongPress: () {
-                      HapticFeedback.lightImpact();
-                      if (text.isNotEmpty) {
-                        Clipboard.setData(ClipboardData(text: text));
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(l10n.translate('copied'), style: TextStyle(fontFamily: 'Cairo', color: Colors.white)),
-                          duration: Duration(seconds: 1),
-                          backgroundColor: AppColors.primary,
-                          behavior: SnackBarBehavior.floating,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ));
-                      }
-                    },
-                    child: Container(
-                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.65),
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFA01530),
-                        borderRadius: BorderRadius.only(
-                          topLeft: const Radius.circular(18),
-                          topRight: isGrouped ? const Radius.circular(6) : const Radius.circular(18),
-                          bottomLeft: const Radius.circular(18),
-                          bottomRight: const Radius.circular(6),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (imagePath != null)
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: Image.file(File(imagePath!), width: 200, height: 160, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(
-                                width: 200, height: 160,
-                                color: Colors.white12,
-                                child: const Icon(Icons.broken_image, color: Colors.white54, size: 40),
-                              )),
-                            ),
-                          if (text.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Text(text, style: const TextStyle(fontFamily: 'Cairo', fontSize: 13, color: Colors.white, height: 1.4)),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Text(DateFormat('HH:mm').format(time), style: TextStyle(fontFamily: 'Cairo', fontSize: 10, color: _saraFaint(context))),
-                  ),
-                ],
-              ),
+      child: _SaraUserRow(
+        isGrouped: isGrouped, avatarBytes: avatarBytes,
+        child: GestureDetector(
+          onLongPress: () {
+            HapticFeedback.lightImpact();
+            if (text.isNotEmpty) {
+              Clipboard.setData(ClipboardData(text: text));
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(l10n.translate('copied'), style: TextStyle(fontFamily: 'Cairo', color: Colors.white)),
+                duration: Duration(seconds: 1),
+                backgroundColor: AppColors.primary,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ));
+            }
+          },
+          child: Container(
+            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.66),
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              gradient: _saraUserInk,
+              borderRadius: _saraBubbleRadius(user: true, grouped: isGrouped),
+              boxShadow: [BoxShadow(color: AppColors.primary.withAlpha(_saraLight(context) ? 26 : 60), blurRadius: 14, offset: const Offset(0, 3))],
             ),
-            const SizedBox(width: 8),
-            _UserAvatar(bytes: avatarBytes, size: 30),
-          ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (imagePath != null)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.file(File(imagePath!), width: 210, height: 168, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(
+                      width: 210, height: 168,
+                      color: Colors.white12,
+                      child: const Icon(Icons.broken_image, color: Colors.white54, size: 40),
+                    )),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 3),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+                    if (text.isNotEmpty)
+                      Text(text, style: const TextStyle(fontFamily: 'Cairo', fontSize: 13.5, color: Colors.white, height: 1.4)),
+                    Text(DateFormat('HH:mm').format(time), style: _saraStamp(context, onInk: true)),
+                  ]),
+                ),
+              ],
+            ),
+          ),
         ),
-      ),
       ),
     );
   }
@@ -3810,76 +3935,57 @@ class _AudioBubbleState extends State<_AudioBubble> {
 
     // Message bubbles copy on press — quiet for the Information Clicker.
     return ClickerQuiet(
-      child: Padding(
-      padding: EdgeInsets.only(top: widget.isGrouped ? 1 : 6),
-      child: Align(
-        alignment: Alignment.centerRight,
-        child: Row(
-          textDirection: ui.TextDirection.ltr,
-          mainAxisSize: MainAxisSize.min,
+      child: _SaraUserRow(
+        isGrouped: widget.isGrouped, avatarBytes: widget.avatarBytes,
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Flexible(
+            Container(
+              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+              padding: const EdgeInsets.fromLTRB(8, 8, 12, 6),
+              decoration: BoxDecoration(
+                gradient: _saraUserInk,
+                borderRadius: _saraBubbleRadius(user: true, grouped: widget.isGrouped),
+                boxShadow: [BoxShadow(color: AppColors.primary.withAlpha(_saraLight(context) ? 26 : 60), blurRadius: 14, offset: const Offset(0, 3))],
+              ),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Container(
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFA01530),
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(18),
-                        topRight: widget.isGrouped ? const Radius.circular(6) : const Radius.circular(18),
-                        bottomLeft: const Radius.circular(18),
-                        bottomRight: const Radius.circular(6),
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            GestureDetector(
-                              onTap: _togglePlay,
-                              child: Container(
-                                width: 32, height: 32,
-                                decoration: BoxDecoration(color: Colors.white.withAlpha(30), shape: BoxShape.circle),
-                                child: Icon(_playing ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 18),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: _buildWaveform(progress),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              _playing ? _fmt(_position) : '$mins:$secs',
-                              style: const TextStyle(fontFamily: 'Cairo', fontSize: 11, color: Colors.white70),
-                            ),
-                          ],
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    textDirection: ui.TextDirection.ltr,
+                    children: [
+                      GestureDetector(
+                        onTap: _togglePlay,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: 34, height: 34,
+                          decoration: BoxDecoration(color: Colors.white.withAlpha(_playing ? 60 : 36), shape: BoxShape.circle),
+                          child: Icon(_playing ? Icons.pause_rounded : Icons.play_arrow_rounded, color: Colors.white, size: 20),
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 10),
+                      Flexible(child: _buildWaveform(progress)),
+                      const SizedBox(width: 8),
+                      Text(
+                        _playing ? _fmt(_position) : '$mins:$secs',
+                        style: const TextStyle(fontFamily: 'Cairo', fontSize: 11, color: Colors.white70),
+                      ),
+                    ],
                   ),
-                  if (widget.text.isNotEmpty && widget.text != AppLocalizations.of(context).translate('saraVoiceMessage'))
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(widget.text, style: TextStyle(fontFamily: 'Cairo', fontSize: 12, color: _saraFaint(context))),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(DateFormat('HH:mm').format(widget.time), style: TextStyle(fontFamily: 'Cairo', fontSize: 10, color: _saraFaint(context))),
-                  ),
+                  Text(DateFormat('HH:mm').format(widget.time), style: _saraStamp(context, onInk: true)),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            _UserAvatar(bytes: widget.avatarBytes, size: 30),
+            if (widget.text.isNotEmpty && widget.text != AppLocalizations.of(context).translate('saraVoiceMessage'))
+              Padding(
+                padding: const EdgeInsets.only(top: 4, right: 4),
+                child: Text(widget.text, style: TextStyle(fontFamily: 'Cairo', fontSize: 12, color: _saraSub(context))),
+              ),
           ],
         ),
-      ),
       ),
     );
   }
@@ -3972,69 +4078,68 @@ class _AssistantAudioBubbleState extends State<_AssistantAudioBubble> {
 
     // Message bubbles copy on press — quiet for the Information Clicker.
     return ClickerQuiet(
-      child: Padding(
-      padding: EdgeInsets.only(top: widget.isGrouped ? 1 : 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        textDirection: ui.TextDirection.ltr,
-        children: [
-          const _SaraAvatar(size: 30),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Container(
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: _saraCard(context),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Column(
+      child: _SaraSideRow(
+        isGrouped: widget.isGrouped,
+        child: Container(
+          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+          padding: const EdgeInsets.fromLTRB(8, 8, 12, 6),
+          decoration: BoxDecoration(
+            color: _saraBubble(context),
+            border: Border.all(color: _saraLine(context), width: .7),
+            borderRadius: _saraBubbleRadius(user: false, grouped: widget.isGrouped),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Row(
                 mainAxisSize: MainAxisSize.min,
+                textDirection: ui.TextDirection.ltr,
                 children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      GestureDetector(
-                        onTap: _togglePlay,
-                        child: Container(
-                          width: 32, height: 32,
-                          decoration: BoxDecoration(color: AppColors.primary.withAlpha(30), shape: BoxShape.circle),
-                          child: Icon(_playing ? Icons.pause : Icons.play_arrow, color: AppColors.primary, size: 18),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: List.generate(24, (i) {
-                            const barHeights = [0.3, 0.5, 0.7, 0.9, 1.0, 0.8, 0.6, 0.9, 1.0, 0.7, 0.5, 0.8,
-                                                1.0, 0.6, 0.4, 0.7, 0.9, 1.0, 0.8, 0.5, 0.7, 0.9, 0.6, 0.4];
-                            final barProgress = i / 24;
-                            final active = barProgress <= progress;
-                            return Container(
-                              width: 3, height: 16 * barHeights[i],
-                              margin: const EdgeInsets.symmetric(horizontal: 0.5),
-                              decoration: BoxDecoration(
-                                color: active ? AppColors.primary : AppColors.primary.withAlpha(40),
-                                borderRadius: BorderRadius.circular(1.5),
-                              ),
-                            );
-                          }),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _playing ? _fmt(_position) : _fmt(_total),
-                        style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textSecondary),
-                      ),
-                    ],
+                  GestureDetector(
+                    onTap: _togglePlay,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: 34, height: 34,
+                      decoration: BoxDecoration(
+                        gradient: _playing ? null : _saraUserInk,
+                        color: _playing ? AppColors.primary.withAlpha(40) : null,
+                        shape: BoxShape.circle),
+                      child: Icon(_playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                          color: _playing ? _saraAccent(context) : Colors.white, size: 20),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: List.generate(24, (i) {
+                        const barHeights = [0.3, 0.5, 0.7, 0.9, 1.0, 0.8, 0.6, 0.9, 1.0, 0.7, 0.5, 0.8,
+                                            1.0, 0.6, 0.4, 0.7, 0.9, 1.0, 0.8, 0.5, 0.7, 0.9, 0.6, 0.4];
+                        final barProgress = i / 24;
+                        final active = barProgress <= progress;
+                        return Container(
+                          width: 3, height: 16 * barHeights[i],
+                          margin: const EdgeInsets.symmetric(horizontal: 0.5),
+                          decoration: BoxDecoration(
+                            color: active ? _saraAccent(context) : _saraAccent(context).withAlpha(55),
+                            borderRadius: BorderRadius.circular(1.5),
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _playing ? _fmt(_position) : _fmt(_total),
+                    style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: _saraSub(context)),
                   ),
                 ],
               ),
-            ),
+              Text(DateFormat('HH:mm').format(widget.time), style: _saraStamp(context)),
+            ],
           ),
-        ],
-      ),
+        ),
       ),
     );
   }
@@ -4156,36 +4261,43 @@ class _ConfirmationCard extends ConsumerWidget {
     }
     final displayParams = Map<String, String>.fromEntries(saraDetailRows(resolved, arabic: !isEn));
 
+    final light = _saraLight(context);
+    final accent = riskLevel == RiskLevel.medium || riskLevel == RiskLevel.low ? _saraAccent(context) : riskColor;
     return Container(
-      margin: const EdgeInsets.only(top: 4),
+      margin: const EdgeInsets.only(top: 10, left: 34),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: _saraConfirmBg(context),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: riskColor.withOpacity(0.3), width: 1.5),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: riskColor.withAlpha(light ? 70 : 110), width: 1),
         boxShadow: [
-          BoxShadow(color: riskColor.withOpacity(0.1), blurRadius: 8, offset: Offset(0, 2)),
+          BoxShadow(color: riskColor.withAlpha(light ? 22 : 40), blurRadius: 18, offset: const Offset(0, 6)),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header
+          // Header: a risk-tinted band with an icon tile and the operation.
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
             decoration: BoxDecoration(
-              color: riskColor.withOpacity(0.12),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+              gradient: LinearGradient(colors: [riskColor.withAlpha(light ? 26 : 50), riskColor.withAlpha(light ? 8 : 18)]),
+              border: Border(bottom: BorderSide(color: riskColor.withAlpha(light ? 40 : 60), width: .7)),
             ),
             child: Row(
               children: [
-                Icon(_riskIcon(), color: riskColor, size: 20),
-                const SizedBox(width: 8),
+                Container(
+                  width: 30, height: 30,
+                  decoration: BoxDecoration(color: riskColor.withAlpha(light ? 30 : 60), borderRadius: BorderRadius.circular(9)),
+                  child: Icon(_riskIcon(), color: accent, size: 18),
+                ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     _toolDisplayName(context),
                     style: TextStyle(
-                      fontFamily: 'Cairo', fontSize: 14, fontWeight: FontWeight.bold,
-                      color: riskColor,
+                      fontFamily: 'Cairo', fontSize: 14, fontWeight: FontWeight.w800,
+                      color: _saraText(context),
                     ),
                   ),
                 ),
@@ -4258,7 +4370,7 @@ class _ConfirmationCard extends ConsumerWidget {
                       backgroundColor: riskColor,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       elevation: 0,
                     ),
                   ),
@@ -4272,8 +4384,9 @@ class _ConfirmationCard extends ConsumerWidget {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: _saraCardStrong(context),
                       side: BorderSide(color: _saraLine(context)),
+                      backgroundColor: _saraField(context),
                       padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
                 ),
@@ -4313,86 +4426,76 @@ class _AssistantBubble extends StatelessWidget {
     // RTL (Arabic), so user/Sara are never on the same side.
     final isRtl = Localizations.localeOf(context).languageCode == 'ar';
     final msgDir = isRtl ? ui.TextDirection.rtl : ui.TextDirection.ltr;
+    final light = _saraLight(context);
     // Message bubbles copy on press — quiet for the Information Clicker.
     return ClickerQuiet(
-      child: Padding(
-      padding: EdgeInsets.only(top: isGrouped ? 1 : 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        textDirection: ui.TextDirection.ltr,
-        children: [
-          Padding(
-            padding: const EdgeInsetsDirectional.only(end: 8),
-            child: GestureDetector(
-              onTap: onCopy,
-              child: _SaraAvatar(size: 32),
+      child: _SaraSideRow(
+        isGrouped: isGrouped,
+        onAvatarTap: onCopy,
+        child: GestureDetector(
+          onLongPress: onCopy,
+          // While Sara's words stream in, the bubble's edge warms to the
+          // brand tone with a faint halo; it eases back when done.
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 520),
+            curve: Curves.easeOutCubic,
+            key: anchorKey,
+            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
+            decoration: BoxDecoration(
+              color: _saraBubble(context),
+              border: Border.all(
+                  color: animate ? AppColors.primary.withAlpha(light ? 80 : 110) : _saraLine(context),
+                  width: animate ? 1 : .7),
+              borderRadius: _saraBubbleRadius(user: false, grouped: isGrouped),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withAlpha(light ? 9 : 40), blurRadius: 10, offset: const Offset(0, 3)),
+                BoxShadow(color: AppColors.primary.withAlpha(animate ? (light ? 28 : 44) : 0), blurRadius: 20, spreadRadius: animate ? .5 : 0),
+              ],
             ),
-          ),
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onLongPress: onCopy,
-                // While Sara's words stream in, the bubble wears a gentle
-                // glow edge in the brand tone; it eases back when done.
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 520),
-                  curve: Curves.easeOutCubic,
-                  key: anchorKey,
-                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                    decoration: BoxDecoration(
-                      color: _saraBubble(context),
-                      border: Border.all(
-                          color: animate
-                              ? AppColors.primary.withAlpha(_saraLight(context) ? 70 : 95)
-                              : _saraLine(context),
-                          width: animate ? 0.9 : 0.6),
-                      borderRadius: BorderRadius.only(
-                        topLeft: isGrouped ? const Radius.circular(8) : const Radius.circular(20),
-                        topRight: const Radius.circular(20),
-                        bottomLeft: const Radius.circular(6),
-                        bottomRight: const Radius.circular(20),
-                      ),
-                      boxShadow: [
-                        BoxShadow(color: Colors.black.withAlpha(_saraLight(context) ? 10 : 30), blurRadius: 16, offset: const Offset(0, 4)),
-                        BoxShadow(
-                            color: AppColors.primary.withAlpha(animate ? (_saraLight(context) ? 26 : 40) : 0),
-                            blurRadius: 22,
-                            spreadRadius: animate ? 0.5 : 0),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SaraWordReveal(text: text, animate: animate, direction: msgDir,
-                            onStart: onRevealStart, onProgress: onRevealProgress, onComplete: onRevealComplete,
-                            style: TextStyle(fontFamily: 'Cairo', fontSize: 14, color: _saraText(context), height: 1.8)),
+            child: ClipRRect(
+              borderRadius: _saraBubbleRadius(user: false, grouped: isGrouped),
+              child: Stack(children: [
+                // Sara's signature: a slim crimson ink line on the leading edge.
+                Positioned(left: 0, top: 0, bottom: 0, width: 2.5, child: DecoratedBox(decoration: BoxDecoration(
+                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                    colors: [AppColors.primary, AppColors.primary.withAlpha(animate ? 160 : 40)])))),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 13, 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SaraWordReveal(text: text, animate: animate, direction: msgDir,
+                          onStart: onRevealStart, onProgress: onRevealProgress, onComplete: onRevealComplete,
+                          style: TextStyle(fontFamily: 'Cairo', fontSize: 14.5, color: _saraText(context), height: 1.75)),
                         if (routeLink != null) ...[
                           const SizedBox(height: 10),
                           // A real link: names the screen it opens and goes
                           // straight to its route (with the record's id).
                           Semantics(button: true, link: true, child: InkWell(
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(12),
                             onTap: () => openSaraRoute(context, routeLink!),
                             child: Ink(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
                               decoration: BoxDecoration(
-                                gradient: LinearGradient(colors: [AppColors.primary.withAlpha(30), AppColors.primary.withAlpha(12)]),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: AppColors.primary.withAlpha(70)),
+                                color: _saraField(context),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: _saraAccent(context).withAlpha(light ? 55 : 80), width: .8),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.open_in_new_rounded, size: 14, color: AppColors.primary),
-                                  const SizedBox(width: 6),
+                                  Container(
+                                    width: 22, height: 22,
+                                    decoration: BoxDecoration(color: AppColors.primary.withAlpha(light ? 22 : 50), borderRadius: BorderRadius.circular(7)),
+                                    child: Icon(Icons.open_in_new_rounded, size: 13, color: _saraAccent(context)),
+                                  ),
+                                  const SizedBox(width: 8),
                                   Flexible(child: Text(saraRouteLinkLabel(routeLink!, arabic: isRtl) ?? l10n.translate('goToSection'),
                                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary))),
+                                      style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.w700, color: _saraAccent(context)))),
                                   const SizedBox(width: 4),
-                                  Icon(isRtl ? Icons.chevron_left_rounded : Icons.chevron_right_rounded, size: 16, color: AppColors.primary),
+                                  Icon(isRtl ? Icons.chevron_left_rounded : Icons.chevron_right_rounded, size: 16, color: _saraAccent(context)),
                                 ],
                               ),
                             ),
@@ -4409,14 +4512,14 @@ class _AssistantBubble extends StatelessWidget {
                                 onTap: () => onAction(a),
                                 builder: (active) => AnimatedContainer(
                                   duration: const Duration(milliseconds: 160),
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
                                   decoration: BoxDecoration(
-                                    color: AppColors.primary.withAlpha(active ? 38 : 22),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: AppColors.primary.withAlpha(active ? 110 : 60), width: 0.8),
+                                    color: active ? AppColors.primary.withAlpha(light ? 26 : 56) : _saraField(context),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: _saraAccent(context).withAlpha(active ? 120 : (light ? 55 : 80)), width: .8),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: AppColors.primary.withAlpha(active ? 40 : 0),
+                                        color: AppColors.primary.withAlpha(active ? 36 : 0),
                                         blurRadius: 12,
                                       ),
                                     ],
@@ -4424,9 +4527,9 @@ class _AssistantBubble extends StatelessWidget {
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(_actionIcon(a), size: 13, color: AppColors.primary),
+                                      Icon(_actionIcon(a), size: 13, color: _saraAccent(context)),
                                       const SizedBox(width: 5),
-                                      Text(label, style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.primary)),
+                                      Text(label, style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.w700, color: _saraAccent(context))),
                                     ],
                                   ),
                                 ),
@@ -4434,36 +4537,34 @@ class _AssistantBubble extends StatelessWidget {
                             }).toList(),
                           ),
                         ],
-                      ],
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 3, left: 4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(DateFormat('HH:mm').format(time), style: TextStyle(fontFamily: 'Cairo', fontSize: 10, color: _saraFaint(context))),
-                      const SizedBox(width: 6),
-                      GestureDetector(
-                        onTap: onCopy,
-                        child: Container(
-                          padding: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            color: _saraCard(context),
-                            borderRadius: BorderRadius.circular(4),
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        textDirection: ui.TextDirection.ltr,
+                        children: [
+                          Text(DateFormat('HH:mm').format(time), style: _saraStamp(context)),
+                          const SizedBox(width: 6),
+                          Semantics(
+                            button: true,
+                            label: l10n.translate('actionCopy'),
+                            child: InkResponse(
+                              onTap: onCopy,
+                              radius: 14,
+                              child: Padding(
+                                padding: const EdgeInsets.all(3),
+                                child: Icon(Icons.copy_rounded, size: 12, color: _saraFaint(context)),
+                              ),
+                            ),
                           ),
-                          child: Icon(Icons.copy_rounded, size: 10, color: _saraFaint(context)),
-                        ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-              ],
+              ]),
             ),
           ),
-        ],
-      ),
+        ),
       ),
     );
   }
@@ -4501,6 +4602,33 @@ class _AssistantBubble extends StatelessWidget {
   }
 }
 
+/// Sara's side of the conversation: her portrait once at the head of a
+/// group, the content next to it, and a free gutter on the far side so
+/// her messages never touch the user's column.
+class _SaraSideRow extends StatelessWidget {
+  final bool isGrouped;
+  final VoidCallback? onAvatarTap;
+  final Widget child;
+  const _SaraSideRow({required this.isGrouped, required this.child, this.onAvatarTap});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(top: isGrouped ? 2 : 10),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      textDirection: ui.TextDirection.ltr,
+      children: [
+        isGrouped
+            ? const SizedBox(width: 28)
+            : GestureDetector(onTap: onAvatarTap, child: const _SaraAvatar(size: 28)),
+        const SizedBox(width: 6),
+        Flexible(child: Align(alignment: Alignment.centerLeft, child: child)),
+        const SizedBox(width: 28),
+      ],
+    ),
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  TYPING INDICATOR
 // ═══════════════════════════════════════════════════════════════
@@ -4512,7 +4640,7 @@ class _TypingIndicator extends StatefulWidget {
 }
 
 class _TypingIndicatorState extends State<_TypingIndicator> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600));
+  late final AnimationController _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
 
   @override
   void didChangeDependencies() {
@@ -4528,51 +4656,47 @@ class _TypingIndicatorState extends State<_TypingIndicator> with SingleTickerPro
   @override
   Widget build(BuildContext context) {
     final light = _saraLight(context);
-    final base = light ? const Color(0xFFF0E6E9) : const Color(0xFF2A2B31);
-    // Gemini-like: soft lines of colour light sweep across while she thinks.
-    Widget line(double width, double delay) => AnimatedBuilder(
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    // Three ink dots ripple in turn while Sara works, next to a quiet
+    // label; a faint light sweeps the bubble edge with the same rhythm.
+    Widget dot(double delay) => AnimatedBuilder(
       animation: _ctrl,
       builder: (_, __) {
-        final t = ((_ctrl.value + delay) % 1.0) * 2.4 - 1.2;
-        return Container(
-          width: width, height: 9,
-          margin: const EdgeInsets.only(bottom: 7),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(6),
-            gradient: LinearGradient(
-              begin: Alignment(t - 1, 0), end: Alignment(t + 1, 0),
-              colors: [base, const Color(0xFFE05470).withAlpha(light ? 150 : 170), const Color(0xFFF2A65A).withAlpha(light ? 120 : 140),
-                const Color(0xFF7B5CD6).withAlpha(light ? 110 : 150), base],
-              stops: const [0, .35, .5, .65, 1],
+        final t = ((_ctrl.value - delay) % 1.0 + 1.0) % 1.0;
+        final wave = t < .45 ? sin(t / .45 * pi) : 0.0;
+        return Transform.translate(
+          offset: Offset(0, -3.2 * wave),
+          child: Container(
+            width: 6.5, height: 6.5,
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color.lerp(_saraFaint(context), _saraAccent(context), .25 + .75 * wave),
             ),
           ),
         );
       },
     );
-    return Padding(
-      padding: const EdgeInsets.only(top: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        textDirection: ui.TextDirection.ltr,
-        children: [
-          Padding(
-            padding: const EdgeInsetsDirectional.only(end: 8),
-            child: _SaraAvatar(size: 32),
-          ),
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 7),
-            decoration: BoxDecoration(
-              color: _saraBubble(context),
-              border: Border.all(color: _saraLine(context), width: 0.6),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [line(170, 0), line(128, .12), line(84, .24)],
-            ),
-          ),
-        ],
+    return _SaraSideRow(
+      isGrouped: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 9, 14, 9),
+        decoration: BoxDecoration(
+          color: _saraBubble(context),
+          border: Border.all(color: AppColors.primary.withAlpha(light ? 45 : 70), width: .8),
+          borderRadius: _saraBubbleRadius(user: false, grouped: false),
+          boxShadow: [BoxShadow(color: AppColors.primary.withAlpha(light ? 16 : 30), blurRadius: 16)],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          textDirection: ui.TextDirection.ltr,
+          children: [
+            dot(0), dot(.16), dot(.32),
+            const SizedBox(width: 8),
+            Text(arabic ? 'سارة تفكر…' : 'Sara is thinking…',
+                style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.w600, color: _saraSub(context))),
+          ],
+        ),
       ),
     );
   }
@@ -4592,43 +4716,58 @@ class _ErrorBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     // Message bubbles copy on press — quiet for the Information Clicker.
+    final light = _saraLight(context);
     return ClickerQuiet(
-      child: Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.danger.withAlpha(20),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.danger.withAlpha(40)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.error_outline, color: AppColors.danger, size: 16),
-                const SizedBox(width: 8),
-                Flexible(child: Text(text, style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, color: AppColors.danger))),
-              ],
-            ),
+      child: _SaraSideRow(
+        isGrouped: false,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+          decoration: BoxDecoration(
+            color: _saraBubble(context),
+            borderRadius: _saraBubbleRadius(user: false, grouped: false),
+            border: Border.all(color: AppColors.danger.withAlpha(light ? 60 : 90), width: .8),
           ),
-          const SizedBox(height: 6),
-          GestureDetector(
-            onTap: () => onRetry(query),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              decoration: BoxDecoration(
-                color: _saraCard(context),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _saraLine(context)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 24, height: 24,
+                    decoration: BoxDecoration(color: AppColors.danger.withAlpha(light ? 22 : 45), shape: BoxShape.circle),
+                    child: const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 15),
+                  ),
+                  const SizedBox(width: 9),
+                  Flexible(child: Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(text, style: TextStyle(fontFamily: 'Cairo', fontSize: 12.5, height: 1.5, color: _saraText(context))),
+                  )),
+                ],
               ),
-              child: Text(l10n.translate('retry'), style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: _saraSub(context))),
-            ),
+              const SizedBox(height: 6),
+              _SaraPressable(
+                onTap: () => onRetry(query),
+                builder: (active) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: active ? AppColors.primary.withAlpha(light ? 26 : 56) : _saraField(context),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _saraAccent(context).withAlpha(active ? 120 : (light ? 55 : 80)), width: .8),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.refresh_rounded, size: 14, color: _saraAccent(context)),
+                    const SizedBox(width: 5),
+                    Text(l10n.translate('retry'), style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.w700, color: _saraAccent(context))),
+                  ]),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
       ),
     );
   }

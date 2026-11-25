@@ -146,7 +146,7 @@ class BankReportPdfGenerator {
           _kpiVertDivider(subColor),
           _kpiItem(translations?['expensesLabel'] ?? 'المصروفات', nf.format(expense), _c(preset.dangerColor), reg, bold),
           _kpiVertDivider(subColor),
-          _kpiItem(translations?['net'] ?? 'الصافي', nf.format(net), netColor, reg, bold),
+          _kpiItem(translations?['net'] ?? 'الفرق', nf.format(net), netColor, reg, bold),
         ],
       ),
     );

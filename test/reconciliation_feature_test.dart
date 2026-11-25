@@ -96,7 +96,7 @@ void main() {
     await pumpFor(tester, const Duration(milliseconds: 120), 10);
     // No overflow exception + the three layout zones exist.
     expect(tester.takeException(), isNull);
-    expect(find.text('جاري المطابقة'), findsOneWidget);
+    expect(find.text('جاري الفحص'), findsOneWidget);
     expect(find.text('نراجع الأرقام ونقارنها بالواقع'), findsOneWidget);
     expect(find.byType(CustomPaint), findsWidgets);
   });
@@ -172,11 +172,11 @@ void main() {
       return out;
     }
 
-    expect(await msg(ReconEqualizeKind.bank), 'تمت مساواة البنك');
-    expect(await msg(ReconEqualizeKind.cash), 'تمت مساواة الكاش');
-    expect(await msg(ReconEqualizeKind.product), 'تمت مساواة هذا المنتج');
-    expect(await msg(ReconEqualizeKind.category), 'تمت مساواة هذا القسم');
-    expect(await msg(ReconEqualizeKind.store), 'تمت مساواة المخزون بالكامل');
+    expect(await msg(ReconEqualizeKind.bank), 'تم تصحيح البنك');
+    expect(await msg(ReconEqualizeKind.cash), 'تم تصحيح الكاش');
+    expect(await msg(ReconEqualizeKind.product), 'تم تصحيح هذا المنتج');
+    expect(await msg(ReconEqualizeKind.category), 'تم تصحيح هذا القسم');
+    expect(await msg(ReconEqualizeKind.store), 'تم تصحيح المخزون بالكامل');
   });
 
   testWidgets(
@@ -234,9 +234,9 @@ void main() {
       child: hostRouted(const ReconciliationHomePage()),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('مطابقة الحسابات البنكية والكاش'), findsOneWidget);
-    expect(find.text('مطابقة المخزون'), findsOneWidget);
-    expect(find.text('المطابقات السابقة'), findsOneWidget);
+    expect(find.text('فحص أرصدة البنوك والكاش'), findsOneWidget);
+    expect(find.text('جرد المخزون'), findsOneWidget);
+    expect(find.text('الفحوصات السابقة'), findsOneWidget);
     expect(find.byType(OutlinedButton), findsOneWidget);
   });
 
@@ -254,9 +254,9 @@ void main() {
       child: hostRouted(const ReconInventoryScopePage()),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('مطابقة منتج معين'), findsOneWidget);
-    expect(find.text('مطابقة تصنيف معين'), findsOneWidget);
-    expect(find.text('مطابقة المخزون بالكامل'), findsOneWidget);
+    expect(find.text('جرد منتج معين'), findsOneWidget);
+    expect(find.text('جرد تصنيف معين'), findsOneWidget);
+    expect(find.text('جرد المخزون بالكامل'), findsOneWidget);
     expect(find.text('اختار منتج واكتب كم عنده بالحقيقة'), findsOneWidget);
   });
 

@@ -245,7 +245,7 @@ void main() {
         final add = find.text('إضافة عميل جديد');
         await until(add);
         await tester.tap(add);
-        await until(find.text('قيمة الدين الافتتاحي'));
+        await until(find.text('قيمة الدين السابق'));
         final fields = find.descendant(
           of: find.byType(BottomSheet),
           matching: find.byType(EditableText),

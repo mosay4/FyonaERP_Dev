@@ -196,13 +196,13 @@ class AccountTreeReportPdfGenerator {
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
         children: [
-          _kpiItem(_tr(translations, 'totalAssets', 'إجمالي الأصول'), '${nf.format(assets)}$cur', txtColor, reg, bold),
+          _kpiItem(_tr(translations, 'totalAssets', 'إجمالي الممتلكات'), '${nf.format(assets)}$cur', txtColor, reg, bold),
           _kpiVertDivider(),
-          _kpiItem(_tr(translations, 'totalPayable', 'ديون مستحقة'), '${nf.format(payable)}$cur', _c(preset.dangerColor), reg, bold),
+          _kpiItem(_tr(translations, 'totalPayable', 'عليك للناس'), '${nf.format(payable)}$cur', _c(preset.dangerColor), reg, bold),
           _kpiVertDivider(),
-          _kpiItem(_tr(translations, 'totalReceivable', 'ديون لي'), '${nf.format(receivable)}$cur', _c(preset.successColor), reg, bold),
+          _kpiItem(_tr(translations, 'totalReceivable', 'لك عند الناس'), '${nf.format(receivable)}$cur', _c(preset.successColor), reg, bold),
           _kpiVertDivider(),
-          _kpiItem(_tr(translations, 'netWorth', 'صافي الثروة'), '${nf.format(net)}$cur', netColor, reg, bold),
+          _kpiItem(_tr(translations, 'netWorth', 'ثروتك الفعلية'), '${nf.format(net)}$cur', netColor, reg, bold),
         ],
       ),
     );

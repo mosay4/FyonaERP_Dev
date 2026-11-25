@@ -123,7 +123,7 @@ class BankDetailReportPdf {
         ? tr('allCurrencies')
         : (bundle.sections.isEmpty
             ? ''
-            : '${curName(bundle.sections.first.currency)} (${currencyShort(bundle.sections.first.currency)})');
+            : curName(bundle.sections.first.currency));
 
     final doc = pw.Document(title: '$title — ${bundle.bankName}');
     final textDir = rtl ? pw.TextDirection.rtl : pw.TextDirection.ltr;

@@ -160,9 +160,9 @@ class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
         final message = error is BusinessBackupRejected
             ? switch (error.problem) {
                 BusinessBackupProblem.invalidArchive =>
-                  'رمز الاستعادة أو النسخة غير صالح لهذا الدفتر',
+                  'رمز الاستعادة أو النسخة غير صالح لهذه السجلات',
                 BusinessBackupProblem.notEmpty =>
-                  'الدفتر غير فارغ؛ لم تُستبدل أو تُدمج أي سجلات',
+                  'السجلات غير فارغة؛ لم تُستبدل أو تُدمج أي سجلات',
                 BusinessBackupProblem.tooLarge =>
                   'النسخة تتجاوز الحد المسموح لهذه التجربة',
                 BusinessBackupProblem.nothingToBackUp =>
@@ -228,8 +228,8 @@ class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
       outcome.alreadyRestored
           ? 'هذه النسخة مستعادة بالفعل؛ لم تُكرّر السجلات'
           : outcome.hasSharedHistory
-          ? 'تمت الاستعادة؛ العمليات المشتركة تحتاج مطابقة قبل مزامنتها'
-          : 'تمت استعادة الدفتر المحلي',
+          ? 'تمت الاستعادة؛ العمليات المشتركة تحتاج فحصاً قبل مزامنتها'
+          : 'تمت استعادة السجلات المحلية',
       success: true,
     );
     if (!outcome.alreadyRestored)
@@ -321,8 +321,8 @@ class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
         children: [
           Text(
             local
-                ? 'نسخة مشفّرة من دفتر هذا الفرع على الجهاز. لا تشمل تسجيل الدخول أو الشخصي. '
-                      'الاستعادة إلى دفتر فارغ فقط، ولا تُشغّل المزامنة أو تنقل التفويض إلى جهاز جديد.'
+                ? 'نسخة مشفّرة من سجلات هذا الفرع على الجهاز. لا تشمل تسجيل الدخول أو الشخصي. '
+                      'الاستعادة إلى سجلات فارغة فقط، ولا تُشغّل المزامنة أو تنقل التفويض إلى جهاز جديد.'
                 : 'نسخ بيانات المتجر والفروع المسموحة لك: الفواتير والحسابات والمخزون وإعدادات المشروع. '
                       'حسابات الدخول وملفات الموظفين لا تدخل في هذه النسخة. الاستعادة ترجع البيانات المحفوظة، وترفض الدمج عند وجود سجلات مالية أو مخزنية أحدث لحماية الأرصدة.',
             style: const TextStyle(fontFamily: 'Cairo', fontSize: 12),
@@ -433,7 +433,7 @@ class _BusinessRecoveryCodeDialogState
   @override
   Widget build(BuildContext context) => AlertDialog(
     scrollable: true,
-    title: const Text('استعادة الدفتر'),
+    title: const Text('استعادة السجلات'),
     content: Column(
       mainAxisSize: MainAxisSize.min,
       children: [

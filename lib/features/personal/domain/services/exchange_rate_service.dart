@@ -162,15 +162,8 @@ class ExchangeRateService {
     'IQD': 'دينار عراقي',
   };
 
-  static String currencySymbol(String code) {
-    const symbols = {
-      'SAR': 'ر.س', 'USD': r'$', 'YER': 'ر.ي', 'YER_OLD': 'ر.ي', 'YER_NEW': 'ر.ي',
-      'EUR': '€', 'GBP': '£', 'AED': 'د.إ', 'EGP': 'ج.م',
-      'KWD': 'د.ك', 'BHD': 'د.ب', 'QAR': 'ر.ق', 'OMR': 'ر.ع',
-      'JOD': 'د.أ', 'LBP': 'ل.ل', 'SYP': 'ل.س', 'IQD': 'د.ع',
-    };
-    return symbols[code] ?? code;
-  }
+  /// Same display everywhere: Arabic name in Arabic, the code in English.
+  static String currencySymbol(String code) => fmt.currencySymbol(code);
 
   /// Display name / symbol following the current app locale.
   /// (The maps above stay as Arabic reference data.)

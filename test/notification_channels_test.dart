@@ -76,7 +76,7 @@ void main() {
       final d = NotificationChannels.subscription.iosDetails();
       expect(d.sound, 'sound_1.mp3');
       expect(
-          NotificationChannels.recurring.iosDetails().sound, 'sound_2.mp3');
+          NotificationChannels.recurring.iosDetails().sound, 'sound_2.wav');
     });
   });
 }

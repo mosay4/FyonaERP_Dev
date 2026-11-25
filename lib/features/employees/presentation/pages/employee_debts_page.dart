@@ -174,7 +174,7 @@ class _EmployeeDebtsPageState extends ConsumerState<EmployeeDebtsPage> {
           if (d['cash_effect'] == 'none')
             const ReceiptDetail(
               label: 'حركة الرصيد',
-              value: 'قيد دين فقط — لم يتم إيداع أو سحب مبلغ',
+              value: 'تسجيل دين فقط — لم يتم إيداع أو سحب مبلغ',
             ),
           ReceiptDetail(
             label: 'نوع الدين',

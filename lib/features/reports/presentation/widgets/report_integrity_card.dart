@@ -133,15 +133,15 @@ class ReportIntegrityCard extends StatelessWidget {
                   ? l10n.translate('repSelectDeviceBranch')
                   : localMissing
                   ? (ar
-                        ? 'هذا التقرير لم يُنقل إلى دفتر الجهاز لهذا الفرع بعد. لن نعرض أرقام الدفتر القديم على أنها أرقام الفرع.'
-                        : 'This report is not available from the device ledger yet. Older server figures are not shown for this branch.')
+                        ? 'هذا التقرير لم يُنقل إلى سجلات الجهاز لهذا الفرع بعد. لن نعرض الأرقام القديمة على أنها أرقام الفرع.'
+                        : 'This report is not available from this device\'s records yet. Older server figures are not shown for this branch.')
                   : missing.isEmpty
                   ? (ar
                         ? 'تحقق من الاتصال ثم أعد المحاولة.'
                         : 'Check the connection and retry.')
                   : (ar
                         ? 'القيم الأصلية محفوظة. يلزم سعر صرف موثّق لتواريخ العمليات أدناه. لن نعرض إجمالياً ناقصاً أو نستخدم سعر اليوم لعملية تاريخية. اطلب من الإدارة توثيق السعر التاريخي المعتمد ثم أعد المحاولة.'
-                        : 'Original amounts are preserved. Documented rates are required for the dates below. No partial total or present-day rate will replace historical valuation. Ask administration to document the approved historical rate, then retry.'),
+                        : 'Original amounts are kept. Saved exchange rates are needed for the dates below. We won\'t show a partial total or use today\'s rate for an old transaction. Ask the admin to save the approved rate for those dates, then retry.'),
               style: TextStyle(
                 fontFamily: 'Cairo',
                 fontSize: 12,

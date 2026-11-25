@@ -9,7 +9,7 @@ import 'package:go_router/go_router.dart';
 ///
 /// - absolute routes (incl. query params) pass through untouched
 /// - slash-less payloads are repaired, ids are never dropped
-/// - unknown payloads are a safe no-op (null)
+/// - unknown named payloads open the notification inbox
 void main() {
   group('pending navigation readiness', () {
     late GoRouter router;
@@ -82,7 +82,7 @@ void main() {
           isFalse,
         );
       }
-      expect(NotificationRouter.navigate(context, 'unknown-payload'), isFalse);
+      expect(NotificationRouter.navigate(context, ''), isFalse);
       await tester.pumpAndSettle();
 
       expect(router.routeInformationProvider.value.uri.path, '/splash');
@@ -201,8 +201,8 @@ void main() {
   });
 
   group('resolveRoute unknown safe', () {
-    test('unknown payload is null', () {
-      expect(NotificationRouter.resolveRoute('foobar'), isNull);
+    test('unknown named payload opens the inbox (never a dead tap)', () {
+      expect(NotificationRouter.resolveRoute('foobar'), '/notifications');
     });
 
     test('empty / blank payload is null', () {
@@ -211,8 +211,8 @@ void main() {
     });
 
     test('lookalike prefixes do not match', () {
-      expect(NotificationRouter.resolveRoute('sara_extra'), isNull);
-      expect(NotificationRouter.resolveRoute('homely'), isNull);
+      expect(NotificationRouter.resolveRoute('sara_extra'), '/notifications');
+      expect(NotificationRouter.resolveRoute('homely'), '/notifications');
     });
   });
 }

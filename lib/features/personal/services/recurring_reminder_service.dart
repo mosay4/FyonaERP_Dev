@@ -75,7 +75,7 @@ class RecurringReminderService {
         presentAlert: true,
         presentBadge: true,
         presentSound: true,
-        sound: 'sound_2.mp3',
+        sound: 'sound_2.wav',
       ),
     );
   }

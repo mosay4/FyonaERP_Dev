@@ -13,7 +13,7 @@ class EmployeeApi {
       return 'ما عندك صلاحية لهذي العملية الآن';
     }
     if (e is BusinessCashEqualizationPending) {
-      return 'في طلب تسوية معلّق؛ انتظر قراره أول';
+      return 'في طلب تصحيح معلّق؛ انتظر قراره أول';
     }
     if (e is BusinessLedgerError) {
       return switch (e.problem) {
@@ -21,7 +21,7 @@ class EmployeeApi {
         BusinessLedgerProblem.insufficientBalance => 'الرصيد في الحساب ما يكفي',
         BusinessLedgerProblem.currencyMismatch => 'اختر حساب بنفس عملة العملية',
         BusinessLedgerProblem.sharedCashRequiresArbitration =>
-          'هذا الحساب المشترك ما يتحرك إلا عن طريق التسوية المشتركة',
+          'هذا الحساب المشترك ما يتحرك إلا بموافقة الطرفين',
         BusinessLedgerProblem.invalidEmployee =>
           'بيانات الموظف أو العملية غير مكتملة',
         _ => 'تعذر تنفيذ العملية',

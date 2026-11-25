@@ -76,7 +76,7 @@ class NotificationChannelSpec {
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
-      sound: '$sound.mp3',
+      sound: sound == ChannelSound.sound2 ? '$sound.wav' : '$sound.mp3',
     );
   }
 }

@@ -295,7 +295,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('اختر العملة'));
       await tester.pumpAndSettle();
-      await tester.tap(find.textContaining('USD').first);
+      await tester.tap(find.textContaining('دولار أمريكي').first);
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, '100');
       await tester.enterText(

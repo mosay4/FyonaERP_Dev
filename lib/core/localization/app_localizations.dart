@@ -81,6 +81,12 @@ class AppLocalizations {
   /// Current application language code ('ar' | 'en').
   static String get currentLanguage => _staticLang;
 
+  /// Read-only view of a preloaded ARB table (null when not loaded yet).
+  /// Used by the Information Clicker to map a visible label back to its
+  /// key, so help survives wording changes in the .arb files.
+  static Map<String, dynamic>? cachedTable(String languageCode) =>
+      _stringCache[languageCode];
+
   /// Keeps the static lookup below in sync with the app language.
   /// Called from [LocaleNotifier] on every change (see locale_provider.dart).
   static void setStaticLanguage(String languageCode) {

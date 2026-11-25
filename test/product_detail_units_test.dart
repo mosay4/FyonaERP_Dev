@@ -178,11 +178,11 @@ void main() {
     await pump(tester, extra: true);
     expect(find.text('أسعار البيع'), findsNothing);
     // Base unit: its own sale and purchase price with the currency.
-    expect(find.text('30 USD'), findsOneWidget);
-    expect(find.text('10 USD'), findsOneWidget);
+    expect(find.text('30 دولار أمريكي'), findsOneWidget);
+    expect(find.text('10 دولار أمريكي'), findsOneWidget);
     // Extra unit «باكيت»: its own prices, in the product currency.
-    expect(find.text('200 USD'), findsOneWidget);
-    expect(find.text('80 USD'), findsOneWidget);
+    expect(find.text('200 دولار أمريكي'), findsOneWidget);
+    expect(find.text('80 دولار أمريكي'), findsOneWidget);
     expect(find.text('سعر البيع'), findsNWidgets(2));
   });
 }

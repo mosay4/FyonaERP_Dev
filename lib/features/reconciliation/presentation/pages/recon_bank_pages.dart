@@ -22,6 +22,7 @@ import '../../data/reconciliation_api.dart';
 import '../recon_report_pdf_layout.dart';
 import '../widgets/recon_motion.dart';
 import '../widgets/recon_results.dart';
+import '../widgets/recon_scenes.dart';
 import '../widgets/recon_widgets.dart';
 
 /// ─────────────────────────────────────────────────────────────────────────
@@ -94,7 +95,11 @@ class _ReconAccountsPageState extends ConsumerState<ReconAccountsPage> {
         !(_source.isDeviceLedger || current.isDeviceLedger) ||
         (identical(current, _source) &&
             ref.watch(localBankReconciliationAllowedProvider));
-    return Scaffold(
+    // Opening motion (ledger balance) while the accounts load underneath.
+    return ReconOpeningGate(
+      scene: ReconOpenScene.financial,
+      ready: !allowed || !_loading,
+      child: Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
@@ -154,6 +159,7 @@ class _ReconAccountsPageState extends ConsumerState<ReconAccountsPage> {
                 ],
               ),
       ),
+    ),
     );
   }
 }

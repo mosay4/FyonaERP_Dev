@@ -20,7 +20,7 @@ import 'package:fyona_flutter/features/sales/presentation/widgets/sale_customer_
 /// 1. The «بحث وتحديد منتجات» picker offers «بدون تصنيف» / «مع التصنيف»
 ///    when the categories feature is ON, and keeps the selection and
 ///    quantities while switching views.
-/// 2. The «مديونية سابقة» chips show the device-ledger amount (the
+/// 2. The «دين سابق» chips show the device-ledger amount (the
 ///    projection answers `total`, the chips used to read `debt` → «—»).
 void main() {
   Map<String, dynamic> product(String id, String name) => {
@@ -167,7 +167,7 @@ void main() {
     expect(byId, {'p-loose': 1, 'p-drink': 2});
   });
 
-  // ── «مديونية سابقة» ──
+  // ── «دين سابق» ──
   Map<String, dynamic> ledgerBalance() {
     // Exactly what LocalCommerceBridge.partyBalance answers on the device.
     final projection = BusinessDebtProjection([
@@ -219,7 +219,7 @@ void main() {
       child: app(const Scaffold(body: SaleCustomerSection())),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('مديونية سابقة'), findsOneWidget);
+    expect(find.text('دين سابق'), findsOneWidget);
     expect(find.text('13,500'), findsOneWidget);
     expect(find.text('2,000.5'), findsOneWidget);
     expect(find.text('—'), findsNothing);

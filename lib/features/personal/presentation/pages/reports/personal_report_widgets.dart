@@ -115,7 +115,7 @@ class _CurrencySheetState extends State<_CurrencySheet> {
           child: Center(
             child: Text(
               flag.isEmpty ? '¤' : flag,
-              style: const TextStyle(fontSize: 20),
+              style: const TextStyle(fontSize: 16),
             ),
           ),
         ),
@@ -288,8 +288,8 @@ class PrKpi extends StatelessWidget {
     final lang = AppLocalizations.of(context).locale.languageCode;
     final style = TextStyle(
       fontFamily: 'Cairo',
-      fontSize: 18,
-      fontWeight: FontWeight.w900,
+      fontSize: 16.5,
+      fontWeight: FontWeight.w800,
       color: color,
     );
     return PrCard(
@@ -1002,7 +1002,7 @@ class PrCurrencyChip extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (flag.isNotEmpty)
-                      Text(flag, style: const TextStyle(fontSize: 13))
+                      Text(flag, style: const TextStyle(fontSize: 11.5))
                     else
                       const Icon(
                         Icons.currency_exchange_rounded,

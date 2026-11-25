@@ -68,7 +68,7 @@ class TemplateRegistry {
       cardOrder: ['header', 'info', 'items', 'totals', 'notes', 'footer'],
     ));
     register(DocumentType.paymentNote, const TemplatePreset(
-      name: 'إشعار دائن/مدين', description: 'قالب الإشعار',
+      name: 'إشعار دفع', description: 'قالب الإشعار',
       documentType: DocumentType.paymentNote, layout: LayoutPreset.classic,
       colors: ThemeColorsConfig(primary: Color(0xFFA01530), amountText: Color(0xFFA01530), tableHeader: Color(0xFFA01530)),
       typography: TypographyConfig(),

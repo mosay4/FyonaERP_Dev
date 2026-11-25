@@ -199,18 +199,18 @@ void main() {
 
     test('status wording is honest per record state', () {
       // pure logic mirrored from the builder (subset-font streams can't be
-      // text-grepped): approved → تمت المساواة; checked+diff → لم تُنفَّذ.
+      // text-grepped): approved → تم التصحيح; checked+diff → لم تُنفَّذ.
       String statusLine(Map rec) {
         final hasDiff = (rec['lines'] as List).any((l) =>
             (((l['diff'] ?? 0) as num?) ?? 0).toDouble().abs() > 1e-9);
         return '${rec['status']}' == 'approved'
-            ? 'تمت المساواة'
+            ? 'تم التصحيح'
             : hasDiff
-                ? 'لم تُنفَّذ المساواة بعد'
+                ? 'لم يُنفَّذ التصحيح بعد'
                 : 'لا يوجد أي اختلاف — كل شيء مطابق';
       }
-      expect(statusLine({...bankRecord(), 'status': 'checked'}), 'لم تُنفَّذ المساواة بعد');
-      expect(statusLine({...bankRecord(), 'status': 'approved'}), 'تمت المساواة');
+      expect(statusLine({...bankRecord(), 'status': 'checked'}), 'لم يُنفَّذ التصحيح بعد');
+      expect(statusLine({...bankRecord(), 'status': 'approved'}), 'تم التصحيح');
     });
 
     test('account-type wording: توفير/جاري', () {

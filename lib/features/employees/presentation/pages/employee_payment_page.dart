@@ -784,7 +784,7 @@ class _EmployeePaymentPageState extends ConsumerState<EmployeePaymentPage> {
                   style: const TextStyle(fontSize: 22),
                 ),
                 title: Text(
-                  currencyLabel(a.currency, locale: 'ar'),
+                  currencyLabel(a.currency),
                   style: const TextStyle(
                     fontFamily: 'Cairo',
                     fontWeight: FontWeight.w700,
@@ -839,7 +839,7 @@ class _EmployeePaymentPageState extends ConsumerState<EmployeePaymentPage> {
                   style: const TextStyle(fontSize: 22),
                 ),
                 title: Text(
-                  currencyLabel(a.currency, locale: 'ar'),
+                  currencyLabel(a.currency),
                   style: const TextStyle(
                     fontFamily: 'Cairo',
                     fontWeight: FontWeight.w700,

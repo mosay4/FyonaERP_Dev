@@ -21,7 +21,7 @@ void main() {
       'falcon': ('صقر', 'Saqr'),
       'transactions': ('العمليات', 'Transactions'),
       'income': ('إضافة دخل', 'Add income'),
-      'expenses': ('سحب مصروف', 'Withdraw expense'),
+      'expenses': ('سحب مصروف', 'Add expense'),
       'returns': ('المرتجعات', 'Returns'),
     };
     for (final entry in labels.entries) {

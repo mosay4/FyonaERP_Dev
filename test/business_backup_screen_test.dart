@@ -386,7 +386,7 @@ void main() {
       files.pendingPicker!.complete(Stream.value(files.exported!));
       files.pendingPicker = null;
       await tester.pumpAndSettle();
-      expect(find.text('تمت استعادة الدفتر المحلي'), findsNothing);
+      expect(find.text('تمت استعادة السجلات المحلية'), findsNothing);
       await tester.runAsync(() async {
         expect(
           await second.withLedger(
@@ -398,7 +398,7 @@ void main() {
         );
       });
       await enter(code);
-      await see(find.text('تمت استعادة الدفتر المحلي'));
+      await see(find.text('تمت استعادة السجلات المحلية'));
       expect(files.picked, 2);
       await tester.runAsync(() async {
         await second.close();

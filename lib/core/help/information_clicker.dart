@@ -2,14 +2,15 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../router/app_router.dart';
 import '../../shared/providers/locale_provider.dart';
+import 'catalog/help_catalog.dart';
+import 'catalog/help_registry.dart';
 import 'help_clicker_settings.dart';
-import 'help_allowlist.dart';
-import 'help_content.dart';
-import 'help_explain.dart';
+import 'help_detector.dart';
+
+export 'help_target.dart' show HelpTarget;
 
 const _kRed = Color(0xFFE63946);
 const _kRedDeep = Color(0xFFA01530);
@@ -21,8 +22,6 @@ const _kCard = Color(0xFF0C0C0E);
 /// belongs to a native action (copy, receipt, delete…) in [ClickerQuiet]:
 /// the overlay then stays completely silent there — no progress border, no
 /// explanation card — while the widget's own gestures keep working untouched.
-const _kClickerQuietTag = 'fyona.clicker.quiet.v1';
-
 class ClickerQuiet extends StatelessWidget {
   final Widget child;
   const ClickerQuiet({super.key, required this.child});
@@ -30,7 +29,7 @@ class ClickerQuiet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MetaData(
-      metaData: _kClickerQuietTag,
+      metaData: kClickerQuietTag,
       // Opaque (not deferToChild) so this box always joins the hit-test
       // path and the overlay can see the marker. It owns no gesture
       // recognizer, so taps, drags and scrolls pass through unchanged.
@@ -40,6 +39,17 @@ class ClickerQuiet extends StatelessWidget {
   }
 }
 
+/// Arena member that wins only after the full hold duration.
+///
+/// * Quick taps: it rejects itself on pointer-up, so the button's own tap
+///   fires normally.
+/// * Drags/scrolls: it gives up as soon as the finger travels past the touch
+///   slop.
+/// * Native long presses: the press is probed first and stays quiet there,
+///   so the element's own long press is never contested.
+/// * Tooltips: a tooltip's long press wins the arena after ~0.5s but only
+///   shows a bubble; [survivesRejection] lets the hold keep counting so
+///   icon buttons with a tooltip still get their help.
 class _ClickerRecognizer extends OneSequenceGestureRecognizer {
   _ClickerRecognizer();
 
@@ -47,10 +57,11 @@ class _ClickerRecognizer extends OneSequenceGestureRecognizer {
   void Function(Offset position)? onTrigger;
   void Function(Offset position)? onPressStart;
   VoidCallback? onPressEnd;
+  bool Function()? survivesRejection;
 
   Timer? _timer;
   Offset? _downPosition;
-  bool _tracking = false;
+  int? _pointer;
   bool _resolved = false;
 
   @override
@@ -59,22 +70,33 @@ class _ClickerRecognizer extends OneSequenceGestureRecognizer {
   @override
   void didStopTrackingLastPointer(int pointer) {}
 
-  void _settleAccepted() {
+  void _settle(GestureDisposition d) {
     if (_resolved) return;
     _resolved = true;
-    resolve(GestureDisposition.accepted);
+    resolve(d);
   }
 
-  void _settleRejected() {
-    if (_resolved) return;
-    _resolved = true;
-    resolve(GestureDisposition.rejected);
+  void _finish() {
+    _timer?.cancel();
+    _timer = null;
+    final p = _pointer;
+    _pointer = null;
+    _downPosition = null;
+    if (p != null) stopTrackingPointer(p);
+    try {
+      onPressEnd?.call();
+    } catch (_) {}
+  }
+
+  void _cancel() {
+    _settle(GestureDisposition.rejected);
+    _finish();
   }
 
   @override
   void addAllowedPointer(PointerDownEvent event) {
-    if (_tracking) return;
-    _tracking = true;
+    if (_pointer != null) return;
+    _pointer = event.pointer;
     _resolved = false;
     _downPosition = event.position;
     super.addAllowedPointer(event);
@@ -84,50 +106,38 @@ class _ClickerRecognizer extends OneSequenceGestureRecognizer {
     _timer?.cancel();
     final duration = getDuration?.call() ?? const Duration(seconds: 2);
     _timer = Timer(duration, () {
-      if (_resolved) return;
-      _settleAccepted();
-      try {
-        onPressEnd?.call();
-      } catch (_) {}
+      _timer = null;
       final pos = _downPosition;
-      if (pos != null) onTrigger?.call(pos);
+      if (_pointer == null || pos == null) return;
+      // Winning here rejects the element's tap: releasing after the card
+      // opens never also presses the button.
+      _settle(GestureDisposition.accepted);
+      _finish();
+      onTrigger?.call(pos);
     });
   }
 
   @override
   void handleEvent(PointerEvent event) {
+    if (event.pointer != _pointer) return;
     if (event is PointerMoveEvent) {
       final down = _downPosition;
-      if (down != null && (event.position - down).distance > 24) {
-        _timer?.cancel();
-        _timer = null;
-        _tracking = false;
-        try {
-          onPressEnd?.call();
-        } catch (_) {}
-        _settleRejected();
+      if (down != null && (event.position - down).distance > kTouchSlop) {
+        _cancel();
       }
     } else if (event is PointerUpEvent || event is PointerCancelEvent) {
-      _timer?.cancel();
-      _timer = null;
-      _settleRejected();
-      _tracking = false;
-      try {
-        onPressEnd?.call();
-      } catch (_) {}
+      _cancel();
     }
   }
 
   @override
   void rejectGesture(int pointer) {
     _resolved = true;
-    _timer?.cancel();
-    _timer = null;
-    _tracking = false;
-    try {
-      onPressEnd?.call();
-    } catch (_) {}
-    super.rejectGesture(pointer);
+    if (_timer != null && (survivesRejection?.call() ?? false)) {
+      // Keep tracking moves/ups through the pointer route.
+      return;
+    }
+    _finish();
   }
 
   @override
@@ -140,9 +150,32 @@ class _ClickerRecognizer extends OneSequenceGestureRecognizer {
   }
 }
 
+/// A press the clicker can explain: where it is and what to say.
+class _Decision {
+  final HelpProbe probe;
+  final HelpMatch match;
+  const _Decision(this.probe, this.match);
+}
+
 class InformationClickerOverlay extends ConsumerStatefulWidget {
   final Widget child;
-  const InformationClickerOverlay({super.key, required this.child});
+
+  /// Catalog override (tests). Defaults to the app catalog.
+  final HelpCatalog? catalog;
+
+  /// Route override (tests). Defaults to the router's current location.
+  final String Function()? routeOf;
+
+  /// Language override (tests). Defaults to the app locale.
+  final bool Function()? arabicOf;
+
+  const InformationClickerOverlay({
+    super.key,
+    required this.child,
+    this.catalog,
+    this.routeOf,
+    this.arabicOf,
+  });
 
   @override
   ConsumerState<InformationClickerOverlay> createState() =>
@@ -153,6 +186,16 @@ class _InformationClickerOverlayState
     extends ConsumerState<InformationClickerOverlay> {
   final GlobalKey<OverlayState> _overlayKey = GlobalKey<OverlayState>();
   OverlayEntry? _entry;
+  OverlayEntry? _progressEntry;
+  Timer? _progressDelay;
+  _Decision? _pending;
+
+  /// How long the finger may rest on the screen before the progress border
+  /// starts drawing. A normal tap releases well before this, so quick taps
+  /// never flash a border around whatever they touched.
+  static const Duration _pressGrace = Duration(milliseconds: 350);
+
+  HelpCatalog get _catalog => widget.catalog ?? HelpRegistry.catalog;
 
   @override
   void dispose() {
@@ -163,15 +206,9 @@ class _InformationClickerOverlayState
     super.dispose();
   }
 
-  OverlayEntry? _progressEntry;
-  Timer? _progressDelay;
-
-  /// How long the finger may rest on the screen before the progress border
-  /// starts drawing. A normal tap releases well before this, so quick taps no
-  /// longer flash a red border around whatever they touched.
-  static const Duration _pressGrace = Duration(milliseconds: 350);
-
   String _currentRoute() {
+    final custom = widget.routeOf;
+    if (custom != null) return custom();
     try {
       return ref.read(goRouterProvider).state.uri.toString();
     } catch (_) {
@@ -180,6 +217,8 @@ class _InformationClickerOverlayState
   }
 
   bool _isArabic() {
+    final custom = widget.arabicOf;
+    if (custom != null) return custom();
     try {
       return ref.read(localeProvider).languageCode != 'en';
     } catch (_) {
@@ -191,64 +230,46 @@ class _InformationClickerOverlayState
     }
   }
 
-  /// Decides whether a press may show anything, and WHICH label explains it.
-  /// Returns null when the press must stay completely quiet. When the press
-  /// lands on a big section card with no curated label of its own, the
-  /// effective label is forced to '' so the card renders the section's
-  /// curated content — never the raw record text.
-  ({bool allow, String label, Rect? rect})? _decide(Offset anchor) {
+  /// Finds the element under [anchor] and its curated help. Null means the
+  /// press must stay completely quiet (background, user data, text fields,
+  /// elements with their own long press, or no curated help).
+  _Decision? _decide(Offset anchor) {
     if (!mounted) return null;
     final view = View.of(context);
-    // Quiet zones (transaction rows, chat bubbles…) opt out entirely:
-    // their long-press belongs to a native action, never to the clicker.
-    if (_isQuietAt(anchor, view.viewId)) return null;
-    if (_isEditableAt(anchor, view.viewId)) return null;
-    final route = _currentRoute();
-    final arabic = _isArabic();
-    final resolved = _resolveTarget(anchor, view.viewId, arabic);
-    if (HelpAllowlist.allows(
-        route: route, label: resolved.label, arabic: arabic)) {
-      return (
-        allow: true,
-        label: resolved.label,
-        rect: resolved.rect,
-      );
-    }
-    final fallbackRect =
-        resolved.rect ?? _targetRectAt(anchor, view.viewId);
-    if (HelpAllowlist.allowsSectionCard(
-        route: route, rect: fallbackRect)) {
-      return (allow: true, label: '', rect: fallbackRect);
-    }
-    return null;
+    final size = MediaQuery.sizeOf(context);
+    final found =
+        HelpDetector.probeAt(anchor, viewId: view.viewId, screen: size);
+    final probe = found.probe;
+    if (probe == null) return null;
+    final match = _catalog.resolve(probe,
+        route: _currentRoute(), arabic: _isArabic());
+    if (match == null) return null;
+    return _Decision(probe, match);
   }
 
   void _showProgress(Offset anchor) {
+    _pending = null;
     if (!mounted || _entry != null || _progressEntry != null) return;
     if (_progressDelay != null) return;
     final settings = ref.read(helpClickerProvider);
     if (!settings.enabled) return;
     final decision = _decide(anchor);
     if (decision == null) return;
-    final view = View.of(context);
-    final rect = decision.rect ??
-        _targetRectAt(anchor, view.viewId) ??
-        Rect.fromCenter(center: anchor, width: 76, height: 76);
+    _pending = decision;
     final total = settings.seconds * 1000;
     // Elapsed-time progress: the controller runs on the FULL press duration
     // and starts at the fraction already spent inside the grace window, so
-    // the border completes at exactly the same instant the trigger fires —
-    // one shared time source, no Future/Timer drift between them.
-    final startAt =
-        (_pressGrace.inMilliseconds / total).clamp(0.0, 1.0);
+    // the border completes at exactly the same instant the trigger fires.
+    final startAt = (_pressGrace.inMilliseconds / total).clamp(0.0, 1.0);
     _progressDelay = Timer(_pressGrace, () {
       _progressDelay = null;
       if (!mounted || _entry != null || _progressEntry != null) return;
+      if (!identical(_pending, decision)) return;
       final entry = OverlayEntry(
         builder: (_) => Positioned.fill(
           child: IgnorePointer(
             child: _ProgressBorder(
-              target: rect,
+              target: decision.probe.liveRect,
               duration: Duration(milliseconds: total),
               startAt: startAt,
             ),
@@ -271,30 +292,33 @@ class _InformationClickerOverlayState
   }
 
   void _showAt(Offset anchor) {
-    if (_entry != null) return;
-    if (!mounted) return;
+    if (_entry != null || !mounted) return;
     final settings = ref.read(helpClickerProvider);
-    if (!settings.enabled) {
-      _hideProgress();
-      return;
-    }
-    final route = _currentRoute();
-    final arabic = _isArabic();
-    final decision = _decide(anchor);
-    if (decision == null) {
-      _hideProgress();
-      return;
-    }
-    final info = HelpExplain.resolve(
-        route: route, label: decision.label, arabic: arabic);
-    final media = MediaQuery.of(context);
+    final pending = _pending;
+    _pending = null;
     _hideProgress();
+    if (!settings.enabled || pending == null) return;
+    // Re-probe at trigger time: the screen may have changed during the hold.
+    final decision = _decide(anchor);
+    if (decision == null ||
+        decision.match.entry.id != pending.match.entry.id) {
+      return;
+    }
+    try {
+      Tooltip.dismissAllToolTips();
+    } catch (_) {}
+    final arabic = _isArabic();
+    final route = _currentRoute().toLowerCase();
+    final sara = route.startsWith('/personal/ai') ||
+        route.startsWith('/ai') && !route.startsWith('/ai-suggestions');
+    final media = MediaQuery.of(context);
     _removeEntry();
     final entry = OverlayEntry(
       builder: (_) => _SpotlightHost(
         anchor: anchor,
-        target: decision.rect,
-        info: info,
+        target: decision.probe.liveRect(),
+        match: decision.match,
+        avatar: sara ? 'assets/images/sara_avatar.jpg' : null,
         arabic: arabic,
         screenSize: media.size,
         padding: media.padding,
@@ -313,211 +337,10 @@ class _InformationClickerOverlayState
     } catch (_) {}
   }
 
-  bool _isQuietAt(Offset position, int viewId) {
-    try {
-      final result = HitTestResult();
-      WidgetsBinding.instance.hitTestInView(result, position, viewId);
-      return result.path.any((e) =>
-          e.target is RenderMetaData &&
-          (e.target as RenderMetaData).metaData == _kClickerQuietTag);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  bool _isEditableAt(Offset position, int viewId) {
-    try {
-      final result = HitTestResult();
-      WidgetsBinding.instance.hitTestInView(result, position, viewId);
-      return result.path.any((e) => e.target is RenderEditable);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Rect? _targetRectAt(Offset position, int viewId) {
-    try {
-      final size = MediaQuery.of(context).size;
-      final result = HitTestResult();
-      WidgetsBinding.instance.hitTestInView(result, position, viewId);
-      for (final entry in result.path) {
-        final target = entry.target;
-        if (target is! RenderBox || !target.attached || !target.hasSize) {
-          continue;
-        }
-        if (target is RenderParagraph || target is RenderEditable) continue;
-        final boxSize = target.size;
-        if (boxSize.width < 10 || boxSize.height < 10) continue;
-        if (boxSize.width > size.width * 0.96 &&
-            boxSize.height > size.height * 0.96) {
-          continue;
-        }
-        Offset local;
-        try {
-          local = target.globalToLocal(position);
-        } catch (_) {
-          continue;
-        }
-        if (local.dx < -6 ||
-            local.dy < -6 ||
-            local.dx > boxSize.width + 6 ||
-            local.dy > boxSize.height + 6) {
-          continue;
-        }
-        Offset origin;
-        try {
-          origin = target.localToGlobal(Offset.zero);
-        } catch (_) {
-          continue;
-        }
-        final rect = origin & boxSize;
-        if (rect.width <= 0 || rect.height <= 0) continue;
-        return rect;
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  ({Rect? rect, String label}) _resolveTarget(
-      Offset position, int viewId, bool arabic) {
-    try {
-      final size = MediaQuery.of(context).size;
-      final result = HitTestResult();
-      WidgetsBinding.instance.hitTestInView(result, position, viewId);
-      String label = '';
-      Rect? frame;
-      var levels = 0;
-      for (final entry in result.path) {
-        if (levels >= 6) break;
-        final target = entry.target;
-        if (target is! RenderBox || !target.attached || !target.hasSize) {
-          continue;
-        }
-        if (target is RenderParagraph || target is RenderEditable) continue;
-        final boxSize = target.size;
-        if (boxSize.width < 10 || boxSize.height < 10) continue;
-        if (boxSize.width > size.width * 0.7 &&
-            boxSize.height > size.height * 0.4) {
-          continue;
-        }
-        Offset local;
-        try {
-          local = target.globalToLocal(position);
-        } catch (_) {
-          continue;
-        }
-        if (local.dx < -6 ||
-            local.dy < -6 ||
-            local.dx > boxSize.width + 6 ||
-            local.dy > boxSize.height + 6) {
-          continue;
-        }
-        Offset origin;
-        try {
-          origin = target.localToGlobal(Offset.zero);
-        } catch (_) {
-          continue;
-        }
-        final rect = origin & boxSize;
-        if (rect.width <= 0 || rect.height <= 0) continue;
-        levels++;
-        final texts = _collectTexts(target);
-        if (texts.isEmpty) continue;
-        if (label.isEmpty) {
-          label = _chooseLabel(texts, arabic: arabic);
-          frame = rect;
-        } else {
-          final compatible =
-              texts.every((t) => t == label || !_hasLetters(t));
-          if (compatible) {
-            frame = rect;
-          } else {
-            break;
-          }
-        }
-      }
-      return (rect: frame, label: label);
-    } catch (_) {}
-    return (rect: null, label: '');
-  }
-
-  List<String> _collectTexts(RenderObject root) {
-    final out = <String>[];
-    void visit(RenderObject o) {
-      if (o is RenderParagraph) {
-        final text = _paragraphText(o);
-        if (text != null && text.isNotEmpty) out.add(text);
-        return;
-      }
-      try {
-        o.visitChildren(visit);
-      } catch (_) {}
-    }
-
-    try {
-      visit(root);
-    } catch (_) {}
-    return out;
-  }
-
-  String _chooseLabel(List<String> texts, {required bool arabic}) {
-    for (final t in texts) {
-      if (HelpContent.hasExactLabel(t, arabic: arabic)) return t;
-    }
-    String best = '';
-    for (final t in texts) {
-      if (!_hasLetters(t)) continue;
-      if (t.length > best.length) best = t;
-    }
-    if (best.isNotEmpty) return best;
-    for (final t in texts) {
-      if (t.trim().length >= 2 && t.length > best.length) best = t;
-    }
-    return best;
-  }
-
-  bool _hasLetters(String s) =>
-      RegExp(r'[A-Za-z\u0600-\u06FF]').hasMatch(s);
-
-  String? _paragraphText(RenderParagraph p) {
-    try {
-      final span = p.text;
-      String? family;
-      span.visitChildren((s) {
-        if (family == null && s is TextSpan && s.style?.fontFamily != null) {
-          family = s.style!.fontFamily;
-        }
-        return true;
-      });
-      final f = family ?? '';
-      if (f.contains('Icon') ||
-          f.contains('Material') ||
-          f.contains('Phosphor') ||
-          f.contains('Huge')) {
-        return null;
-      }
-      final text = span.toPlainText().trim();
-      if (text.isEmpty) return null;
-      final runes = text.runes.toList();
-      final privateUse = runes
-          .where((r) => (r >= 0xE000 && r <= 0xF8FF) || r >= 0xF0000)
-          .length;
-      if (privateUse > 0 && privateUse >= (runes.length / 2).ceil()) {
-        return null;
-      }
-      final hasLetters = RegExp(r'[A-Za-z\u0600-\u06FF]').hasMatch(text);
-      if (!hasLetters && text.length < 3) return null;
-      return text;
-    } catch (_) {
-      return null;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     // Watch settings so the persisted duration is loaded long before the
-    // first press (the trigger timer must read the USER value, never the
-    // just-built default) and the overlay follows on/off changes.
+    // first press and the overlay follows on/off changes.
     ref.watch(helpClickerProvider);
     return Stack(
       children: [
@@ -543,6 +366,8 @@ class _InformationClickerOverlayState
                   instance.onPressEnd = () {
                     if (mounted) _hideProgress();
                   };
+                  instance.survivesRejection =
+                      () => _pending?.probe.hasTooltip ?? false;
                 },
               ),
             },
@@ -557,8 +382,9 @@ class _InformationClickerOverlayState
 
 class _SpotlightHost extends StatefulWidget {
   final Offset anchor;
-  final Rect? target;
-  final HelpExplainData info;
+  final Rect target;
+  final HelpMatch match;
+  final String? avatar;
   final bool arabic;
   final Size screenSize;
   final EdgeInsets padding;
@@ -567,7 +393,8 @@ class _SpotlightHost extends StatefulWidget {
   const _SpotlightHost({
     required this.anchor,
     required this.target,
-    required this.info,
+    required this.match,
+    required this.avatar,
     required this.arabic,
     required this.screenSize,
     required this.padding,
@@ -615,23 +442,22 @@ class _SpotlightHostState extends State<_SpotlightHost>
     final topLimit = widget.padding.top + 8;
     final bottomLimit = screenH - widget.padding.bottom - 8;
     final target = widget.target;
-    final targetCenterX =
-        (target?.center.dx ?? widget.anchor.dx).clamp(0.0, screenW);
-    final targetTop = target?.top ?? (widget.anchor.dy - 24);
-    final targetBottom = target?.bottom ?? (widget.anchor.dy + 24);
+    final targetCenterX = target.center.dx.clamp(0.0, screenW);
+    final targetTop = target.top;
+    final targetBottom = target.bottom;
 
-    final hole = target?.inflate(7);
+    final hole = target.inflate(6);
     final cardWidth = (screenW - 32).clamp(200.0, 360.0);
     final cardLeft = (targetCenterX - cardWidth / 2)
         .clamp(16.0, (screenW - cardWidth - 16).clamp(16.0, screenW));
     final spaceAbove = targetTop - topLimit - 18;
     final spaceBelow = bottomLimit - targetBottom - 18;
     final showAbove = spaceAbove >= 250 || spaceAbove >= spaceBelow;
-    final available = (showAbove ? spaceAbove : spaceBelow).clamp(190.0, 430.0);
+    final available = (showAbove ? spaceAbove : spaceBelow).clamp(170.0, 430.0);
 
     return AnimatedBuilder(
       animation: _controller,
-      builder: (_, __) {
+      builder: (_, _) {
         final dim = (_controller.value * 178).round().clamp(0, 178);
         final t = _pop.value;
         return Stack(
@@ -650,8 +476,7 @@ class _SpotlightHostState extends State<_SpotlightHost>
               left: cardLeft,
               width: cardWidth,
               top: showAbove ? null : targetBottom + 16,
-              bottom:
-                  showAbove ? screenH - targetTop + 16 : null,
+              bottom: showAbove ? screenH - targetTop + 16 : null,
               child: Opacity(
                 opacity: _controller.value.clamp(0.0, 1.0),
                 child: Transform.scale(
@@ -662,10 +487,12 @@ class _SpotlightHostState extends State<_SpotlightHost>
                   child: ConstrainedBox(
                     constraints: BoxConstraints(maxHeight: available),
                     child: _SpotCard(
-                      info: widget.info,
+                      match: widget.match,
+                      avatar: widget.avatar,
                       arabic: widget.arabic,
                       tailDown: showAbove,
-                      tailX: (targetCenterX - cardLeft).clamp(36.0, cardWidth - 36.0),
+                      tailX: (targetCenterX - cardLeft)
+                          .clamp(36.0, cardWidth - 36.0),
                       onClose: _close,
                     ),
                   ),
@@ -688,13 +515,15 @@ class _DimPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final path = Path()..addRect(Offset.zero & size);
-    if (hole != null && !hole!.isEmpty) {
-      path.addRRect(RRect.fromRectAndRadius(hole!, const Radius.circular(22)));
+    final h = hole;
+    final radius = Radius.circular(_ringRadius(h));
+    if (h != null && !h.isEmpty) {
+      path.addRRect(RRect.fromRectAndRadius(h, radius));
       path.fillType = PathFillType.evenOdd;
     }
     canvas.drawPath(path, Paint()..color = Colors.black.withAlpha(dimAlpha));
-    if (hole != null && !hole!.isEmpty) {
-      final frame = RRect.fromRectAndRadius(hole!, const Radius.circular(22));
+    if (h != null && !h.isEmpty) {
+      final frame = RRect.fromRectAndRadius(h, radius);
       final glow = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 8
@@ -714,15 +543,24 @@ class _DimPainter extends CustomPainter {
       old.hole != hole || old.dimAlpha != dimAlpha;
 }
 
+/// Ring corner radius that hugs the element: round for small icon buttons,
+/// softer for wide rows.
+double _ringRadius(Rect? r) {
+  if (r == null) return 16;
+  return math.min(22.0, r.shortestSide / 2);
+}
+
 class _SpotCard extends StatelessWidget {
-  final HelpExplainData info;
+  final HelpMatch match;
+  final String? avatar;
   final bool arabic;
   final bool tailDown;
   final double tailX;
   final VoidCallback onClose;
 
   const _SpotCard({
-    required this.info,
+    required this.match,
+    required this.avatar,
     required this.arabic,
     required this.tailDown,
     required this.tailX,
@@ -733,180 +571,167 @@ class _SpotCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final align = arabic ? TextAlign.right : TextAlign.left;
     final dir = arabic ? TextDirection.rtl : TextDirection.ltr;
-    return DefaultTextStyle(
-      style: const TextStyle(
-        fontFamily: 'Cairo',
-        decoration: TextDecoration.none,
-        color: Color(0xFFE8E8E8),
-        fontSize: 13,
-      ),
-      child: CustomPaint(
-        painter: _SpotCardPainter(tailDown: tailDown, tailX: tailX),
-        child: SingleChildScrollView(
-          padding: EdgeInsets.only(
-            top: tailDown ? 14 : 20,
-            bottom: tailDown ? 22 : 14,
-            left: 16,
-            right: 16,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                textDirection: dir,
-                children: [
-                  Expanded(
-                    child: Text(
-                      info.title,
-                      textAlign: align,
-                      softWrap: true,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontFamily: 'Cairo',
-                        decoration: TextDecoration.none,
-                        fontSize: 19,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        height: 1.3,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  GestureDetector(
-                    onTap: onClose,
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withAlpha(14),
-                        border: Border.all(
-                            color: Colors.white.withAlpha(60)),
-                      ),
-                      child: const Icon(Icons.close_rounded,
-                          size: 15, color: Colors.white),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                info.body,
-                textAlign: align,
-                softWrap: true,
-                style: const TextStyle(
-                  fontFamily: 'Cairo',
-                  decoration: TextDecoration.none,
-                  fontSize: 12.5,
-                  height: 1.6,
-                  color: Color(0xFFD9D9D9),
-                ),
-              ),
-              const SizedBox(height: 10),
-              // Items without a real flow show description only — never a
-              // filler "how to use" block.
-              if (info.steps.isNotEmpty)
+    return Directionality(
+      textDirection: dir,
+      child: DefaultTextStyle(
+        style: const TextStyle(
+          fontFamily: 'Cairo',
+          decoration: TextDecoration.none,
+          color: Color(0xFFE8E8E8),
+          fontSize: 13,
+        ),
+        child: CustomPaint(
+          painter: _SpotCardPainter(tailDown: tailDown, tailX: tailX),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              top: tailDown ? 14 : 28,
+              bottom: tailDown ? 30 : 14,
+              left: 16,
+              right: 16,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  textDirection: dir,
                   children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Align(
-                          alignment: align == TextAlign.right
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 13, vertical: 6),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFFE0393E), _kRedDeep],
-                                begin: Alignment.topRight,
-                                end: Alignment.bottomLeft,
-                              ),
-                              borderRadius: BorderRadius.circular(20),
+                    _HelpIconBadge(
+                        key: ValueKey(match.entry.id),
+                        icon: match.entry.icon,
+                        avatar: avatar),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            match.title,
+                            textAlign: align,
+                            softWrap: true,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontFamily: 'Cairo',
+                              decoration: TextDecoration.none,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                              height: 1.3,
                             ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            match.body,
+                            textAlign: align,
+                            softWrap: true,
+                            style: const TextStyle(
+                              fontFamily: 'Cairo',
+                              decoration: TextDecoration.none,
+                              fontSize: 13,
+                              height: 1.6,
+                              color: Color(0xFFD9D9D9),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: onClose,
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withAlpha(14),
+                          border:
+                              Border.all(color: Colors.white.withAlpha(60)),
+                        ),
+                        child: const Icon(Icons.close_rounded,
+                            size: 15, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+                // Elements without a real flow show the idea only — never a
+                // filler "how to use" block.
+                if (match.how.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 13, vertical: 5),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFFE0393E), _kRedDeep],
+                          begin: Alignment.topRight,
+                          end: Alignment.bottomLeft,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        arabic ? 'طريقة الاستخدام' : 'How to use',
+                        style: const TextStyle(
+                          fontFamily: 'Cairo',
+                          decoration: TextDecoration.none,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  for (var i = 0; i < match.how.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 22,
+                            height: 22,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _kRed,
+                            ),
+                            alignment: Alignment.center,
                             child: Text(
-                              arabic ? 'طريقة الاستخدام:' : 'How to use:',
-                              softWrap: true,
+                              '${i + 1}',
                               style: const TextStyle(
                                 fontFamily: 'Cairo',
                                 decoration: TextDecoration.none,
-                                fontSize: 12.5,
+                                fontSize: 12,
                                 fontWeight: FontWeight.w800,
                                 color: Colors.white,
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        ...info.steps.asMap().entries.map((entry) {
-                          final index = entry.key;
-                          final step = entry.value;
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              textDirection: dir,
-                              children: [
-                                Container(
-                                  width: 25,
-                                  height: 25,
-                                  decoration: const BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: _kRed,
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    '${index + 1}',
-                                    style: const TextStyle(
-                                      fontFamily: 'Cairo',
-                                      decoration: TextDecoration.none,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w800,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Padding(
-                                    padding:
-                                        const EdgeInsets.only(top: 2),
-                                    child: Text(
-                                      step,
-                                      textAlign: align,
-                                      softWrap: true,
-                                      style: const TextStyle(
-                                        fontFamily: 'Cairo',
-                                        decoration: TextDecoration.none,
-                                        fontSize: 12.5,
-                                        height: 1.6,
-                                        color: Color(0xFFE8E8E8),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              match.how[i],
+                              textAlign: align,
+                              softWrap: true,
+                              style: const TextStyle(
+                                fontFamily: 'Cairo',
+                                decoration: TextDecoration.none,
+                                fontSize: 12.5,
+                                height: 1.6,
+                                color: Color(0xFFE8E8E8),
+                              ),
                             ),
-                          );
-                        }),
-                      ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  _FloatingBadge(info: info),
                 ],
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -914,34 +739,53 @@ class _SpotCard extends StatelessWidget {
   }
 }
 
-class _FloatingBadge extends StatefulWidget {
-  final HelpExplainData info;
-  const _FloatingBadge({required this.info});
+/// The element's icon, introduced with one elegant, FINITE motion: it pops
+/// in with a soft spring and a quarter-turn settle while a single glow ring
+/// ripples out of the badge. Nothing loops, so the card is static once the
+/// entrance ends (and `pumpAndSettle` settles).
+class _HelpIconBadge extends StatefulWidget {
+  final IconData icon;
+  final String? avatar;
+  const _HelpIconBadge({super.key, required this.icon, this.avatar});
 
   @override
-  State<_FloatingBadge> createState() => _FloatingBadgeState();
+  State<_HelpIconBadge> createState() => _HelpIconBadgeState();
 }
 
-class _FloatingBadgeState extends State<_FloatingBadge>
+class _HelpIconBadgeState extends State<_HelpIconBadge>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
+  late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1800),
-  )..repeat();
+    duration: const Duration(milliseconds: 1100),
+  )..forward();
+
+  late final Animation<double> _pop = CurvedAnimation(
+    parent: _c,
+    curve: const Interval(0.0, 0.65, curve: Curves.elasticOut),
+  );
+  late final Animation<double> _turn = CurvedAnimation(
+    parent: _c,
+    curve: const Interval(0.0, 0.55, curve: Curves.easeOutCubic),
+  );
+  late final Animation<double> _ripple = CurvedAnimation(
+    parent: _c,
+    curve: const Interval(0.25, 1.0, curve: Curves.easeOut),
+  );
 
   @override
   void dispose() {
-    _controller.dispose();
+    _c.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final badge = Container(
-      width: 78,
-      height: 94,
+    const size = 52.0;
+    final face = Container(
+      width: size,
+      height: size,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         gradient: const LinearGradient(
           colors: [Color(0xFF3A0B10), Color(0xFF120304)],
           begin: Alignment.topCenter,
@@ -949,40 +793,55 @@ class _FloatingBadgeState extends State<_FloatingBadge>
         ),
         border: Border.all(color: _kRed.withAlpha(110)),
         boxShadow: [
-          BoxShadow(
-            color: _kRed.withAlpha(70),
-            blurRadius: 20,
-            spreadRadius: 1,
-          ),
+          BoxShadow(color: _kRed.withAlpha(70), blurRadius: 18, spreadRadius: 1),
         ],
       ),
       alignment: Alignment.center,
-      child: widget.info.asset != null
+      child: widget.avatar != null
           ? ClipRRect(
-              borderRadius: BorderRadius.circular(13),
-              child: Image.asset(
-                widget.info.asset!,
-                width: 56,
-                height: 56,
-                fit: BoxFit.cover,
-              ),
+              borderRadius: BorderRadius.circular(12),
+              child: Image.asset(widget.avatar!,
+                  width: 40, height: 40, fit: BoxFit.cover),
             )
-          : Icon(widget.info.icon,
-              size: 40, color: widget.info.iconColor),
+          : Icon(widget.icon, size: 28, color: Colors.white),
     );
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (_, child) {
-        final wave = math.sin(_controller.value * 2 * math.pi);
-        return Transform.translate(
-          offset: Offset(0, wave * 3),
-          child: Transform.scale(
-            scale: 1 + wave * 0.015,
-            child: child,
-          ),
-        );
-      },
-      child: badge,
+    return SizedBox(
+      width: size,
+      height: size,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (_, child) {
+          final r = _ripple.value;
+          return Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              if (r > 0 && r < 1)
+                IgnorePointer(
+                  child: Container(
+                    width: size + 22 * r,
+                    height: size + 22 * r,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16 + 8 * r),
+                      border: Border.all(
+                        color: _kRed.withAlpha((150 * (1 - r)).round()),
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                ),
+              Transform.rotate(
+                angle: (1 - _turn.value) * -math.pi / 6,
+                child: Transform.scale(
+                  scale: 0.4 + 0.6 * _pop.value,
+                  child: child,
+                ),
+              ),
+            ],
+          );
+        },
+        child: face,
+      ),
     );
   }
 }
@@ -999,7 +858,7 @@ class _SpotCardPainter extends CustomPainter {
     final h = size.height;
     const radius = 26.0;
     final body = RRect.fromRectAndRadius(
-      Rect.fromLTWH(2, tailDown ? 2 : 16, w - 4, h - (tailDown ? 18 : 18) - 2),
+      Rect.fromLTWH(2, tailDown ? 2 : 16, w - 4, h - 18 - 2),
       const Radius.circular(radius),
     );
     final path = Path()..addRRect(body);
@@ -1042,7 +901,8 @@ class _SpotCardPainter extends CustomPainter {
 }
 
 class _ProgressBorder extends StatefulWidget {
-  final Rect target;
+  /// Live bounds of the pressed element (follows it if it scrolls).
+  final Rect Function() target;
 
   /// Full press duration from Touch Down (same value the trigger timer
   /// uses).
@@ -1078,9 +938,9 @@ class _ProgressBorderState extends State<_ProgressBorder>
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _controller,
-      builder: (_, __) => CustomPaint(
+      builder: (_, _) => CustomPaint(
         painter: _ProgressBorderPainter(
-          rect: widget.target,
+          rect: widget.target(),
           progress: _controller.value,
         ),
         size: Size.infinite,
@@ -1097,8 +957,9 @@ class _ProgressBorderPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final hole = rect.inflate(6);
-    final frame = RRect.fromRectAndRadius(hole, const Radius.circular(22));
+    final hole = rect.inflate(4);
+    final frame =
+        RRect.fromRectAndRadius(hole, Radius.circular(_ringRadius(hole)));
     canvas.drawRRect(frame, Paint()..color = _kRed.withAlpha(24));
     final faint = Paint()
       ..style = PaintingStyle.stroke

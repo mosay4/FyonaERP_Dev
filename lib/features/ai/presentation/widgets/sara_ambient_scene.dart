@@ -351,9 +351,10 @@ class SaraAmbientPainter extends CustomPainter {
     final c = controller, g = c.geometry;
     final w = size.width, h = size.height;
     final rect = Offset.zero & size;
-    final base = dark ? const Color(0xFF15161A) : const Color(0xFFF4F2F4);
+    // Graphite (dark) / warm paper (light), matching the chat page.
+    final base = dark ? const Color(0xFF0C0D10) : const Color(0xFFF4F3F1);
     final tint = Color.alphaBlend(
-      primary.withValues(alpha: dark ? .07 : .045),
+      primary.withValues(alpha: dark ? .075 : .04),
       base,
     );
     canvas.drawRect(
@@ -363,7 +364,21 @@ class SaraAmbientPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [tint, base, base],
-          stops: const [0, .45, 1],
+          stops: const [0, .38, 1],
+        ).createShader(rect),
+    );
+    // Studio light: one soft, wide pool of light falling from under the
+    // header across the conversation (no shapes, no swirls).
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(0, -1.05),
+          radius: 1.1,
+          colors: [
+            Colors.white.withValues(alpha: dark ? .035 : .45),
+            Colors.white.withValues(alpha: 0),
+          ],
         ).createShader(rect),
     );
     void glow(Offset centre, double radius, Color color, double alpha) {

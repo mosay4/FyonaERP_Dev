@@ -50,7 +50,7 @@ void main() {
         EnginePhase.sendSemanticsUpdate, const Duration(seconds: 6));
     await tester.enterText(find.byType(TextField).first, '900');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('ابدأ المطابقة'));
+    await tester.tap(find.text('ابدأ الفحص'));
     await pumpFor(tester, const Duration(milliseconds: 250), 20);
     await tester.pump();
     await tester.pump();

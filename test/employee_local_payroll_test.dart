@@ -359,7 +359,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('اختر العملة'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(currencyLabel('SAR', locale: 'ar')));
+    await tester.tap(find.text(currencyLabel('SAR', locale: 'ar')).first);
     await tester.pumpAndSettle();
     await settle(); // Real async reads finish outside the pump loop.
     await tester.enterText(find.widgetWithText(TextField, 'المبلغ'), '1500');

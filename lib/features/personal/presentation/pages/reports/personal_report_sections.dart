@@ -178,8 +178,8 @@ class PersonalReportSections {
             currency: currencyLabel(ccy, locale: lang),
             style: const TextStyle(
               fontFamily: 'Cairo',
-              fontSize: 28,
-              fontWeight: FontWeight.w900,
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
               color: Colors.white,
             ),
           ),

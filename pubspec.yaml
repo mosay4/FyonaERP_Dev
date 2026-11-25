@@ -98,7 +98,7 @@ flutter:
     - assets/images/connect/
     - assets/l10n/
     - assets/audio/crystal_echo.mp3
-    - assets/audio/sound_2.mp3
+    - assets/audio/sound_2.wav
     - assets/audio/barcode_capture.wav
     - assets/audio/product_alert.wav
     - assets/audio/product_select.wav
@@ -140,6 +140,11 @@ flutter:
     - assets/audio/report_debts_settle.wav
     - assets/audio/report_personal_wallet.wav
     - assets/audio/report_personal_export.wav
+    - assets/audio/recon_open_financial.wav
+    - assets/audio/recon_open_financial_end.wav
+    - assets/audio/recon_open_inventory.wav
+    - assets/audio/recon_open_inventory_end.wav
+    - assets/audio/recon_settle.wav
     - assets/video/intro.mp4
     - assets/video/intro_poster.png
   fonts:

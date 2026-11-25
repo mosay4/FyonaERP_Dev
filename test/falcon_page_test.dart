@@ -334,7 +334,7 @@ void main() {
     // (ListView builds only visible children).
     await tester.drag(find.byType(ListView).first, const Offset(0, -320));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('120 US Dollar'), findsOneWidget);
+    expect(find.text('120 USD'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

@@ -439,7 +439,7 @@ class _DebtAlarmPageState extends State<DebtAlarmPage> with TickerProviderStateM
   Future<void> _startAlarmSound() async {
     try {
       await _player.setReleaseMode(ReleaseMode.loop);
-      await _player.play(AssetSource('audio/sound_2.mp3'), volume: 1.0);
+      await _player.play(AssetSource('audio/sound_2.wav'), volume: 0.8);
     } catch (e) {
       debugPrint('[DebtAlarm] sound error: $e');
     }

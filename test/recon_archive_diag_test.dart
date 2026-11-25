@@ -46,7 +46,7 @@ void main() {
     final y1 = tester.getTopLeft(find.textContaining('RCN-1')).dy;
     final y2 = tester.getTopLeft(find.textContaining('RCN-2')).dy;
     expect(y1 < y2, true, reason: 'newest must come first');
-    expect(find.text('مطابقة البنوك والكاش'), findsOneWidget);
+    expect(find.text('فحص البنوك والكاش'), findsOneWidget);
     expect(find.text('الكل'), findsOneWidget);
     expect(find.text('هذا الشهر'), findsOneWidget);
     expect(find.text('هذه السنة'), findsOneWidget);
@@ -57,7 +57,7 @@ void main() {
       (tester) async {
     await open(tester, ArchiveApi(ApiClient(dio: Dio()), mode: 'empty'));
     expect(find.byType(CircularProgressIndicator), findsNothing);
-    expect(find.text('لا توجد مطابقات محفوظة'), findsOneWidget);
+    expect(find.text('لا توجد فحوصات محفوظة'), findsOneWidget);
   });
 
   testWidgets('REGRESSION: archive failure clears loading (never hangs)',

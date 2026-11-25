@@ -11,7 +11,7 @@ import '../../../../shared/widgets/two_tone_icon.dart';
 import '../../../../shared/widgets/two_tone_icons.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/utils/currency_formatter.dart'
-    show currencySymbol, currencyShort, currencyName, localizedCurrencyName;
+    show currencySymbol, currencyName, currencyLabel, currencyCode, currencyFlagEmoji;
 
 class CurrencySettingsPage extends ConsumerStatefulWidget {
   CurrencySettingsPage({super.key});
@@ -194,7 +194,7 @@ class _CurrencySettingsPageState extends ConsumerState<CurrencySettingsPage> {
                             dropdownColor: AppColors.surface,
                             style: TextStyle(fontFamily: 'Cairo', color: AppColors.textPrimary),
                             underline: SizedBox(),
-                            items: _currencies.map((c) => DropdownMenuItem(value: c.currency, child: Text('${currencyShort(c.currency)} — ${currencyName(c.currency)}'))).toList(),
+                            items: _currencies.map((c) => DropdownMenuItem(value: c.currency, child: Text(currencyName(c.currency)))).toList(),
                             onChanged: (v) {
                               if (v != null) setState(() => _defaultCurrency = v);
                             },
@@ -225,7 +225,7 @@ class _CurrencySettingsPageState extends ConsumerState<CurrencySettingsPage> {
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Center(
-                                    child: Text(currencySymbol(c.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 18), fontWeight: FontWeight.bold, color: AppColors.success)),
+                                    child: Text(currencyFlagEmoji(c.currency).isEmpty ? currencyCode(c.currency) : currencyFlagEmoji(c.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 18), fontWeight: FontWeight.bold, color: AppColors.success)),
                                   ),
                                 ),
                                  SizedBox(width: 12),
@@ -233,7 +233,7 @@ class _CurrencySettingsPageState extends ConsumerState<CurrencySettingsPage> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text('${currencyShort(c.currency)} — ${localizedCurrencyName(c.currency) ?? c.name ?? ''}', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 14), fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                                      Text(currencyLabel(c.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 14), fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                                        SizedBox(height: 4),
                                       Row(
                                         children: [

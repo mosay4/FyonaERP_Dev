@@ -156,8 +156,8 @@ class _PersonalReportsPageState extends ConsumerState<PersonalReportsPage> {
                       l10n.translate('prepHow'),
                       style: TextStyle(
                         fontFamily: 'Cairo',
-                        fontSize: R.fontSize(context, 21),
-                        fontWeight: FontWeight.w900,
+                        fontSize: R.fontSize(context, 17),
+                        fontWeight: FontWeight.w800,
                         color: AppColors.textPrimary,
                       ),
                     ),

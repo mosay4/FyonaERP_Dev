@@ -280,21 +280,21 @@ void main() {
     await pumpKind(tester, 'money', surface: const Size(360, 640));
     expect(tester.takeException(), isNull);
     for (var i = 0; i < 8; i++) {
-      if (find.textContaining('عرض جميع التسويات').evaluate().isNotEmpty) {
+      if (find.textContaining('عرض جميع التصحيحات').evaluate().isNotEmpty) {
         break;
       }
       await tester.drag(find.byType(ListView).last, const Offset(0, -260));
       await pumpFor(tester, const Duration(milliseconds: 120), 3);
     }
-    expect(find.textContaining('عرض جميع التسويات (4)'), findsOneWidget);
-    await tester.ensureVisible(find.textContaining('عرض جميع التسويات (4)'));
+    expect(find.textContaining('عرض جميع التصحيحات (4)'), findsOneWidget);
+    await tester.ensureVisible(find.textContaining('عرض جميع التصحيحات (4)'));
     await pumpFor(tester, const Duration(milliseconds: 150), 3);
     await tester.tap(
-      find.textContaining('عرض جميع التسويات (4)'),
+      find.textContaining('عرض جميع التصحيحات (4)'),
       warnIfMissed: false,
     );
     await pumpFor(tester, const Duration(milliseconds: 200), 4);
-    expect(find.text('تقليل عدد التسويات'), findsOneWidget);
+    expect(find.text('تقليل عدد التصحيحات'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

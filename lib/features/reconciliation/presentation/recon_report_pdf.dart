@@ -76,22 +76,22 @@ class ReconReportPdf {
     // ── strings ──
     final title = isAr
         ? (isBank
-            ? 'تقرير مطابقة الحسابات البنكية والكاش'
-            : 'تقرير مطابقة المخزون')
+            ? 'تقرير فحص البنوك والكاش'
+            : 'تقرير جرد المخزون')
         : (isBank
-            ? 'Bank & Cash Reconciliation Report'
-            : 'Inventory Reconciliation Report');
+            ? 'Bank & Cash Check Report'
+            : 'Inventory Count Report');
     final cols = ReconPdfLayout.columnOrder(isAr: isAr, isBank: isBank);
     final firstCol = cols.last; // AR: rightmost; EN: leftmost
     final colSystem = isAr ? 'بالنظام' : 'In system';
     final colActual = isAr ? 'بالحقيقة' : 'In reality';
     final colDiff = isAr ? 'الفرق' : 'Difference';
     final subjectLabel = isAr ? (isBank ? 'الحساب' : 'النطاق') : 'Account';
-    final dateLabel = isAr ? 'تاريخ المطابقة' : 'Matched at';
+    final dateLabel = isAr ? 'تاريخ الفحص' : 'Checked at';
     final approvedLabel = isAr ? 'تاريخ الاعتماد' : 'Approved at';
-    final resultTitle = isAr ? 'نتيجة المطابقة' : 'Reconciliation result';
+    final resultTitle = isAr ? 'نتيجة الفحص' : 'Check result';
     final summaryTitle = isAr ? 'الخلاصة' : 'Summary';
-    final settleTitle = isAr ? 'التسويات الظاهرة' : 'Settlements';
+    final settleTitle = isAr ? 'التصحيحات' : 'Corrections';
     final countWord = isAr ? (isBank ? 'عملات' : 'منتجات')
         : (isBank ? 'currencies' : 'products');
     final reviewed = isAr ? 'تمت مراجعتها' : 'reviewed';
@@ -102,7 +102,7 @@ class ReconReportPdf {
         ? (isBank ? 'عملات فيها نقص' : 'منتجات فيها نقص')
         : 'with shortage';
     final noneWord =
-        isAr ? 'لا يوجد أي اختلاف — كل شيء مطابق' : 'No differences — all clear';
+        isAr ? 'لا يوجد أي اختلاف — كل شيء مطابق' : 'No differences — everything matches';
 
     final lines = [
       for (final l in (record['lines'] as List? ?? []).whereType<Map>())

@@ -126,7 +126,11 @@ String _normalizeCurrency(String code) {
 /// (YER_OLD, YER_NEW, SAR, USD, …). This is the ONE short form the whole app
 /// uses, so the same currency can never appear as «ر.ي» here and «YER_OLD»
 /// there. Full names are provided by [currencyName].
-String currencyShort(String code) => _normalizeCurrency(code);
+String currencyShort(String code) => currencyLabel(code);
+
+/// The canonical code itself (YER_OLD, SAR, …) for logic, keys and APIs —
+/// never shown to Arabic users.
+String currencyCode(String code) => _normalizeCurrency(code);
 
 String formatAmount(num amount, String currencyCode, {String? locale}) {
   final symbol = currencySymbol(currencyCode, locale: locale);
@@ -136,7 +140,8 @@ String formatAmount(num amount, String currencyCode, {String? locale}) {
 
 /// The token written next to amounts in tight layouts. Returns the compact
 /// ISO code ([currencyShort]) so every small-space display is identical.
-String currencySymbol(String code, {String? locale}) => currencyShort(code);
+String currencySymbol(String code, {String? locale}) =>
+    currencyLabel(code, locale: locale);
 
 const Map<String, String> _currencyNamesAr = {
   'USD': 'دولار أمريكي', 'EUR': 'يورو', 'SAR': 'ريال سعودي',
@@ -221,7 +226,9 @@ String? localizedCurrencyName(String code, {String? locale}) {
 /// code). Arabic mode returns the full Arabic name (e.g. دولار أمريكي، ريال
 /// سعودي، ريال يمني قديم); English mode returns the full English name.
 String currencyName(String code, {String? locale}) {
-  return localizedCurrencyName(code, locale: locale) ?? currencyShort(code);
+  // English shows the plain code everywhere (USD, YER_OLD, YER_NEW, SAR).
+  if ((locale ?? _currentLocale) != 'ar') return _normalizeCurrency(code);
+  return localizedCurrencyName(code, locale: 'ar') ?? _normalizeCurrency(code);
 }
 
 /// The SINGLE localized label shown in pickers/lists: the full Arabic name in
@@ -229,7 +236,9 @@ String currencyName(String code, {String? locale}) {
 /// (e.g. YER_OLD) — never the duplicated «CODE - name» pair.
 String currencyLabel(String code, {String? locale}) {
   final isAr = (locale ?? _currentLocale) == 'ar';
-  return isAr ? currencyName(code, locale: 'ar') : currencyShort(code);
+  return isAr
+      ? (localizedCurrencyName(code, locale: 'ar') ?? _normalizeCurrency(code))
+      : _normalizeCurrency(code);
 }
 
 /// ISO country (alpha-2) per currency code — used to render the flag.

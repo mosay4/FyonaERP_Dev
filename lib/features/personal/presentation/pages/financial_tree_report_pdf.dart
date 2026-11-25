@@ -32,14 +32,14 @@ class FinancialTreeReportPdfGenerator {
       case FinancialTreeNodeType.root: return 'الجذر';
       case FinancialTreeNodeType.income: return 'الدخل';
       case FinancialTreeNodeType.expense: return 'المصروفات';
-      case FinancialTreeNodeType.asset: return 'الأصول';
+      case FinancialTreeNodeType.asset: return 'الممتلكات';
       case FinancialTreeNodeType.investment: return 'الاستثمارات';
       case FinancialTreeNodeType.debt: return 'الديون';
-      case FinancialTreeNodeType.liability: return 'الالتزامات';
+      case FinancialTreeNodeType.liability: return 'ما عليك';
       case FinancialTreeNodeType.transfer: return 'التحويلات';
       case FinancialTreeNodeType.saving: return 'الادخار';
       case FinancialTreeNodeType.payment: return 'الدفعات';
-      case FinancialTreeNodeType.receivable: return 'المستحقات';
+      case FinancialTreeNodeType.receivable: return 'لك عند الناس';
       case FinancialTreeNodeType.custom: return 'أخرى';
     }
   }
@@ -827,7 +827,7 @@ class FinancialTreeReportPdfGenerator {
 
     final cards = <pw.Widget>[
       metric(
-        _tr(translations, 'netFlow', 'صافي التدفق'),
+        _tr(translations, 'netFlow', 'فرق الداخل والخارج'),
         '${nf.format(netFlow)}$cur'.trim(),
         netFlow >= 0 ? _c(0xFF22C55E) : _c(0xFFEF4444),
       ),
@@ -915,16 +915,16 @@ class FinancialTreeReportPdfGenerator {
       );
     }
 
-    items.add(item('totalAssets', 'إجمالي الأصول', comp.totalAssets, amountColor));
+    items.add(item('totalAssets', 'إجمالي الممتلكات', comp.totalAssets, amountColor));
     items.add(item('totalIncome', 'إجمالي الدخل', comp.totalIncome, successColor));
     items.add(item('totalExpenses', 'إجمالي المصروفات', comp.totalExpenses, dangerColor));
     items.add(item('totalInvestments', 'إجمالي الاستثمارات', comp.totalInvestments, pColor));
-    items.add(item('totalReceivable', 'ديون لي', comp.totalReceivable, successColor));
-    items.add(item('totalPayable', 'ديون مستحقة', comp.totalPayable, dangerColor));
+    items.add(item('totalReceivable', 'لك عند الناس', comp.totalReceivable, successColor));
+    items.add(item('totalPayable', 'عليك للناس', comp.totalPayable, dangerColor));
     items.add(item('totalPaidLabel', 'إجمالي المدفوع', comp.totalPaid, amountColor));
     items.add(item('totalRemainingLabel', 'إجمالي المتبقي', comp.totalRemaining, subColor));
     items.add(item('availableBalance', 'الرصيد المتاح', comp.available, availableColor));
-    items.add(item('netWorth', 'صافي الثروة', comp.netWorth, netColor));
+    items.add(item('netWorth', 'ثروتك الفعلية', comp.netWorth, netColor));
 
     final grid = <pw.Widget>[];
     for (var i = 0; i < items.length; i += 5) {

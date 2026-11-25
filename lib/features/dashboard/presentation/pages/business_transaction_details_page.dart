@@ -449,7 +449,7 @@ class _BusinessTransactionDetailsPageState
     final c = (currency ?? '').toString().trim();
     if (n.isEmpty && c.isEmpty) return '—';
     if (c.isEmpty) return n;
-    return '$n  (${currencySymbol(c)})';
+    return '$n · ${currencySymbol(c)}';
   }
 
   String _rateName(dynamic code) {

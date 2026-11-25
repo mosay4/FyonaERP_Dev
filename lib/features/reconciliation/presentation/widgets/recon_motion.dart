@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/financial_cinema.dart';
+import 'recon_scenes.dart';
 
 enum ReconSceneVariant {
   bank,
@@ -53,7 +54,7 @@ class CrystalBalanceSeal extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox(
     width: size,
     height: size,
-    child: FinancialSuccessScene(canvasHeight: size),
+    child: FittedBox(child: ReconSettleMark(size: size)),
   );
 }
 
@@ -82,7 +83,8 @@ Future<ReconSuccessAction?> showCrystalSuccess(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            FinancialSuccessScene(message: message),
+            // The «balanced» settle mark (< 1 s, own soft cue).
+            ReconSettleMark(message: message),
             const SizedBox(height: 18),
             Wrap(
               spacing: 10,

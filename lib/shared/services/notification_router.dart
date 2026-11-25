@@ -65,7 +65,11 @@ class NotificationRouter {
     if (p.isEmpty) return null;
     // Absolute routes (with or without query) pass through untouched —
     // this preserves ?id= / ?debtId= / invoice params.
-    if (p.startsWith('/')) return p;
+    if (p.startsWith('/')) {
+      // Admin-console routes don't exist in the app: open the inbox.
+      if (p.startsWith('/admin')) return RouteNames.notifications;
+      return p;
+    }
 
     final qIndex = p.indexOf('?');
     final base = qIndex < 0 ? p : p.substring(0, qIndex);
@@ -83,6 +87,12 @@ class NotificationRouter {
         return RouteNames.suggestions;
       case 'notifications':
         return '${RouteNames.notifications}$query';
+      // Product expiry / low stock alerts.
+      case 'inventory':
+        return '/inventory$query';
+      // Scheduled reminders have no screen of their own: the inbox shows them.
+      case 'reminders':
+        return RouteNames.notifications;
       default:
         break;
     }
@@ -100,7 +110,9 @@ class NotificationRouter {
     if (p.startsWith('personal/') || p.startsWith('subscription/')) {
       return '/$p';
     }
-    return null;
+    // Any other named payload still opens the notification inbox (where the
+    // full text lives) instead of doing nothing.
+    return RouteNames.notifications;
   }
 
   static bool _notReady(BuildContext ctx) {
@@ -113,6 +125,9 @@ class NotificationRouter {
         loc = GoRouter.of(ctx).routeInformationProvider.value.uri.path;
       }
       return loc == RouteNames.splash ||
+          // Account entry decides the home screen right after: navigating
+          // now would be overridden, so the tap waits for it.
+          loc == '/account-entry' ||
           loc == RouteNames.login ||
           loc == RouteNames.reentry ||
           loc == RouteNames.chooseUsage ||

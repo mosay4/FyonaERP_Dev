@@ -308,7 +308,7 @@ void main() {
       expect(c.allocated, 130);
       expect(c.available, 0);
       expect(c.overAllocated, isTrue);
-      expect(c.warnings.any((w) => w.contains('Over-allocation')), isTrue);
+      expect(c.warnings.any((w) => w.contains('أكبر من النقد المتاح')), isTrue);
     });
   });
 
@@ -365,7 +365,7 @@ void main() {
         _node(id: 'a2', parentId: 'a1', name: 'جزء', type: FinancialTreeNodeType.expense, amount: 600),
       ];
       final issues = FinancialEngine.validateTree(tree: _tree(), nodes: nodes, convert: identity);
-      expect(issues.any((i) => i.message.contains('أبناء')), isTrue);
+      expect(issues.any((i) => i.message.contains('العناصر الفرعية')), isTrue);
     });
   });
 }

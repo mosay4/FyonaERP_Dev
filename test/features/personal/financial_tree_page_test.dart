@@ -45,11 +45,11 @@ void main() {
     await tester.pumpAndSettle();
 
     // لوحة المؤشرات الدائمة
-    expect(find.text('صافي الثروة'), findsOneWidget);
+    expect(find.text('ثروتك الفعلية'), findsOneWidget);
     expect(find.text('النقد الحر'), findsOneWidget);
     expect(find.text('إجمالي الدخل'), findsOneWidget);
     expect(find.text('إجمالي المصروفات'), findsOneWidget);
-    expect(find.text('ديون مستحقة'), findsOneWidget);
+    expect(find.text('عليك للناس'), findsOneWidget);
 
     // بطاقات الشجرة التجريبية
     expect(find.text('الراتب الشهري'), findsOneWidget);
