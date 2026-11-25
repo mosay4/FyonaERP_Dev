@@ -264,3 +264,6 @@ Commit a18fc9e, backend business-6193-relay.194a6734, APK 35,646,282 bytes Teleg
 
 ## 26. Round 19 (2026-11-25)
 Commit 89e5445 (no backend change). APK 35,837,963 bytes (36MB guard close!). sound_2 now WAV calm chime; NotificationRouter maps inventory/reminders/admin + waits on /account-entry; currencyShort/Symbol/Name follow language (AR names, EN codes); help clicker rewritten (lib/core/help/help_detector.dart + catalog/); recon_scenes.dart; Sara chat redesign (gap fix via MediaQuery.removePadding).
+
+## 27. Personal device-only (2026-11-25)
+Stages 1-6 committed (f983118, a097f18, 50e8411 + asset trim), backend business-6193-relay.5c45942b, APK 35,261,057 bytes Telegram 1318/1319. Plan + API + stage notes: docs/PERSONAL_LOCAL_PLAN.md. QA: all users local Personal; old builds get 409 update_required; server Personal rows purged 7 days after each user ack (hourly). Pending: Stage 7 soak; device-approval for relay key grant (owner decision); remove ToolExecutor._exec_create_transaction server path + its tests; backups redesign awaits owner.
