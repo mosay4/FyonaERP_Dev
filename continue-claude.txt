@@ -247,3 +247,8 @@ OPEN ITEMS (need owner decision or next round)
 - Offline dialog: compact 64px cloud+slash tile.
 - Invoice picker: showCategories (بدون تصنيف / مع التصنيف + category tiles, InventoryCategoryTile public). Previous-debt chips: debtRowAmount (device rows use 'total').
 - Full suite: 1560 passed, 10 known + 1 (fixed after).
+
+## 23. Round 16 (2026-11-25)
+Commit 7d1695a, backend release business-6193-relay.dff7931e. APK 35,560,074 bytes sent Telegram 1308, report 1309 (../verification/claude-phase16/FYONA-report-rounds15-16.txt).
+Build OOM on 8GB host: needed a temporary 4GB swap file (/swapfile-fyona-build, swapoff done; file deletion left to owner). Kill orphan frontend_server after a failed build.
+Round 16: Sara smart Personal notifications (lib/features/personal/services/smart_insights, on-device, no AI), Personal categories in personal_entity_cache, Sara tools for categories/tree/merchant (contract 1.7.0), same-currency bank accounts (personal_account_choice.dart), welcome dedupe, live plan badge + subscription_changed push, invoice cashier (ledger schema 19), branch chip, intro every 72h, forced-dark auth.
