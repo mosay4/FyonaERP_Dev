@@ -4,6 +4,7 @@ import 'dart:ui' show Color;
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../data/ledger/personal_reminder_store.dart';
 import '../data/models/personal_models.dart';
 import '../../../core/localization/app_localizations.dart';
 import '../../../core/utils/currency_formatter.dart';
@@ -133,8 +134,7 @@ class RecurringReminderService {
       final route = _detailRoute(rt);
       final rc = requestCodeFor(rt.id);
 
-      final prefs = await SharedPreferences.getInstance();
-      final all = _decodeAll(prefs.getString(storeKey));
+      final all = _decodeAll(await PersonalReminderStore.read(storeKey));
       all[_storeKeyFor(rt.id)] = ReminderCodec.buildEntry(
         millis: when.millisecondsSinceEpoch,
         title: title,
@@ -144,7 +144,7 @@ class RecurringReminderService {
         requestCode: rc,
         route: route,
       );
-      await prefs.setString(storeKey, jsonEncode(all));
+      await PersonalReminderStore.write(storeKey, jsonEncode(all));
 
       await DebtReminderService.requestExactAlarmPermissionIfNeeded();
       await _native.invokeMethod('scheduleReminderAlarm', {
@@ -165,10 +165,9 @@ class RecurringReminderService {
 
   static Future<void> cancelById(String id) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final all = _decodeAll(prefs.getString(storeKey));
+      final all = _decodeAll(await PersonalReminderStore.read(storeKey));
       all.remove(_storeKeyFor(id));
-      await prefs.setString(storeKey, jsonEncode(all));
+      await PersonalReminderStore.write(storeKey, jsonEncode(all));
     } catch (_) {}
     try {
       await _native.invokeMethod(
@@ -182,8 +181,7 @@ class RecurringReminderService {
   /// Never throws.
   static Future<void> rescheduleAll() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final all = _decodeAll(prefs.getString(storeKey));
+      final all = _decodeAll(await PersonalReminderStore.read(storeKey));
       if (all.isEmpty) return;
       final now = DateTime.now().millisecondsSinceEpoch;
       final pruned = ReminderCodec.prunePastKeys(all, now);
@@ -207,7 +205,7 @@ class RecurringReminderService {
         } catch (_) {}
       }
       if (pruned.isNotEmpty) {
-        await prefs.setString(storeKey, jsonEncode(all));
+        await PersonalReminderStore.write(storeKey, jsonEncode(all));
       }
     } catch (_) {}
   }

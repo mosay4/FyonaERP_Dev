@@ -181,6 +181,20 @@ class InsightIncomeEvent {
   const InsightIncomeEvent(this.date, this.amountBase);
 }
 
+/// One bank/cash account as the phone holds it (native currency).
+class InsightAccount {
+  final String id;
+  final String name;
+  final String currency;
+  final double balance;
+  const InsightAccount({
+    required this.id,
+    required this.name,
+    required this.currency,
+    required this.balance,
+  });
+}
+
 class SaraInsightInput {
   final DateTime now;
   final String baseCurrency;
@@ -200,6 +214,9 @@ class SaraInsightInput {
   /// Upcoming scheduled incomes (recurring income rules).
   final List<InsightIncomeEvent> scheduledIncomes;
 
+  /// The user's accounts with their balances (low-balance heads-up).
+  final List<InsightAccount> accounts;
+
   const SaraInsightInput({
     required this.now,
     required this.baseCurrency,
@@ -210,6 +227,7 @@ class SaraInsightInput {
     this.recurring = const [],
     this.obligations = const [],
     this.scheduledIncomes = const [],
+    this.accounts = const [],
   });
 
   SaraInsightInput atTime(DateTime t) => SaraInsightInput(
@@ -222,6 +240,7 @@ class SaraInsightInput {
         recurring: recurring,
         obligations: obligations,
         scheduledIncomes: scheduledIncomes,
+        accounts: accounts,
       );
 }
 
@@ -427,20 +446,23 @@ class SaraAnalysis {
 
 /// Event-driven alert raised right after a new expense lands.
 class InstantAlert {
-  /// 'bigExpense' | 'budgetOver'
+  /// 'bigExpense' | 'budgetOver' | 'lowBalance'
   final String kind;
   final InsightTx? tx;
   final BudgetAlert? budgetAlert;
+  final InsightAccount? account;
   final double ratio;
   const InstantAlert({
     required this.kind,
     this.tx,
     this.budgetAlert,
+    this.account,
     this.ratio = 0,
   });
 
   String get key {
     if (budgetAlert != null) return 'instant:${budgetAlert!.key}';
+    if (account != null) return 'instant:low:${account!.id}';
     // Content-based (not id-based): an offline row re-keyed by the server
     // after sync must never alert twice.
     final t = tx;
@@ -1284,6 +1306,12 @@ class SaraInsightEngine {
   }
 
   // ── Event-driven ──────────────────────────────────────────
+
+  /// Accounts at or below zero, in a stable order (the device's own
+  /// low-balance heads-up; the server no longer reads Personal balances).
+  static List<InsightAccount> lowAccounts(SaraInsightInput input) =>
+      input.accounts.where((a) => a.balance <= 0).toList()
+        ..sort((a, b) => a.id.compareTo(b.id));
 
   /// Decides whether [tx] (a just-added expense) deserves an instant
   /// heads-up. Budget overruns are reported by the caller through

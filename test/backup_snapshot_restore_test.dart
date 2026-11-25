@@ -16,6 +16,7 @@ import 'package:fyona_flutter/features/personal/domain/services/backup_service.d
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:fyona_flutter/features/personal/data/ledger/personal_ledger.dart';
 import 'package:fyona_flutter/features/personal/data/ledger/personal_ledger_backup.dart';
+import 'package:fyona_flutter/features/personal/data/ledger/personal_local_cutover.dart';
 import 'support/personal_ledger_test_support.dart';
 
 /// Backup/Restore 4.0.0 verification (Personal only).
@@ -1255,6 +1256,8 @@ void main() {
 
     test('pending superseded converges instead of clearing silently',
         () async {
+      PersonalLocalMode.serverDeclined = true; // a server keeping Personal data
+      addTearDown(() => PersonalLocalMode.serverDeclined = false);
       final bs = makeBackup(dio: serverDio(online: false));
       final svc = makeService();
       await seedRich(svc);
@@ -1338,6 +1341,10 @@ void main() {
   });
 
   group('server paths (intercepted Dio)', () {
+    // These model a server that still keeps Personal data (not a
+    // device-only Personal server): the backup's server layer applies.
+    setUp(() => PersonalLocalMode.serverDeclined = true);
+    tearDown(() => PersonalLocalMode.serverDeclined = false);
     test('offline upload fails explicitly, nothing stored', () async {
       final bs = makeBackup(dio: serverDio(online: false));
       final res = await bs.uploadServerBackup(
@@ -1646,6 +1653,10 @@ void main() {
   });
 
   group('golden round-trip (strict equality)', () {
+    // These model a server that still keeps Personal data (not a
+    // device-only Personal server): the backup's server layer applies.
+    setUp(() => PersonalLocalMode.serverDeclined = true);
+    tearDown(() => PersonalLocalMode.serverDeclined = false);
     /// Seeds EVERYTHING the runtime depends on: mirror entities with real
     /// links across 6 currencies, raw legacy rows, prefs (typed), trees,
     /// uploads. Returns stable ids for assertions.

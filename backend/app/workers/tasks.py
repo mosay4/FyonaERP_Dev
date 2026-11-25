@@ -18,7 +18,7 @@ from app.domain.entities.finance_entities import BankAccount
 from app.domain.entities.personal_entities import (
     PersonalBankAccount, PersonalBudget,
 )
-from app.core import email_service, email_templates
+from app.core import email_service, email_templates, personal_local_mode
 
 logger = get_logger("tasks")
 
@@ -385,9 +385,11 @@ async def _check_low_balance():
     triggered = 0
     push_jobs: list[dict] = []
     async with async_session_factory() as session:
-        # Personal accounts
-        pstmt = select(PersonalBankAccount).where(PersonalBankAccount.is_deleted == False)  # noqa: E712
-        paccounts = (await session.execute(pstmt)).scalars().all()
+        # Personal accounts (local Personal users: their devices raise this
+        # alert from their own ledger; the server keeps no Personal data).
+        paccounts = [] if personal_local_mode.ENABLED else (await session.execute(
+            select(PersonalBankAccount).where(PersonalBankAccount.is_deleted == False)  # noqa: E712
+        )).scalars().all()
         for acc in paccounts:
             if acc.balance is not None and Decimal(str(acc.balance)) <= 0:
                 if await _has_notification_today(session, acc.user_id, "warning", str(acc.id)):
@@ -471,7 +473,8 @@ async def _check_budget_alerts():
     triggered = 0
     push_jobs: list[dict] = []
     async with async_session_factory() as session:
-        budgets = (await session.execute(
+        # Local Personal users: the device's smart notifications cover it.
+        budgets = [] if personal_local_mode.ENABLED else (await session.execute(
             select(PersonalBudget).where(PersonalBudget.is_deleted == False)  # noqa: E712
         )).scalars().all()
         for b in budgets:
@@ -681,6 +684,15 @@ def purge_personal_relay() -> dict:
             return purged
 
     return {"status": "ok", "purged": _run_async(_run())}
+
+
+@celery.task(name="purge_personal_local")
+def purge_personal_local() -> dict:
+    """Delete migrated legacy Personal rows once their grace period ended
+    (docs/PERSONAL_LOCAL_PLAN.md, Stage 6). Idempotent."""
+    from app.workers import personal_maintenance
+
+    return {"status": "ok", **_run_async(personal_maintenance.purge_local_once())}
 
 
 # ── Subscription renewal retries (custom off-session schedule) ──

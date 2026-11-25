@@ -87,7 +87,7 @@ def device_call(call_id: str, tool: str, args: Optional[dict], tz_name: str,
     return {"id": call_id, "method": "TOOL", "path": tool, "params": params}
 
 
-# ── prompt context (what SaraContextBuilder.build reads from tables) ──────
+# ── prompt context (the blocks the old server context builder read) ──────
 _CONTEXT_KEYS = {
     "banking": ("get_bank_accounts", "accounts"),
     "savings_goals": ("get_savings_goals", "savings_goals"),
@@ -101,7 +101,7 @@ _CONTEXT_KEYS = {
 
 
 def context_keys(category: str) -> List[str]:
-    """The same blocks, in the same order, as SaraContextBuilder.build."""
+    """The prompt context blocks per intent (order kept from the old server builder)."""
     keys = []
     if category in ("balance", "transaction", "analysis", "search", "general", "delete", "create"):
         keys.append("banking")
@@ -136,7 +136,7 @@ def _payload(result: Any) -> Any:
 
 def context_from_results(results: List[dict]) -> Dict[str, Any]:
     """Device answers of the context calls → the prompt's `data` dict,
-    in SaraContextBuilder's key order. Failed reads are left out."""
+    in the context key order. Failed reads are left out."""
     answered = {str(r.get("id")): r.get("result") for r in results or [] if isinstance(r, dict)}
     data: Dict[str, Any] = {}
     for key, (_, field) in _CONTEXT_KEYS.items():
@@ -202,7 +202,7 @@ def unseal(state: Any, user_id: str) -> dict:
 
 async def convert_analytics(result: Any, target: Optional[str]) -> Any:
     """Explicit cross-currency total for device analytics, with the
-    server's public rates (same rules as build_financial_analytics)."""
+    server's public rates (convert_net_totals)."""
     if not target or not isinstance(result, dict):
         return result
     from app.domain.services.sara_analytics import convert_net_totals

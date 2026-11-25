@@ -28,6 +28,16 @@ router = APIRouter(tags=["AI"])
 logger = get_logger("ai_api")
 
 
+def _update_required():
+    """Personal Sara reads the user's ledger on the phone only: a build
+    without the device header must be updated (no server fallback)."""
+    from fastapi.responses import JSONResponse
+
+    message = "حدّث التطبيق إلى آخر إصدار لاستخدام سارة في القسم الشخصي."
+    return JSONResponse({"success": False, "code": "update_required",
+                         "message": message, "detail": message}, status_code=409)
+
+
 def _svc(db):
     return HRService(
         SQLDepartmentRepo(db),
@@ -84,6 +94,8 @@ async def query_ai(
     user_id = UUID(uid)
     if data.account_type not in (None, 'personal'):
         raise HTTPException(403, detail='افتح سارة من قسم الأعمال لبيانات الأعمال.')
+    if not personal_device.is_device_request(request):
+        return _update_required()
 
     # Build agent context
     ctx = AgentContext(
@@ -118,9 +130,9 @@ async def query_ai(
         query=data.query,
         ctx=ctx,
         conversation_history=history,
-        # New app builds: the Personal ledger is on the phone; Sara's reads
-        # come back as device_calls (POST /ai/continue).
-        device=personal_device.is_device_request(request),
+        # The Personal ledger is on the phone; Sara's reads come back as
+        # device_calls (POST /ai/continue).
+        device=True,
     )
     result = response.model_dump()
     result["user_query"] = data.query
@@ -152,6 +164,8 @@ async def query_attachment(
     is_en = (language or "ar").lower() in ("en", "english")
     if account_type != 'personal':
         raise HTTPException(403, detail='افتح سارة من قسم الأعمال لبيانات الأعمال.')
+    if request is None or not personal_device.is_device_request(request):
+        return _update_required()
     has_attachment = any(f is not None and f.filename for f in (audio_file, image_file, attachment_file))
     if not (settings.SARA_API_KEY or settings.DEEPSEEK_API_KEY) and (has_attachment or query.strip()):
         return ok({
@@ -297,7 +311,7 @@ async def query_attachment(
         query=query,
         ctx=ctx,
         conversation_history=history_list,
-        device=personal_device.is_device_request(request),
+        device=True,
     )
     result = response.model_dump()
     result["user_query"] = query
@@ -325,7 +339,7 @@ async def continue_personal(
     """The phone answered Sara's Personal reads from its own ledger. The
     paused conversation comes back signed; nothing was kept on the server."""
     if not personal_device.is_device_request(request):
-        raise HTTPException(409, detail="Personal Sara device mode header is missing.")
+        return _update_required()
     if len(json.dumps(data.state, default=str)) > personal_device.STATE_LIMIT or \
             len(json.dumps(data.results, default=str)) > personal_device.STATE_LIMIT:
         raise HTTPException(413, detail="المحادثة طويلة جدًا؛ ابدأ طلبًا جديدًا.")

@@ -148,77 +148,8 @@ def _empty_db_calls(n=22):
     return [_rows([])] * n
 
 
-@pytest.mark.asyncio
-async def test_stored_timestamps_echoed_verbatim_with_tz():
-    mod = _mod()
-    tx = MagicMock()
-    tx.id = uuid4()
-    tx.description = "عشاء"
-    tx.amount = Decimal("500")
-    tx.currency = "SAR"
-    tx.tx_type = "expense"
-    tx.category = "طعام"
-    tx.date = Z(2026, 5, 14, 22, 0)  # stored UTC instant
-    tx.bank_account_id = None
-    db = AsyncMock()
-    script = [
-        _rows([("SAR", 0, 0)]), _rows([("SAR", 500, 1)]),
-        _rows([]), _rows([]),
-        _rows([]), _rows([("طعام", "SAR", 500, 1)]), _rows([]),
-        _rows([]), _rows([]),
-        _rows([]), _rows([]), _rows([]), _rows([]),
-        _rows([("طعام", "SAR", 500)]), _rows([]),
-        _rows([]),
-        _rows([tx]),
-        _rows([tx]), _rows([tx]),
-        _rows([]),
-    ]
-    # pad to the exact call count (20 base, no linked entities)
-    while len(script) < 20:
-        script.append(_rows([]))
-    db.execute.side_effect = script
-    a = await mod.build_financial_analytics(
-        db, uuid4(), "this_month",
-        now=Z(2026, 5, 15, 12, 0), tz=RIYADH)
-    assert a["meta"]["timezone"] == RIYADH
-    assert a["meta"]["period_start"].endswith("+00:00")  # UTC bounds
-    top = a["details"]["top_expenses"][0]
-    assert top["date"] == "2026-05-14T22:00:00+00:00"  # stored instant intact
-    assert top["amount"] == "500" and top["currency_id"] == "SAR"
-
-
-# ── 10: currency grouping unchanged by tz ───────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_currency_buckets_identical_with_and_without_tz():
-    mod = _mod()
-
-    def script():
-        return [
-            _rows([("SAR", 200, 1), ("USD", 100, 1)]),
-            _rows([("SAR", 50, 1), ("USD", 10, 1)]),
-            _rows([]), _rows([]),
-            _rows([]), _rows([]), _rows([]),
-            _rows([]), _rows([]),
-            _rows([]), _rows([]), _rows([]), _rows([]),
-            _rows([]), _rows([]),
-            _rows([]),
-            _rows([]),
-            _rows([]), _rows([]),
-            _rows([]),
-        ]
-
-    db1, db2 = AsyncMock(), AsyncMock()
-    db1.execute.side_effect = script()
-    db2.execute.side_effect = script()
-    a_utc = await mod.build_financial_analytics(
-        db1, uuid4(), "this_month", now=Z(2026, 5, 15, 12, 0))
-    a_tz = await mod.build_financial_analytics(
-        db2, uuid4(), "this_month", now=Z(2026, 5, 15, 12, 0), tz=RIYADH)
-    assert a_utc["facts"]["money_by_currency"] == \
-        a_tz["facts"]["money_by_currency"]
-    assert a_utc["meta"]["timezone"] == "UTC"
-    assert a_tz["meta"]["timezone"] == RIYADH
+# (Stored timestamps / currency buckets of the analytics snapshot are pinned
+# on the phone side now: test/fixtures/personal_analytics_parity.json.)
 
 
 # ── 11: non-UTC zone with DST ───────────────────────────────────────────────
@@ -269,34 +200,25 @@ async def test_loader_falls_back_when_user_row_missing():
     assert await mod.load_user_timezone_name(db3, uuid4()) == NY
 
 
-# ── runtime: builder applies the stored user timezone ───────────────────────
+# ── runtime: device calls carry the stored user timezone ────────────────
 
 @pytest.mark.asyncio
-async def test_runtime_builder_uses_stored_user_timezone():
+async def test_runtime_device_calls_use_stored_user_timezone(monkeypatch):
     from app.domain.services import sara_agent_service as mod
+    from app.domain.models.agent_models import AgentContext
+    monkeypatch.setattr(mod, "classify_intent", lambda q: mod.IntentClassification(
+        category="analysis", period="today", needs_data=True))
     user_row = MagicMock()
     user_row.scalar.return_value = NY
     db = AsyncMock()
-    db.execute.side_effect = [
-        _rows([]),         # banking (runs before the tz lookup)
-        user_row,          # central tz lookup (users.timezone)
-        _rows([]), _rows([]),  # legacy financial summary
-        _rows([]), _rows([]),  # analytics current sums
-        _rows([]), _rows([]),  # analytics previous sums
-        _rows([]), _rows([]), _rows([]),  # transfers/tops/income
-        _rows([]), _rows([]),  # banks + flows
-        _rows([]), _rows([]), _rows([]), _rows([]),  # budgets/goals/debts/rec
-        _rows([]), _rows([]),  # movers
-        _rows([]),  # anomaly base
-        _rows([]),  # period expenses
-        _rows([]), _rows([]),  # top + recent
-        _rows([]),  # frequent
-    ]
-    intent = mod.IntentClassification(category="analysis",
-                                      subcategory="financial_summary",
-                                      period="today", needs_data=True)
-    builder = mod.SaraContextBuilder(db, uuid4(), uuid4())
-    data = await builder.build(intent)
-    assert data["analytics"]["meta"]["timezone"] == NY
-    # Legacy summary follows the same central bounds (bounded window now).
-    assert data["financial"]["period"] == "today"
+    db.execute.return_value = user_row
+    ctx = AgentContext(user_id=str(uuid4()), user_name="t", language="en",
+                       account_type="personal",
+                       subscription_context={"known": True, "sections": {
+                           "personal": {"active": True}, "business": {"active": False}}})
+    response = await mod.SaraAgentService(db, uuid4(), uuid4()).process(
+        "analyze my spending today", ctx)
+    calls = response.device_calls
+    assert calls, "the phone answers the context reads"
+    bounded = [c for c in calls if (c.get("params") or {}).get("bounds")]
+    assert bounded and all(c["params"]["bounds"]["timezone"] == NY for c in bounded)

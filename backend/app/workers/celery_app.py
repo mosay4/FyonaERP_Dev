@@ -57,6 +57,10 @@ celery.conf.beat_schedule = {
         "task": "purge_personal_relay",
         "schedule": 3600.0,
     },
+    "purge-personal-local-hourly": {
+        "task": "purge_personal_local",
+        "schedule": 3600.0,
+    },
     "retry-renewal-charges-daily": {
         "task": "retry_renewal_charges",
         "schedule": crontab(hour=4, minute=0),

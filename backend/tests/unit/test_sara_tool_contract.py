@@ -116,6 +116,7 @@ def test_pended_schemas_match_flutter_contract():
 def test_backend_executed_tools_all_have_handlers():
     smod = _svc_mod()
     cmod = _contract_mod()
+    from app.domain.services.sara_personal_device import DEVICE_READ_TOOLS as device_reads
     inline_actions = {"open_app_screen", "open_entity", "show_suggestions",
                       "create_entity", "export_report", "ask_clarification",
                       "get_app_help"}
@@ -124,6 +125,10 @@ def test_backend_executed_tools_all_have_handlers():
         if entry.get("owner") == "dual" and tool_id != "create_transaction":
             continue
         if tool_id in inline_actions:
+            continue
+        if tool_id in device_reads:
+            # Personal reads are answered by the phone, never a server table.
+            assert not hasattr(smod.ToolExecutor, f"_exec_{tool_id}"), tool_id
             continue
         assert hasattr(smod.ToolExecutor, f"_exec_{tool_id}"), tool_id
 

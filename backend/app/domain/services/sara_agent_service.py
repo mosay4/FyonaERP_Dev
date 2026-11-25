@@ -1124,273 +1124,9 @@ def classify_intent(query: str) -> IntentClassification:
     return IntentClassification(category="general", needs_data=False)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  CONTEXT BUILDERS
-# ═══════════════════════════════════════════════════════════════
-
-class SaraContextBuilder:
-    """Builds minimal context based on intent classification."""
-
-    def __init__(self, db: AsyncSession, org_id: UUID, user_id: UUID):
-        self._db = db
-        self._org_id = org_id
-        self._user_id = user_id
-
-    async def build(self, intent: IntentClassification) -> dict:
-        context = {}
-        category = intent.category
-
-        if category in ("balance", "transaction", "analysis", "search", "general", "delete", "create"):
-            context["banking"] = await self._get_banking_summary()
-
-        # Delete / create flows need the real entity lists (with IDs) so the
-        # model matches by name and deletes/updates by ID — never guesses.
-        if category in ("delete", "create"):
-            context["savings_goals"] = await self._get_savings_goals()
-            context["debts"] = await self._get_debts()
-            context["budgets"] = await self._get_budgets()
-            context["recurring"] = await self._get_recurring()
-
-        if category in ("analysis", "sales"):
-            from app.domain.services.sara_analytics import (
-                build_financial_analytics,
-                load_user_timezone_name,
-            )
-            # One central lookup: the user's stored timezone drives every
-            # period bound Sara sees (analytics + legacy summary below).
-            tz_name = await load_user_timezone_name(self._db, self._user_id)
-            context["financial"] = await self._get_financial_summary(
-                intent.period or "this_month", tz_name
-            )
-
-        # P1 analytics: pre-computed FACTS/COMPARISONS/DETECTIONS/DETAILS/
-        # MISSING from real data (bounded; per-currency; Decimal-exact).
-        if category == "analysis":
-            from app.domain.services.sara_analytics import (
-                build_financial_analytics,
-            )
-            context["analytics"] = await build_financial_analytics(
-                self._db, self._user_id, intent.period or "this_month",
-                tz=tz_name,
-            )
-
-        # Personal Sara never loads the organization's Business tables.
-
-        if category == "search":
-            context["recent_transactions"] = await self._get_recent_transactions(10)
-
-        return context
-
-    async def _get_banking_summary(self) -> list:
-        from app.domain.entities.personal_entities import PersonalBankAccount
-        r = await self._db.execute(
-            select(PersonalBankAccount).where(
-                PersonalBankAccount.user_id == self._user_id,
-                ~PersonalBankAccount.is_deleted,
-            )
-        )
-        accounts = r.scalars().all()
-        return [
-            {
-                "id": str(a.id),
-                "name": a.bank_name,
-                "currency": a.currency,
-                "balance": str(a.balance),
-                "type": "bank",
-            }
-            for a in accounts
-        ]
-
-    async def _get_savings_goals(self) -> list:
-        from app.domain.entities.personal_entities import PersonalSavingsGoal
-        r = await self._db.execute(
-            select(PersonalSavingsGoal).where(
-                PersonalSavingsGoal.user_id == self._user_id,
-                ~PersonalSavingsGoal.is_deleted,
-            )
-        )
-        return [
-            {
-                "id": str(g.id),
-                "name": g.name,
-                "target_amount": str(g.target_amount),
-                "current_amount": str(g.current_amount),
-            }
-            for g in r.scalars().all()
-        ]
-
-    async def _get_debts(self) -> list:
-        from app.domain.entities.personal_entities import PersonalDebt
-        r = await self._db.execute(
-            select(PersonalDebt).where(
-                PersonalDebt.user_id == self._user_id,
-                ~PersonalDebt.is_deleted,
-            )
-        )
-        return [
-            {
-                "id": str(d.id),
-                "person_name": d.person_name,
-                "amount": str(d.amount),
-                "currency": d.currency,
-                "debt_type": d.debt_type,
-                "is_paid": bool(d.is_paid),
-            }
-            for d in r.scalars().all()
-        ]
-
-    async def _get_budgets(self) -> list:
-        from app.domain.entities.personal_entities import PersonalBudget
-        r = await self._db.execute(
-            select(PersonalBudget).where(
-                PersonalBudget.user_id == self._user_id,
-                ~PersonalBudget.is_deleted,
-            )
-        )
-        return [
-            {
-                "id": str(b.id),
-                "name": b.name or b.category,
-                "amount": str(b.total_amount if b.total_amount else b.amount),
-                "currency": b.currency,
-            }
-            for b in r.scalars().all()
-        ]
-
-    async def _get_recurring(self) -> list:
-        from app.domain.entities.personal_entities import PersonalRecurringTransaction
-        r = await self._db.execute(
-            select(PersonalRecurringTransaction).where(
-                PersonalRecurringTransaction.user_id == self._user_id,
-                ~PersonalRecurringTransaction.is_deleted,
-            )
-        )
-        return [
-            {
-                "id": str(t.id),
-                "name": t.name,
-                "amount": str(t.amount),
-                "currency": t.currency,
-                "is_active": bool(t.is_active),
-            }
-            for t in r.scalars().all()
-        ]
-
-    async def _get_financial_summary(self, period: str, tz_name=None) -> dict:
-        from app.domain.entities.personal_entities import PersonalTransaction
-        from app.domain.services.sara_analytics import (
-            resolve_period,
-            load_user_timezone_name,
-        )
-        # Central date ranges: user-tz wall edges → UTC bounds. Storage and
-        # aggregation logic are untouched; only the window moves.
-        if tz_name is None:
-            tz_name = await load_user_timezone_name(self._db, self._user_id)
-        start, end, _, _, period = resolve_period(period, tz=tz_name)
-
-        income_rows = await self._db.execute(
-            select(
-                PersonalTransaction.currency,
-                func.coalesce(func.sum(PersonalTransaction.amount), 0),
-            ).where(
-                PersonalTransaction.user_id == self._user_id,
-                PersonalTransaction.date >= start,
-                PersonalTransaction.date < end,
-                PersonalTransaction.tx_type.in_(["income"]),
-                ~PersonalTransaction.is_deleted,
-            ).group_by(PersonalTransaction.currency)
-        )
-        expense_rows = await self._db.execute(
-            select(
-                PersonalTransaction.currency,
-                func.coalesce(func.sum(PersonalTransaction.amount), 0),
-            ).where(
-                PersonalTransaction.user_id == self._user_id,
-                PersonalTransaction.date >= start,
-                PersonalTransaction.date < end,
-                PersonalTransaction.tx_type.in_(["expense"]),
-                ~PersonalTransaction.is_deleted,
-            ).group_by(PersonalTransaction.currency)
-        )
-        # Per-currency buckets only: income/expense/net of different
-        # currencies are NEVER added together. No single mixed total.
-        income_by_currency: dict = {}
-        for cur, total in income_rows.all():
-            key = (cur or "SAR").upper()
-            income_by_currency[key] = income_by_currency.get(key, Decimal("0")) + Decimal(str(total or 0))
-        expense_by_currency: dict = {}
-        for cur, total in expense_rows.all():
-            key = (cur or "SAR").upper()
-            expense_by_currency[key] = expense_by_currency.get(key, Decimal("0")) + Decimal(str(total or 0))
-        by_currency = []
-        for cur in sorted(set(income_by_currency) | set(expense_by_currency)):
-            inc = income_by_currency.get(cur, Decimal("0"))
-            exp = expense_by_currency.get(cur, Decimal("0"))
-            by_currency.append({
-                "currency_id": cur,
-                "currency": cur,
-                "income": str(inc),
-                "expense": str(exp),
-                "net": str(inc - exp),
-            })
-        return {"period": period, "by_currency": by_currency}
-
-    async def _get_customer_count(self) -> dict:
-        try:
-            from app.domain.entities.business_entities import Customer
-            r = await self._db.execute(
-                select(func.count(Customer.id)).where(
-                    Customer.organization_id == self._org_id,
-                    ~Customer.is_deleted,
-                )
-            )
-            count = r.scalar() or 0
-            return {"count": count}
-        except Exception:
-            return {"count": 0}
-
-    async def _get_inventory_summary(self) -> dict:
-        try:
-            from app.domain.entities.business_entities import Product
-            total = await self._db.execute(
-                select(func.count(Product.id)).where(
-                    Product.organization_id == self._org_id,
-                    ~Product.is_deleted,
-                )
-            )
-            low = await self._db.execute(
-                select(func.count(Product.id)).where(
-                    Product.organization_id == self._org_id,
-                    ~Product.is_deleted,
-                    Product.stock < Product.min_stock,
-                )
-            )
-            return {
-                "total": total.scalar() or 0,
-                "low_stock": low.scalar() or 0,
-            }
-        except Exception:
-            return {"total": 0, "low_stock": 0}
-
-    async def _get_recent_transactions(self, limit: int = 10) -> list:
-        from app.domain.entities.personal_entities import PersonalTransaction
-        r = await self._db.execute(
-            select(PersonalTransaction)
-            .where(
-                PersonalTransaction.user_id == self._user_id,
-                ~PersonalTransaction.is_deleted,
-            )
-            .order_by(PersonalTransaction.date.desc())
-            .limit(limit)
-        )
-        txs = r.scalars().all()
-        return [
-            {"description": t.description, "amount": str(t.amount),
-             "currency_id": str(getattr(t, "currency", "") or "SAR").upper(),
-             "currency": str(getattr(t, "currency", "") or "SAR").upper(),
-             "type": t.tx_type, "date": str(t.date.date()) if hasattr(t.date, "date") else str(t.date)}
-            for t in txs
-        ]
+# Personal context and reads come from the user's phone (device_calls,
+# sara_personal_device): the server holds no Personal data, so there is no
+# server-side context builder over the Personal tables (Stage 6).
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2185,42 +1921,8 @@ class ToolExecutor:
         return normalize_result(
             tool_name, {"error": f"Unknown tool: {tool_name}"})
 
-    async def _exec_get_banking_data(self, args: dict) -> dict:
-        ctx = SaraContextBuilder(self._db, self._org_id, self._user_id)
-        accounts = await ctx._get_banking_summary()
-        result = {"accounts": accounts}
-        if args.get("include_transactions"):
-            result["transactions"] = await ctx._get_recent_transactions(
-                args.get("limit", 10)
-            )
-        return result
-
-    async def _exec_get_financial_summary(self, args: dict) -> dict:
-        ctx = SaraContextBuilder(self._db, self._org_id, self._user_id)
-        return await ctx._get_financial_summary(args.get("period", "this_month"))
-
-    async def _exec_get_financial_analytics(self, args: dict) -> dict:
-        from datetime import datetime as _dt
-        from app.domain.services.sara_analytics import (
-            build_financial_analytics,
-            load_user_timezone_name,
-        )
-        period = args.get("period", "this_month")
-        start = end = None
-        if period == "custom":
-            try:
-                if args.get("from_date"):
-                    start = _dt.fromisoformat(str(args["from_date"]))
-                if args.get("to_date"):
-                    end = _dt.fromisoformat(str(args["to_date"]))
-            except (ValueError, TypeError):
-                start = end = None
-        tz_name = await load_user_timezone_name(self._db, self._user_id)
-        return await build_financial_analytics(
-            self._db, self._user_id, period,
-            target_currency=args.get("target_currency"),
-            custom_start=start, custom_end=end, tz=tz_name,
-        )
+    # Personal read tools (DEVICE_READ_TOOLS) are answered by the phone from
+    # its own ledger; the server has no handler that reads Personal tables.
 
     async def _exec_get_customer_data(self, args: dict) -> dict:
         from app.domain.entities.business_entities import Customer
@@ -2264,104 +1966,6 @@ class ToolExecutor:
             for p in products
         ]}
 
-    async def _exec_get_sales_data(self, args: dict) -> dict:
-        ctx = SaraContextBuilder(self._db, self._org_id, self._user_id)
-        return await ctx._get_financial_summary(args.get("period", "this_month"))
-
-    async def _exec_get_expenses_data(self, args: dict) -> dict:
-        from app.domain.entities.personal_entities import PersonalTransaction
-        from app.domain.services.sara_analytics import (
-            resolve_period,
-            load_user_timezone_name,
-        )
-
-        category = (args.get("category") or "").strip()
-        period = args.get("period", "this_month")
-
-        # Same central ranges as analytics (user-tz edges → UTC bounds).
-        tz_name = await load_user_timezone_name(self._db, self._user_id)
-        start, end, _, _, period = resolve_period(period, tz=tz_name)
-
-        stmt = select(PersonalTransaction).where(
-            PersonalTransaction.user_id == self._user_id,
-            ~PersonalTransaction.is_deleted,
-            PersonalTransaction.date >= start,
-            PersonalTransaction.date < end,
-            PersonalTransaction.tx_type == "expense",
-        )
-        if category:
-            stmt = stmt.where(PersonalTransaction.category == category)
-        r = await self._db.execute(stmt.limit(args.get("limit", 20)))
-        expenses = r.scalars().all()
-        expense_rows = [
-            {"description": getattr(e, "description", ""), "amount": str(getattr(e, "amount", 0)),
-             "currency_id": str(getattr(e, "currency", "") or "SAR").upper(),
-             "currency": str(getattr(e, "currency", "") or "SAR").upper(),
-             "category": getattr(e, "category", ""), "date": str(getattr(e, "date", ""))}
-            for e in expenses
-        ]
-
-        # Per-currency totals (+ per category×currency): never one mixed sum.
-        by_currency: dict = {}
-        by_category: dict = {}
-        for row in expense_rows:
-            try:
-                amt = Decimal(str(row["amount"]))
-            except Exception:
-                continue
-            cur = row["currency"]
-            by_currency[cur] = by_currency.get(cur, Decimal("0")) + amt
-            cat_key = (row["category"] or "", cur)
-            by_category[cat_key] = by_category.get(cat_key, Decimal("0")) + amt
-
-        return {
-            "period": period,
-            "by_currency": [
-                {"currency_id": cur, "currency": cur, "total": str(total)}
-                for cur, total in sorted(by_currency.items())
-            ],
-            "by_category": [
-                {"category": cat, "currency_id": cur, "currency": cur, "total": str(total)}
-                for (cat, cur), total in sorted(by_category.items())
-            ],
-            "expenses": expense_rows,
-            "bank_withdrawals": [],
-            "category_filter": category or None,
-        }
-
-    async def _exec_search_all_transactions(self, args: dict) -> dict:
-        from app.domain.entities.personal_entities import PersonalTransaction
-        stmt = select(PersonalTransaction).where(
-            PersonalTransaction.user_id == self._user_id,
-            ~PersonalTransaction.is_deleted,
-        )
-        query = (args.get("query") or "").strip()
-        if query:
-            stmt = stmt.where(PersonalTransaction.description.ilike(f"%{query}%"))
-        tx_type = args.get("tx_type")
-        if tx_type:
-            stmt = stmt.where(PersonalTransaction.tx_type == tx_type)
-        category = args.get("category")
-        if category and hasattr(PersonalTransaction, "category"):
-            stmt = stmt.where(PersonalTransaction.category == category)
-        from_date = args.get("from_date")
-        to_date = args.get("to_date")
-        if from_date:
-            stmt = stmt.where(PersonalTransaction.date >= from_date)
-        if to_date:
-            stmt = stmt.where(PersonalTransaction.date <= to_date)
-        stmt = stmt.order_by(PersonalTransaction.date.desc()).limit(args.get("limit", 20))
-        r = await self._db.execute(stmt)
-        txs = r.scalars().all()
-        return {"transactions": [
-            {"description": t.description, "amount": str(t.amount), "type": t.tx_type,
-             "currency_id": str(getattr(t, "currency", "") or "SAR").upper(),
-             "currency": str(getattr(t, "currency", "") or "SAR").upper(),
-             "category": getattr(t, "category", None),
-             "date": str(t.date.date()) if hasattr(t.date, "date") else str(t.date)}
-            for t in txs
-        ]}
-
     async def _verify_tx(self, tx_id) -> bool:
         """Re-read a just-flushed transaction by ID (read-only check).
 
@@ -2374,95 +1978,6 @@ class ToolExecutor:
             return row is not None
         except Exception:
             return False
-
-    # ── Sara list/search/rate reads (read-only; same user-scoped queries
-    # as the context builder, so the online loop can match names to IDs and
-    # fetch real FX rates itself instead of asking the user). ──
-    async def _exec_get_bank_accounts(self, args: dict) -> dict:
-        ctx = SaraContextBuilder(self._db, self._org_id, self._user_id)
-        return {"accounts": await ctx._get_banking_summary()}
-
-    async def _exec_get_savings_goals(self, args: dict) -> dict:
-        ctx = SaraContextBuilder(self._db, self._org_id, self._user_id)
-        return {"savings_goals": await ctx._get_savings_goals()}
-
-    async def _exec_get_debts(self, args: dict) -> dict:
-        ctx = SaraContextBuilder(self._db, self._org_id, self._user_id)
-        return {"debts": await ctx._get_debts()}
-
-    async def _exec_get_budgets(self, args: dict) -> dict:
-        ctx = SaraContextBuilder(self._db, self._org_id, self._user_id)
-        return {"budgets": await ctx._get_budgets()}
-
-    async def _exec_get_recurring(self, args: dict) -> dict:
-        ctx = SaraContextBuilder(self._db, self._org_id, self._user_id)
-        return {"recurring": await ctx._get_recurring()}
-
-    async def _exec_search_entity(self, args: dict) -> dict:
-        query = str(args.get("query") or "").strip().lower()
-        entity_type = str(args.get("entity_type") or "").strip().lower()
-        if not query:
-            return {"error": ("Missing search query" if self._is_en else "نص البحث مفقود")}
-        ctx = SaraContextBuilder(self._db, self._org_id, self._user_id)
-        pools: dict = {
-            "goal": ("name", await ctx._get_savings_goals()),
-            "debt": ("person_name", await ctx._get_debts()),
-            "budget": ("name", await ctx._get_budgets()),
-            "recurring": ("name", await ctx._get_recurring()),
-            "bank": ("name", await ctx._get_banking_summary()),
-            "account": ("name", await ctx._get_banking_summary()),
-        }
-        if entity_type and entity_type not in pools:
-            return {"error": (f"Unknown entity type: {entity_type}" if self._is_en else f"نوع عنصر غير معروف: {entity_type}")}
-        names = [entity_type] if entity_type else list(pools)
-        matches = []
-        for key in names:
-            label, items = pools[key]
-            for it in items:
-                if query in str(it.get(label) or "").strip().lower():
-                    matches.append({"entity_type": key, **it})
-        return {"matches": matches}
-
-    async def _exec_get_entity_detail(self, args: dict) -> dict:
-        from uuid import UUID as _UUID
-        entity_type = str(args.get("entity_type") or "").strip().lower()
-        raw_id = str(args.get("entity_id") or "").strip()
-        try:
-            wanted = _UUID(raw_id)
-        except Exception:
-            return {"error": ("Invalid entity ID" if self._is_en else "معرف العنصر غير صالح")}
-        from app.domain.entities.personal_entities import (
-            PersonalBankAccount, PersonalSavingsGoal, PersonalDebt,
-            PersonalBudget, PersonalRecurringTransaction,
-        )
-        models = {
-            "bank": PersonalBankAccount, "account": PersonalBankAccount,
-            "goal": PersonalSavingsGoal, "debt": PersonalDebt,
-            "budget": PersonalBudget, "recurring": PersonalRecurringTransaction,
-        }
-        model = models.get(entity_type)
-        if model is None:
-            return {"error": (f"Unknown entity type: {entity_type}" if self._is_en else f"نوع عنصر غير معروف: {entity_type}")}
-        row = (await self._db.execute(
-            select(model).where(
-                model.id == wanted,
-                model.user_id == self._user_id,
-                ~model.is_deleted,
-            )
-        )).scalars().first()
-        if row is None:
-            return {"error": ("Not found" if self._is_en else "العنصر غير موجود")}
-        detail = {"id": str(row.id), "entity_type": entity_type}
-        for attr in ("bank_name", "name", "person_name", "amount", "target_amount",
-                     "current_amount", "total_amount", "currency", "debt_type",
-                     "is_paid", "is_active", "balance"):
-            try:
-                val = getattr(row, attr, None)
-            except Exception:
-                val = None
-            if val is not None:
-                detail[attr] = str(val)
-        return {"entity": detail}
 
     async def _exec_get_exchange_rate(self, args: dict) -> dict:
         from_code = str(args.get("from_currency") or "").strip().upper()
@@ -3140,7 +2655,8 @@ async def prepare_personal_banking(executor, args, accounts=None):
     """Resolve exact owned accounts and quote FX without writing money.
     [accounts]: the phone's own list (device mode) — never the server's."""
     if accounts is None:
-        accounts = await SaraContextBuilder(executor._db, executor._org_id, executor._user_id)._get_banking_summary()
+        # The accounts always come from the phone (device mode).
+        return {'error': 'تعذرت قراءة حساباتك من الجهاز.'}
     accounts = [{**a, 'id': str(a.get('id') or ''), 'name': str(a.get('name') or ''),
                  'currency': str(a.get('currency') or '').strip().upper()}
                 for a in accounts if isinstance(a, dict)]
@@ -3233,13 +2749,15 @@ class SaraAgentService:
         device: bool = False,
         resume: Optional[dict] = None,
     ) -> AgentResponse:
-        """[device]: the Personal ledger lives on the user's phone (header
-        x-fyona-device-sara: personal). No Personal table is read: context
+        """The Personal ledger lives only on the user's phone (the app sends
+        x-fyona-device-sara: personal; ai.py refuses requests without it).
+        [device] is kept for callers and is always on. No Personal table is read: context
         and read tools become `device_calls`, and the conversation resumes
         with [resume] = {state (verified), results} from POST /ai/continue.
         Nothing about the user's money is kept on the server between rounds
         (no MEMORY_STORE turns/facts, no question text in analytics)."""
         from app.domain.services import sara_personal_device as personal_device
+        device = True  # Stage 6: unconditional (no server Personal data).
         try:
             _started = time.perf_counter()
             user_key = f'{self._user_key()}:personal'
@@ -3262,18 +2780,18 @@ class SaraAgentService:
                     return AgentResponse(text=guidance['text'], actions=[AgentAction(**a) for a in guidance['actions']], confidence=1)
                 # Device mode: the question may carry the user's figures —
                 # analytics keeps only that a question was asked.
-                self._analytics.record_question(question='' if device else query)
+                self._analytics.record_question(question='')
             # Device mode never reads or writes the shared in-process memory.
-            memory = (AgentMemoryStore().get(user_key) if device else MEMORY_STORE.get(user_key))
+            memory = AgentMemoryStore().get(user_key)
 
             # 1. Classify intent (for context building; tools stay dynamic)
             intent = classify_intent(query)
             intent_str = intent.category
 
             # 2. Build minimal context based on intent
-            if device and state.get('phase') == 'context':
+            if state.get('phase') == 'context':
                 data = personal_device.context_from_results(results)
-            elif device:
+            else:
                 from app.domain.services.sara_analytics import load_user_timezone_name
                 tz_name = await load_user_timezone_name(self._db, self._user_id)
                 calls = personal_device.context_calls(intent_str, intent.period, tz_name)
@@ -3285,9 +2803,6 @@ class SaraAgentService:
                         state=personal_device.seal({'phase': 'context', 'query': query,
                                                     'history': history}, self._user_key()))
                 data = {}
-            else:
-                context_builder = SaraContextBuilder(self._db, self._org_id, self._user_id)
-                data = await context_builder.build(intent)
 
             # 3. Always search knowledge base (help + feature guidance)
             results = search_knowledge(query, account_type=ctx.account_type)
@@ -3298,10 +2813,6 @@ class SaraAgentService:
             # 3b. Knowledge graph relationships for the matched feature
             feature = find_intent_feature(query)
             relationships = format_relationships_for_prompt(feature) if feature else None
-
-            # 3c. Persist current screen into memory (app awareness)
-            if ctx.current_screen and not device:
-                MEMORY_STORE.set_state(user_key, last_screen=ctx.current_screen)
 
             # 4. Build dynamic prompt (with memory + relationships + app state)
             system_prompt = build_dynamic_prompt(ctx, intent, data, memory=memory, relationships=relationships)
@@ -3339,9 +2850,7 @@ class SaraAgentService:
                 if isinstance(msg, dict) and msg.get("role") in ("user", "assistant"):
                     messages.append({"role": msg["role"], "content": msg.get("content", "")})
             messages.append({"role": "user", "content": query})
-            if not device:
-                MEMORY_STORE.append_turn(user_key, "user", query)
-            return await self._run(messages, ctx, query, device=device, intent_str=intent_str,
+            return await self._run(messages, ctx, query, device=True, intent_str=intent_str,
                                    subscription_context=subscription_context)
         except Exception as e:
             return self._failure(e, is_en, _started)
@@ -3353,6 +2862,7 @@ class SaraAgentService:
         state) whenever the phone must answer a read, and resumes here."""
         from app.domain.services import sara_personal_device as personal_device
         from app.domain.services.sara_presentation import present
+        device = True  # Stage 6: unconditional (no server Personal data).
         try:
             _started = time.perf_counter()
             user_key = f'{self._user_key()}:personal'
@@ -3382,10 +2892,8 @@ class SaraAgentService:
             rounds_used = 0
             tool_calls_made = 0
             first_round = 0
-            tz_name = None
-            if device:
-                from app.domain.services.sara_analytics import load_user_timezone_name
-                tz_name = await load_user_timezone_name(self._db, self._user_id)
+            from app.domain.services.sara_analytics import load_user_timezone_name
+            tz_name = await load_user_timezone_name(self._db, self._user_id)
             if resume_state is not None:
                 # The phone answered this round's reads: put each answer
                 # where the tool reply belongs, then continue the loop.
@@ -3471,28 +2979,18 @@ class SaraAgentService:
                     except (json.JSONDecodeError, TypeError):
                         fn_args = {}
 
-                    if device and fn_name == 'create_transaction':
+                    if fn_name == 'create_transaction':
                         # The phone lists its own accounts; prepared on resume.
                         tool_calls_made += 1
                         prepare[tc.id] = fn_args
                         device_calls.append(personal_device.device_call(tc.id, 'get_bank_accounts', {}, tz_name))
                         continue
-                    if device and fn_name in personal_device.DEVICE_READ_TOOLS:
+                    if fn_name in personal_device.DEVICE_READ_TOOLS:
                         tool_calls_made += 1
                         if fn_name == 'get_financial_analytics' and fn_args.get('target_currency'):
                             convert[tc.id] = str(fn_args['target_currency'])
                         device_calls.append(personal_device.device_call(tc.id, fn_name, fn_args, tz_name))
                         continue
-                    if fn_name == 'create_transaction':
-                        prepared = await prepare_personal_banking(tool_executor, fn_args)
-                        if prepared.get('error'):
-                            messages.append({'role': 'tool', 'tool_call_id': tc.id,
-                                'content': json.dumps(prepared, ensure_ascii=False, default=str)})
-                            continue
-                        pending_tools.append(prepared)
-                        answer = ('Review the operation and exchange rate, then confirm. Nothing has been executed yet.' if is_en else 'راجع تفاصيل العملية وسعر الصرف ثم أكد التنفيذ. لم يتم التنفيذ بعد.')
-                        # Never submit the same write twice within an agent loop.
-                        return AgentResponse(text=answer, pending_tools=pending_tools, actions=actions, confidence=0.9)
                     if fn_name == "open_app_screen":
                         tool_calls_made += 1
                         screen = fn_args.get("screen", "")
@@ -3603,9 +3101,7 @@ class SaraAgentService:
                     elif fn_name == "ask_clarification":
                         tool_calls_made += 1
                         self._analytics.record_tool(tool_name="ask_clarification", success=True)
-                        # Model needs more info from the user — remember the pending task
-                        if not device:
-                            MEMORY_STORE.set_state(user_key, current_task=query)
+                        # Model needs more info (nothing is remembered on the server).
                         clarification_requested = True
                         question = fn_args.get("question", "")
                         tool_result = {"clarification": question, "options": fn_args.get("options", [])}
@@ -3627,8 +3123,7 @@ class SaraAgentService:
                             "content": json.dumps(tool_result, ensure_ascii=False, default=str),
                         })
                         continue
-                    elif hasattr(tool_executor, f"_exec_{fn_name}") and not (
-                            device and fn_name != 'get_exchange_rate'):
+                    elif fn_name == 'get_exchange_rate':  # public rates only
                         tool_calls_made += 1
                         # Data fetch OR execution: run and feed result back to the model.
                         # Data-driven: any tool with a _exec_<name> handler is executed,
@@ -3666,8 +3161,6 @@ class SaraAgentService:
                                 params={},
                                 label="Refresh Data" if is_en else "تحديث البيانات",
                             ))
-                            if not device:
-                                MEMORY_STORE.set_state(user_key, last_operation=(f"Financial operation: {tool_result.get('message', '')}" if is_en else f"عملية مالية: {tool_result.get('message', '')}"))
                         continue
                     else:
                         # Unknown tool: return error to model so it can recover
@@ -3728,14 +3221,8 @@ class SaraAgentService:
             if not answer:
                 answer = ("Sorry, I couldn't process your request right now. Could you rephrase your question?" if is_en else "آسف، لم أستطع معالجة طلبك حالياً. هل يمكنك إعادة صياغة سؤالك؟")
 
-            # 8. Persist assistant turn + inferred task (never in device
-            # mode: Sara's answer may quote the user's figures).
-            if not device:
-                MEMORY_STORE.append_turn(user_key, "assistant", answer)
-            # Only clear the in-flight task if it was actually completed (i.e. the
-            # model did NOT stop to ask for clarification and resume later).
-            if not device and intent_str in ("create", "transaction", "navigation", "delete") and not clarification_requested:
-                MEMORY_STORE.set_state(user_key, current_task=None)
+            # 8. Nothing is persisted on the server: Sara's answer may quote
+            # the user's figures.
 
             self._analytics.record_round(
                 rounds=rounds_used, tool_count=tool_calls_made,

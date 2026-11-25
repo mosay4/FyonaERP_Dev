@@ -47,10 +47,9 @@ class NoPersonalTablesDb:
 def _forbid_server_reads(monkeypatch):
     def boom(*a, **k):
         raise AssertionError('server Personal read in device mode')
-    for name in ('build', '_get_banking_summary', '_get_savings_goals', '_get_debts', '_get_budgets',
-                 '_get_recurring', '_get_financial_summary', '_get_recent_transactions'):
-        monkeypatch.setattr(sara.SaraContextBuilder, name, AsyncMock(side_effect=boom))
-    monkeypatch.setattr(sara_analytics, 'build_financial_analytics', AsyncMock(side_effect=boom))
+    # Stage 6: the server-table paths are gone altogether.
+    assert not hasattr(sara, 'SaraContextBuilder')
+    assert not hasattr(sara_analytics, 'build_financial_analytics')
     for name in dir(sara.ToolExecutor):
         if name.startswith('_exec_') and name != '_exec_get_exchange_rate':
             monkeypatch.setattr(sara.ToolExecutor, name, AsyncMock(side_effect=boom))
@@ -229,9 +228,9 @@ async def test_continue_endpoint_requires_header_and_valid_state(monkeypatch):
     uid = uuid4()
     body = ai.PersonalContinue(state=device.seal({'phase': 'context', 'query': 'q', 'history': []}, str(uid)))
     plain = SimpleNamespace(headers={})
-    with pytest.raises(HTTPException) as err:
-        await ai.continue_personal(body, plain, org=str(uuid4()), uid=str(uid), db=None, _=None)
-    assert err.value.status_code == 409
+    refused = await ai.continue_personal(body, plain, org=str(uuid4()), uid=str(uid), db=None, _=None)
+    assert refused.status_code == 409
+    assert json.loads(refused.body)['code'] == 'update_required'
     headed = SimpleNamespace(headers={'x-fyona-device-sara': 'personal'})
     with pytest.raises(HTTPException) as err:
         await ai.continue_personal(body, headed, org=str(uuid4()), uid=str(uuid4()), db=None, _=None)
@@ -246,11 +245,22 @@ async def test_continue_endpoint_requires_header_and_valid_state(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_old_builds_keep_server_context(monkeypatch):
-    built = AsyncMock(return_value={})
-    monkeypatch.setattr(sara.SaraContextBuilder, 'build', built)
+async def test_builds_without_the_device_header_must_update(monkeypatch):
+    """Stage 6: no server fallback — an old build gets «update the app»."""
+    from app.api.v1 import ai
+    from app.domain.models.m5_models import AIQuery
+    process = AsyncMock(side_effect=AssertionError('must not run Sara'))
+    monkeypatch.setattr(ai.SaraAgentService, 'process', process)
+    out = await ai.query_ai(AIQuery(query='كم رصيدي'), SimpleNamespace(headers={}),
+                            org=str(uuid4()), uid=str(uuid4()), db=None, _=None)
+    assert out.status_code == 409 and json.loads(out.body)['code'] == 'update_required'
+    process.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_is_always_device_mode(monkeypatch):
+    _forbid_server_reads(monkeypatch)
     _model(monkeypatch, 'أهلًا')
     uid = uuid4()
-    response = await _agent(AsyncMock(), uid).process('كم رصيدي', _ctx(uid))
-    built.assert_awaited_once()
-    assert response.text and not response.device_calls
+    response = await _agent(NoPersonalTablesDb(), uid).process('كم رصيدي', _ctx(uid), device=False)
+    assert response.device_calls and response.state

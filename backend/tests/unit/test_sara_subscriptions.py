@@ -83,8 +83,10 @@ async def test_personal_guidance_precedes_data_and_model(monkeypatch):
     server = context()
     loader = AsyncMock(return_value=server)
     monkeypatch.setattr(subs, 'load_context', loader)
-    builder = AsyncMock(side_effect=AssertionError('cross-section data must not be read'))
-    monkeypatch.setattr(sara.SaraContextBuilder, 'build', builder)
+    from unittest.mock import MagicMock
+    from app.domain.services import sara_personal_device
+    builder = MagicMock(side_effect=AssertionError('cross-section data must not be read'))
+    monkeypatch.setattr(sara_personal_device, 'context_calls', builder)
     db = AsyncMock()
     uid = uuid4()
     response = await sara.SaraAgentService(db, uuid4(), uid).process('show inventory',

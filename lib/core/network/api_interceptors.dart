@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../storage/secure_storage.dart';
+import '../../features/personal/data/ledger/personal_local_cutover.dart';
 
 /// Real device identity for session recognition (cached after first read so
 /// no request ever waits on platform channels). Falls back to the plain OS
@@ -158,11 +159,20 @@ class AuthInterceptor extends Interceptor {
       options.headers['X-App-Version'] = appVersion;
     }
     options.headers['X-Device-Platform'] = DeviceIdentity.platform;
+    // Device-only Personal builds say so: the server answers older builds
+    // «update the app» instead of letting them sync Personal data.
+    if (PersonalLocalMode.active) {
+      options.headers[PersonalLocalMode.protocolHeader] = PersonalLocalMode.protocol;
+    }
     handler.next(options);
   }
 
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) async {
+    if (PersonalLocalMode.refusalCode(err.response?.data) ==
+        PersonalLocalMode.codeUpdate) {
+      PersonalLocalMode.notice.value = PersonalLocalNotice.updateRequired;
+    }
     handler.next(err);
   }
 }

@@ -15,6 +15,7 @@ import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/network/api_client.dart';
 import '../../data/ledger/personal_ledger.dart';
 import '../../data/ledger/personal_ledger_backup.dart';
+import '../../data/ledger/personal_local_cutover.dart';
 import '../../data/ledger/personal_relay_store.dart';
 import 'backup/backup_integrity.dart';
 import 'backup/backup_snapshot.dart';
@@ -1183,8 +1184,10 @@ class BackupService {
       }
 
       // ── SERVER layer (capability-probed; never blind). ──
+      // Device-only Personal: the server holds no Personal rows, so the
+      // restore is the local layer (it travels to the other devices).
       var serverState = 'skipped';
-      if (!skipServer && _financeService != null) {
+      if (!skipServer && _financeService != null && !PersonalLocalMode.active) {
         onProgress?.call('server', 0.2);
         if (entitiesEmpty) {
           return RestoreResult(
@@ -2179,6 +2182,11 @@ class BackupService {
     try {
       final pending = await getPendingServerRestore();
       if (pending == null || pending.isEmpty) return true;
+      if (PersonalLocalMode.active) {
+        // No server layer for device-only Personal: nothing to finish.
+        await _setPendingServerRestore(null);
+        return true;
+      }
       if (_financeService == null) return false;
       Map<String, dynamic>? decoded;
       if (pending.startsWith('server:')) {

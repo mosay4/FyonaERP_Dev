@@ -32,6 +32,7 @@ from .api.v1.business_relay import router as business_relay_router
 from .api.v1.business_peer_relay import router as business_peer_relay_router
 from .api.v1.personal_relay import router as personal_relay_router
 from .api.v1.business_local_migration import router as business_local_migration_router
+from .api.v1.personal_local import router as personal_local_router
 from .api.v1.reconciliation import router as reconciliation_router
 from .api.v1.business_reports import router as business_reports_router
 from .api.v1.invoices import router as invoice_router
@@ -152,6 +153,14 @@ async def lifespan(app: FastAPI):
         from app.domain.services import inventory_expiry_jobs as _expiry_jobs
 
         asyncio.create_task(_expiry_jobs.expiry_scheduler())
+    except Exception:
+        pass
+    # Hourly Personal maintenance in-process (QA runs no Celery beat): the
+    # relay retention and the purge of migrated legacy Personal rows.
+    try:
+        from app.workers import personal_maintenance as _personal_maintenance
+
+        asyncio.create_task(_personal_maintenance.scheduler())
     except Exception:
         pass
     # Advertise on the LAN (mDNS) so phones find the backend with zero
@@ -290,6 +299,14 @@ async def business_data_stays_on_devices(request, call_next):
     return await _business_local_guard(request, call_next)
 
 
+from .core.personal_local_guard import guard as _personal_local_guard
+
+
+@app.middleware("http")
+async def personal_data_stays_on_devices(request, call_next):
+    return await _personal_local_guard(request, call_next)
+
+
 @app.middleware("http")
 async def strip_metrics_cors(request, call_next):
     """Strip CORS headers from /metrics responses (Prometheus doesn't need them)."""
@@ -338,6 +355,9 @@ app.include_router(business_peer_relay_router,
 app.include_router(business_local_migration_router,
                    prefix=f"{settings.API_PREFIX}/local-migration",
                    tags=["Local migration"])
+app.include_router(personal_local_router,
+                   prefix=f"{settings.API_PREFIX}/personal-local",
+                   tags=["Personal local migration"])
 app.include_router(reconciliation_router, prefix=f"{settings.API_PREFIX}", tags=["Reconciliation"])
 app.include_router(business_reports_router, prefix=f"{settings.API_PREFIX}", tags=["Business Reports"])
 app.include_router(invoice_router, prefix=f"{settings.API_PREFIX}", tags=["Invoices"])

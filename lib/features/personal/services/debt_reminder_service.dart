@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../data/ledger/personal_reminder_store.dart';
 import '../data/models/personal_models.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/router/shell_keys.dart';
@@ -55,10 +56,9 @@ class DebtReminderService {
               final ctx = _contextProvider?.call();
               if (ctx != null && ctx.mounted) {
                 await markAlarmShown(debt);
-                final prefs = await SharedPreferences.getInstance();
-                final all = _decodeAll(prefs.getString(_prefsKey));
+                final all = _decodeAll(await PersonalReminderStore.read(_prefsKey));
                 all.remove(_keyFor(debt));
-                await prefs.setString(_prefsKey, jsonEncode(all));
+                await PersonalReminderStore.write(_prefsKey, jsonEncode(all));
                 try { await showAlarm(ctx, debt); } catch (_) {}
               }
             }
@@ -80,18 +80,16 @@ class DebtReminderService {
     final debt = await _findDebtById(debtId);
     if (debt == null) return;
     await markAlarmShown(debt);
-    final prefs = await SharedPreferences.getInstance();
-    final all = _decodeAll(prefs.getString(_prefsKey));
+    final all = _decodeAll(await PersonalReminderStore.read(_prefsKey));
     all.remove(_keyFor(debt));
-    await prefs.setString(_prefsKey, jsonEncode(all));
+    await PersonalReminderStore.write(_prefsKey, jsonEncode(all));
     if (context.mounted) {
       try { await showAlarm(context, debt); } catch (_) {}
     }
   }
 
   static Future<PersonalDebt?> _findDebtById(String debtId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final all = _decodeAll(prefs.getString(_prefsKey));
+    final all = _decodeAll(await PersonalReminderStore.read(_prefsKey));
     for (final entry in all.values) {
       final debtJson = entry['debt'] as Map<String, dynamic>?;
       if (debtJson != null && debtJson['id']?.toString() == debtId) {
@@ -204,7 +202,7 @@ class DebtReminderService {
     // native bridge and tap routing).
     final requestCode = ReminderCodec.debtRequestCode(debt.id);
     final prefs = await SharedPreferences.getInstance();
-    final all = _decodeAll(prefs.getString(_prefsKey));
+    final all = _decodeAll(await PersonalReminderStore.read(_prefsKey));
     all[_keyFor(debt)] = {
       'debt': debt.toJson(),
       'millis': scheduled.millisecondsSinceEpoch,
@@ -213,7 +211,7 @@ class DebtReminderService {
       'kind': 'debt',
       'refId': debt.id,
     };
-    await prefs.setString(_prefsKey, jsonEncode(all));
+    await PersonalReminderStore.write(_prefsKey, jsonEncode(all));
     // Clear shown flag so it can fire again (for edits / snooze)
     await prefs.remove('$_shownKey${_keyFor(debt)}');
 
@@ -252,9 +250,9 @@ class DebtReminderService {
 
   static Future<void> cancel(PersonalDebt debt) async {
     final prefs = await SharedPreferences.getInstance();
-    final all = _decodeAll(prefs.getString(_prefsKey));
+    final all = _decodeAll(await PersonalReminderStore.read(_prefsKey));
     all.remove(_keyFor(debt));
-    await prefs.setString(_prefsKey, jsonEncode(all));
+    await PersonalReminderStore.write(_prefsKey, jsonEncode(all));
     await prefs.remove('$_shownKey${_keyFor(debt)}');
     try {
       await _native.invokeMethod('cancelExactAlarm',
@@ -265,8 +263,7 @@ class DebtReminderService {
   /// Re-schedules all future reminders (called after boot or app start).
   static Future<void> rescheduleAll() async {
     await init();
-    final prefs = await SharedPreferences.getInstance();
-    final all = _decodeAll(prefs.getString(_prefsKey));
+    final all = _decodeAll(await PersonalReminderStore.read(_prefsKey));
     final now = DateTime.now().millisecondsSinceEpoch;
     final toRemove = <String>[];
     for (final entry in all.entries) {
@@ -301,7 +298,7 @@ class DebtReminderService {
       all.remove(k);
     }
     if (toRemove.isNotEmpty) {
-      await prefs.setString(_prefsKey, jsonEncode(all));
+      await PersonalReminderStore.write(_prefsKey, jsonEncode(all));
     }
   }
 
@@ -310,7 +307,7 @@ class DebtReminderService {
   /// Returns debts whose time has passed and haven't been marked shown.
   static Future<List<PersonalDebt>> dueReminderDebts() async {
     final prefs = await SharedPreferences.getInstance();
-    final all = _decodeAll(prefs.getString(_prefsKey));
+    final all = _decodeAll(await PersonalReminderStore.read(_prefsKey));
     final due = <PersonalDebt>[];
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final entry in all.entries) {
@@ -340,10 +337,9 @@ class DebtReminderService {
       if (!ctx.mounted) return;
       await markAlarmShown(debt);
       // Remove the scheduled entry so it doesn't fire again (unless snoozed)
-      final prefs = await SharedPreferences.getInstance();
-      final all = _decodeAll(prefs.getString(_prefsKey));
+      final all = _decodeAll(await PersonalReminderStore.read(_prefsKey));
       all.remove(_keyFor(debt));
-      await prefs.setString(_prefsKey, jsonEncode(all));
+      await PersonalReminderStore.write(_prefsKey, jsonEncode(all));
       try {
         if (ctx.mounted) await showAlarm(ctx, debt);
       } catch (_) {}
@@ -391,8 +387,7 @@ class DebtReminderService {
   static Future<void> handleNativeAlarm(String debtId) async {
     // This is called from MainActivity when alarm fires and app is open.
     // We look up the debt and show alarm.
-    final prefs = await SharedPreferences.getInstance();
-    final all = _decodeAll(prefs.getString(_prefsKey));
+    final all = _decodeAll(await PersonalReminderStore.read(_prefsKey));
     for (final entry in all.values) {
       final debtJson = entry['debt'] as Map<String, dynamic>?;
       if (debtJson != null) {

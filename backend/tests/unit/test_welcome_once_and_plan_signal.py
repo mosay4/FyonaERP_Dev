@@ -197,22 +197,23 @@ async def test_prepare_banking_asks_which_same_currency_account():
     from app.domain.services import sara_agent_service as sara
 
     executor = MagicMock(_db=None, _org_id="o", _user_id="u")
-    with patch.object(sara.SaraContextBuilder, "_get_banking_summary",
-                      new=AsyncMock(return_value=_rows())):
-        out = await sara.prepare_personal_banking(executor, {
-            "operation": "deposit", "account_name": "الكريمي", "currency": "USD", "amount": 5})
-        assert out["error_code"] == "NEEDS_ACCOUNT"
-        assert {o["id"] for o in out["accounts"]} == {"chk", "sav"}
-        # Once the user picks, the exact id runs on exactly that account.
-        out = await sara.prepare_personal_banking(executor, {
-            "operation": "deposit", "bank_account_id": "sav", "currency": "USD", "amount": 5})
-        assert out["tool"] == "create_transaction"
-        assert out["params"]["account_id"] == "sav"
-        executor._exec_get_exchange_rate = AsyncMock(return_value={"rate": 3.75})
-        out = await sara.prepare_personal_banking(executor, {
-            "operation": "transfer", "from_account_name": "الكريمي", "from_currency": "USD",
-            "to_account_name": "بنك", "to_currency": "SAR", "amount": 5})
-        assert out["error_code"] == "NEEDS_ACCOUNT"
+    rows = _rows()  # the phone's own account list (device mode)
+    out = await sara.prepare_personal_banking(executor, {
+        "operation": "deposit", "account_name": "الكريمي", "currency": "USD", "amount": 5},
+        accounts=rows)
+    assert out["error_code"] == "NEEDS_ACCOUNT"
+    assert {o["id"] for o in out["accounts"]} == {"chk", "sav"}
+    # Once the user picks, the exact id runs on exactly that account.
+    out = await sara.prepare_personal_banking(executor, {
+        "operation": "deposit", "bank_account_id": "sav", "currency": "USD", "amount": 5},
+        accounts=rows)
+    assert out["tool"] == "create_transaction"
+    assert out["params"]["account_id"] == "sav"
+    executor._exec_get_exchange_rate = AsyncMock(return_value={"rate": 3.75})
+    out = await sara.prepare_personal_banking(executor, {
+        "operation": "transfer", "from_account_name": "الكريمي", "from_currency": "USD",
+        "to_account_name": "بنك", "to_currency": "SAR", "amount": 5}, accounts=rows)
+    assert out["error_code"] == "NEEDS_ACCOUNT"
 
 
 @pytest.mark.asyncio

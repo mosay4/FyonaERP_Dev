@@ -56,6 +56,7 @@ class SaraRoutes {
   static const String monthReport =
       '/personal/reports/view?kind=cashflow&period=month';
   static const String recurringList = '/personal/recurring';
+  static const String banks = '/personal/banks';
 }
 
 /// Day keys for cooldown identities (yyyymmdd).
@@ -507,6 +508,19 @@ class SaraNoticeComposer {
         body: n.body,
         route: n.route,
         cooldownKey: alert.budgetAlert!.key,
+      );
+    }
+    final account = alert.account;
+    if (account != null) {
+      return SaraNotice(
+        kind: 'lowBalance',
+        title: tr('saraNotifLowBalanceTitle'),
+        body: tr('saraNotifLowBalanceBody', {
+          'account': account.name,
+          'amount': money(account.balance, account.currency),
+        }),
+        route: SaraRoutes.banks,
+        cooldownKey: alert.key,
       );
     }
     final tx = alert.tx!;

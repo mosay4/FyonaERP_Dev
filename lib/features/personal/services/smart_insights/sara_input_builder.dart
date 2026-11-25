@@ -87,6 +87,7 @@ class SaraInsightInputBuilder {
     List<RecurringTransaction> recurring = const [],
     List<PersonalDebt> debts = const [],
     double? liquidBalance,
+    List<InsightAccount> accounts = const [],
     required SaraConvert convert,
   }) {
     final txs = <InsightTx>[];
@@ -224,6 +225,7 @@ class SaraInsightInputBuilder {
       recurring: rules,
       obligations: obligations,
       scheduledIncomes: incomes,
+      accounts: accounts,
     );
   }
 }

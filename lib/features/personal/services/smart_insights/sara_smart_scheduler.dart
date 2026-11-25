@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../data/ledger/personal_reminder_store.dart';
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../../../core/localization/app_localizations.dart';
@@ -87,7 +88,7 @@ class SaraSmartScheduler {
       final prefs = await SharedPreferences.getInstance();
       var last = prefs.getString(lastFiredKey);
       final ms = (now ?? DateTime.now()).millisecondsSinceEpoch;
-      final all = _decode(prefs.getString(storeKey));
+      final all = _decode(await PersonalReminderStore.read(storeKey));
       for (final e in all.values) {
         final millis = (e['millis'] as num?)?.toInt() ?? 0;
         final day = e['day']?.toString() ?? '';
@@ -162,9 +163,8 @@ class SaraSmartScheduler {
   /// from the store (their day is remembered as fired).
   static Future<void> apply(List<SaraSlot> slots) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
       await lastFiredDay(); // harvest before overwriting the store
-      final old = _decode(prefs.getString(storeKey));
+      final old = _decode(await PersonalReminderStore.read(storeKey));
       final keep = slots.map((s) => requestCodeForDay(s.dayKey)).toSet();
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       for (final e in old.values) {
@@ -192,15 +192,14 @@ class SaraSmartScheduler {
         store['sara_${s.dayKey}'] = entry;
         await _schedule(entry, s.fireAt);
       }
-      await prefs.setString(storeKey, jsonEncode(store));
+      await PersonalReminderStore.write(storeKey, jsonEncode(store));
     } catch (_) {}
   }
 
   /// Cancels every pending Sara digest (switch off / logout).
   static Future<void> cancelAll() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final old = _decode(prefs.getString(storeKey));
+      final old = _decode(await PersonalReminderStore.read(storeKey));
       for (final e in old.values) {
         final rc = (e['requestCode'] as num?)?.toInt() ?? 0;
         final millis = (e['millis'] as num?)?.toInt() ?? 0;
@@ -208,15 +207,14 @@ class SaraSmartScheduler {
           await _cancel(rc);
         }
       }
-      await prefs.remove(storeKey);
+      await PersonalReminderStore.remove(storeKey);
     } catch (_) {}
   }
 
   /// Re-arms stored future digests (force-stop clears AlarmManager).
   static Future<void> rescheduleAll() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final all = _decode(prefs.getString(storeKey));
+      final all = _decode(await PersonalReminderStore.read(storeKey));
       final now = DateTime.now();
       for (final e in all.values) {
         final millis = (e['millis'] as num?)?.toInt() ?? 0;

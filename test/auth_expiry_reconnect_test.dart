@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:fyona_flutter/features/personal/data/ledger/personal_local_cutover.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/database/database_helper.dart';
@@ -146,6 +147,9 @@ void main() {
       (await testLedger()).rawQuery('SELECT * FROM sync_queue ORDER BY id ASC');
 
   setUp(() async {
+    // The old server sync path (a server that still keeps Personal data).
+    PersonalLocalMode.serverDeclined = true;
+    addTearDown(() => PersonalLocalMode.serverDeclined = false);
     await cleanDb();
     sessionDead = true;
     forcedStatus = 401;

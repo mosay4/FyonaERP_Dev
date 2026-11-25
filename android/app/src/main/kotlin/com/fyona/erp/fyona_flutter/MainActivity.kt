@@ -2215,8 +2215,12 @@ class BootReceiver : BroadcastReceiver() {
             val amount = debtObj.optDouble("amount", 0.0)
             val currency = debtObj.optString("currency", "SAR")
             val debtId = debtObj.optString("id", key.removePrefix("debt_"))
-            val title = if (type == "payable") "حان موعد سداد الدين" else "حان موعد تحصيل الدين"
-            val body = "$personName — $amount $currency"
+            // Redacted boot copy (the full reminder lives in the app's
+            // encrypted Personal ledger): its generic title/body as written.
+            val redacted = obj.optInt("_r", 0) == 1
+            val title = if (redacted) obj.optString("title", "FYONA")
+                else if (type == "payable") "حان موعد سداد الدين" else "حان موعد تحصيل الدين"
+            val body = if (redacted) obj.optString("body", "") else "$personName — $amount $currency"
             val requestCode = if (storedRc != 0) storedRc else (debtId.toIntOrNull() ?: debtId.hashCode().and(0x7fffffff))
 
             try {

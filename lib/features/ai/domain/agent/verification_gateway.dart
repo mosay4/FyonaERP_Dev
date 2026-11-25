@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:fyona_flutter/features/personal/data/ledger/personal_ledger.dart';
+import 'package:fyona_flutter/features/personal/data/ledger/personal_local_cutover.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/core/network/api_endpoints.dart';
 import 'package:fyona_flutter/core/offline/offline_guard.dart';
@@ -162,7 +163,9 @@ class SaraVerificationGateway {
     ApiClient? apiClient,
   }) {
     PersonalFinanceApi? serverApi;
-    if (apiClient != null) {
+    // Device-only Personal: the server holds no Personal rows to confirm
+    // against; the device ledger is the confirmation.
+    if (apiClient != null && !PersonalLocalMode.active) {
       try {
         serverApi = PersonalFinanceApi(apiClient);
       } catch (_) {

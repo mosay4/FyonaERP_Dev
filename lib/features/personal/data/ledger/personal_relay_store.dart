@@ -246,6 +246,20 @@ final class PersonalRelayCapture {
       ..written = true;
   }
 
+  /// Sends a row this device already holds to the user's other devices as
+  /// it is here (Stage 6: old outbox writes made before the relay existed).
+  /// Devices that have the row take its fields last-writer-wins and keep
+  /// their counters (a create of a row already present adds nothing).
+  void resend(String type, String id, Map<String, dynamic> row) =>
+      _adopt(type, id, Map<String, dynamic>.from(row));
+
+  /// Sends the delete of a row this device no longer holds.
+  void resendDelete(String type, String id) {
+    _rows['$type\u0000$id'] = _Row(type, id, const {})
+      ..now = null
+      ..written = true;
+  }
+
   /// A key/value entry written ([type]/[value]) or removed (null).
   void kv(String key, {String? type, String? value}) {
     if (!personalRelayKvKey(key)) return;

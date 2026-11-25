@@ -8,17 +8,21 @@ from app.domain.services import sara_agent_service as sara
 async def test_transfer_quotes_real_rate_and_never_calls_a_writer(monkeypatch):
     rows = [{'id': 'source', 'name': 'كاش', 'currency': 'USD', 'balance': '100'},
             {'id': 'target', 'name': 'بنك', 'currency': 'SAR', 'balance': '0'}]
-    monkeypatch.setattr(sara.SaraContextBuilder, '_get_banking_summary', AsyncMock(return_value=rows))
     executor = SimpleNamespace(_db=None, _org_id='org', _user_id='u',
                               _exec_get_exchange_rate=AsyncMock(return_value={'rate': 3.75}))
-    result = await sara.prepare_personal_banking(executor, {
+    # The accounts are always the phone's own list.
+    assert 'error' in await sara.prepare_personal_banking(executor, {
         'operation': 'transfer', 'from_account_name': 'كاش', 'to_account_name': 'بنك', 'amount': 10})
+    result = await sara.prepare_personal_banking(executor, {
+        'operation': 'transfer', 'from_account_name': 'كاش', 'to_account_name': 'بنك', 'amount': 10},
+        accounts=rows)
     assert result['tool'] == 'create_transfer'
     assert result['params']['destination_amount'] == 37.5
     assert rows[0]['balance'] == '100' and rows[1]['balance'] == '0'
     executor._exec_get_exchange_rate.return_value = {'error': 'لا يوجد سعر موثق'}
     assert 'error' in await sara.prepare_personal_banking(executor, {
-        'operation': 'transfer', 'from_account_name': 'كاش', 'to_account_name': 'بنك', 'amount': 10})
+        'operation': 'transfer', 'from_account_name': 'كاش', 'to_account_name': 'بنك', 'amount': 10},
+        accounts=rows)
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ import '../network/api_endpoints.dart';
 import '../network/dio_provider.dart';
 import '../../features/auth/di/auth_providers.dart';
 import '../../features/personal/data/ledger/personal_ledger.dart';
+import '../../features/personal/data/ledger/personal_local_cutover.dart';
 import '../offline/offline_guard.dart';
 import '../offline/sync_integrity.dart';
 import '../offline/sync_logger.dart';
@@ -147,6 +148,9 @@ class SyncEngine {
 
   Future<void> processQueue() async {
     if (_disposed || _isSyncing || !(_connectivity?.isOnline ?? false)) return;
+    // Device-only Personal (Stage 6): after the cutover the old server sync
+    // is off; before it, it only drains the old outbox (never pulls).
+    if (PersonalLocalMode.active && PersonalLocalMode.oldSyncRetired) return;
     _isSyncing = true;
     _updateStatus(SyncState.syncing);
     try {
@@ -166,7 +170,7 @@ class SyncEngine {
       await _pushPending();
       // While the session is dead there is no point pulling (it would 401
       // too); the next cycle after a successful push pulls normally.
-      if (!_authNeeded) await _pullRemote();
+      if (!_authNeeded && !PersonalLocalMode.active) await _pullRemote();
       final pending = await SyncOutbox.pendingCount(userId: _activeUserId);
       final failed = await SyncOutbox.failedCount(userId: _activeUserId);
       final conflicts = await SyncOutbox.conflictCount(userId: _activeUserId);
@@ -252,6 +256,7 @@ class SyncEngine {
         // re-login) resumes with the same identities.
         if (!(_connectivity?.isOnline ?? false)) return;
         if (_authNeeded && firstAttemptDone) return;
+        if (PersonalLocalMode.active && PersonalLocalMode.oldSyncRetired) return;
         if (pendingPaymentAccounts.contains(op.entityId) &&
             (op.entityType ?? '') == 'personal_bank_account' &&
             op.operation == 'UPDATE') {
@@ -360,6 +365,27 @@ class SyncEngine {
       await SyncOutbox.markPending(op.id);
       _updateStatus(SyncState.offline);
       SyncLogger.info('network-break', {'op': op.operationId});
+      return;
+    }
+    // The server keeps no Personal data of this user any more (device-only
+    // Personal): what is still queued here is already in the ledger. Rows
+    // written before the relay existed travel as relay operations now; the
+    // old outbox is emptied and the old sync stops.
+    final refusal = PersonalLocalMode.refusalCode(e.response?.data);
+    if (refusal == PersonalLocalMode.codeLocal) {
+      await SyncOutbox.markPending(op.id);
+      PersonalLocalMode.oldSyncRetired = true;
+      try {
+        await PersonalLocalCutover.convertOutbox(
+            await PersonalLedger.forNamespace(_activeUserId));
+      } catch (err) {
+        SyncLogger.error('personal-local-convert', err, {'op': op.operationId});
+      }
+      return;
+    }
+    if (refusal == PersonalLocalMode.codeUpdate) {
+      // Never conflict a valid intent because of the app version.
+      await SyncOutbox.markPending(op.id);
       return;
     }
     final message = _serverMessage(e);

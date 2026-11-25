@@ -1,7 +1,5 @@
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../../../../core/database/repositories/personal_repository.dart';
 import '../../../../core/database/repositories/personal_cache_repository.dart';
 import '../../../../core/database/repositories/sync_outbox.dart';
@@ -10,6 +8,7 @@ import '../../../../core/network/api_endpoints.dart';
 import '../../../../core/offline/offline_guard.dart';
 import '../../../../core/offline/sync_operation_types.dart';
 import '../../data/ledger/personal_ledger.dart';
+import '../../data/ledger/personal_local_cutover.dart';
 import '../../data/ledger/personal_relay_config.dart';
 import '../../data/ledger/personal_relay_store.dart';
 import '../../../../core/services/currency/currency_engine.dart';
@@ -123,6 +122,14 @@ class PersonalFinanceService {
     bool fullReplace = true,
   }) async {
     final cache = _cache;
+    if (cache != null && PersonalLocalMode.active) {
+      // Device-only Personal: the ledger is the only copy. No first-run
+      // server fetch, no background refresh (the one-time cutover and the
+      // relay bring everything there is).
+      final local = await cache.getCollection(_userId, entityType);
+      final merged = await cache.mergePendingInto(_userId, entityType, local);
+      return _filterActive(merged, params);
+    }
     if (cache != null) {
       List<Map<String, dynamic>> local;
       try {
@@ -598,10 +605,11 @@ class PersonalFinanceService {
 
   static String _cashVaultKey(int userId) => 'cash_vault_$userId';
 
+  // The stash holds balances: it lives in the encrypted Personal ledger
+  // (moved from SharedPreferences, copy → verify → wipe, Stage 6).
   Future<Map<String, dynamic>> _readCashVault() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_cashVaultKey(_userId));
+      final raw = await PersonalLedgerKv.getString(_cashVaultKey(_userId));
       if (raw == null || raw.isEmpty) return {};
       final m = jsonDecode(raw);
       if (m is Map<String, dynamic>) return m;
@@ -612,8 +620,7 @@ class PersonalFinanceService {
 
   Future<void> _writeCashVault(Map<String, dynamic> vault) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_cashVaultKey(_userId), jsonEncode(vault));
+      await PersonalLedgerKv.setString(_cashVaultKey(_userId), jsonEncode(vault));
     } catch (_) {}
   }
 
@@ -2025,6 +2032,9 @@ class PersonalFinanceService {
   }
 
   Future<void> resetAccount() async {
+    // Device-only Personal: nothing to reset on the server (the ledger wipe
+    // is the reset and travels to the other devices through the relay).
+    if (PersonalLocalMode.active) return;
     try {
       await _api.remove(ApiEndpoints.personalFinanceReset);
       return;
@@ -2071,6 +2081,9 @@ class PersonalFinanceService {
     required String? backupId,
     required Map<String, dynamic> entities,
   }) async {
+    if (PersonalLocalMode.active) {
+      throw StateError('Personal data lives on the devices only');
+    }
     final payload = <String, dynamic>{
       'schema_version': schemaVersion,
       'backup_id': backupId,

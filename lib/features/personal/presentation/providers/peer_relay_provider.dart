@@ -60,7 +60,11 @@ final _peerRelayRuntimeProvider = Provider.autoDispose<void>((ref) {
             }
           case 'account_types_request':
             // Another of this user's devices (new phone / reinstall) asks.
-            await PersonalAccountTypeStore.markPending();
+            // With the Personal device relay the types travel there; the
+            // old answer is gone (Stage 6), the request is just consumed.
+            if (!PersonalRelayConfig.enabled) {
+              await PersonalAccountTypeStore.markPending();
+            }
         }
         ack.add('${raw['id']}');
       } catch (_) {
@@ -102,12 +106,12 @@ final _peerRelayRuntimeProvider = Provider.autoDispose<void>((ref) {
 /// Carries this device's account types (جاري/توفير) to the user's other
 /// devices through the relay, which deletes them once delivered.
 ///
-/// With the Personal device relay on, account types ride it instead; this
-/// path then only answers a request from a device still on an older build
-/// (one release), and incoming `account_types` are still merged above.
+/// With the Personal device relay on, account types ride it instead and
+/// nothing is pushed here any more (Stage 6); incoming `account_types` from
+/// older builds are still merged above for one more release.
 Future<void> _relayAccountTypes(dynamic client, String device) async {
-  if (!PersonalRelayConfig.enabled &&
-      await PersonalAccountTypeStore.takeFirstRequest()) {
+  if (PersonalRelayConfig.enabled) return;
+  if (await PersonalAccountTypeStore.takeFirstRequest()) {
     // First run on this install: share what is here and ask the others.
     await PersonalAccountTypeStore.markPending();
     try {

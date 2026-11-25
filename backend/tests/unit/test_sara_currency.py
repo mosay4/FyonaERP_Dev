@@ -60,57 +60,8 @@ def _svc(db):
     return mod.ToolExecutor(db, uuid4(), uuid4(), lang="ar"), mod
 
 
-@pytest.mark.asyncio
-async def test_financial_summary_grouped_by_currency():
-    svc, mod = _svc(AsyncMock())
-    db = svc._db
-    tz_row = MagicMock()
-    tz_row.scalar.return_value = "UTC"  # central tz lookup (bounds unchanged)
-    db.execute.side_effect = [
-        tz_row,
-        _rows([("USD", 100), ("SAR", 200)]),
-        _rows([("USD", 40), ("SAR", 500)]),
-    ]
-    ctx = mod.SaraContextBuilder(db, uuid4(), uuid4())
-    out = await ctx._get_financial_summary("this_month")
-    assert "income" not in out and "expense" not in out and "net" not in out
-    by_cur = {r["currency"]: r for r in out["by_currency"]}
-    assert by_cur["USD"]["income"] == "100"
-    assert by_cur["SAR"]["expense"] == "500"
-    assert by_cur["SAR"]["net"] == str(Decimal("200") - Decimal("500"))
-    assert all("currency_id" in r and "currency" in r for r in out["by_currency"])
-
-
-@pytest.mark.asyncio
-async def test_expenses_grouped_no_mixed_total():
-    svc, mod = _svc(AsyncMock())
-    db = svc._db
-    rows = [_tx_row("a", 10, "USD"), _tx_row("b", 20, "SAR"),
-            _tx_row("c", 5, "USD")]
-    tz_row = MagicMock()
-    tz_row.scalar.return_value = "UTC"  # central tz lookup (bounds unchanged)
-    db.execute.side_effect = [tz_row, _rows(rows)]
-    out = await svc._exec_get_expenses_data({})
-    assert "total_spending" not in out
-    by_cur = {r["currency"]: r["total"] for r in out["by_currency"]}
-    assert by_cur == {"USD": "15", "SAR": "20"}
-    assert all("currency_id" in r for r in out["expenses"])
-    cats = {(r["category"], r["currency"]): r["total"] for r in out["by_category"]}
-    assert cats[("food", "USD")] == "15"
-
-
-@pytest.mark.asyncio
-async def test_recent_and_search_rows_carry_currency():
-    svc, mod = _svc(AsyncMock())
-    db = svc._db
-    db.execute.side_effect = [_rows([_tx_row("x", 7, "YER_NEW")])]
-    ctx = mod.SaraContextBuilder(db, uuid4(), uuid4())
-    recent = await ctx._get_recent_transactions(10)
-    assert recent[0]["currency"] == "YER_NEW"
-    assert recent[0]["currency_id"] == "YER_NEW"
-    db.execute.side_effect = [_rows([_tx_row("y", 9, "EUR")])]
-    found = await svc._exec_search_all_transactions({})
-    assert found["transactions"][0]["currency"] == "EUR"
+# (Per-currency summaries, expenses and searches are computed on the phone
+# from its ledger since Stage 6 — personal_analytics.dart / the device router.)
 
 
 @pytest.mark.asyncio

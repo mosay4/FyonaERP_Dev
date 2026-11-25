@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart' show DatabaseExecutor;
 import '../database_helper.dart';
 import '../../../features/personal/data/ledger/personal_ledger.dart';
+import '../../../features/personal/data/ledger/personal_local_cutover.dart';
 import '../../../features/personal/data/ledger/personal_relay_store.dart';
 import '../../offline/sync_integrity.dart';
 import '../../offline/sync_operation_types.dart';
@@ -635,6 +636,13 @@ class PersonalCacheRepository {
 
   // ── Pending writes for the sync engine ──
 
+  /// Device-only Personal (Stage 6): after this user's cutover nothing goes
+  /// to the old outbox any more — every intent is a relay operation [cap].
+  static bool _oldOutboxRetired(PersonalRelayCapture? cap) =>
+      cap != null &&
+      PersonalLocalMode.active &&
+      PersonalLocalMode.oldSyncRetired;
+
   Future<void> enqueue(
     int userId,
     String entityType,
@@ -752,7 +760,9 @@ class PersonalCacheRepository {
         payloadHash = null;
         idempotencyKey = null;
       }
-      await tx.rawInsert(
+      // Device-only Personal after the cutover: the intent travels as the
+      // relay operation sealed below; the old server sync is off.
+      if (!_oldOutboxRetired(cap)) await tx.rawInsert(
         'INSERT INTO $_outbox ('
         'operation_id, operation_type, table_name, entity_type, entity_id, '
         'record_id, user_id, device_id, operation, data, base_version, source, '
@@ -851,8 +861,9 @@ class PersonalCacheRepository {
         final mirror = op['mirror'] as Map<String, dynamic>;
         await _put(tx, userId, 'personal_transaction', rid, {...mirror, 'id': rid}, cap);
       }
-      // Both outbox rows
-      for (final op in ops) {
+      // Both outbox rows (none once the old sync is retired: the relay
+      // operation sealed below carries the transfer).
+      for (final op in _oldOutboxRetired(cap) ? const <Map<String, dynamic>>[] : ops) {
         final rid = op['id'] as String;
         final send = Map<String, dynamic>.from(op['send'] as Map<String, dynamic>);
         send['id'] = rid;

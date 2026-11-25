@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
+import 'package:fyona_flutter/features/personal/data/ledger/personal_local_cutover.dart';
 import 'package:fyona_flutter/features/personal/data/ledger/personal_ledger.dart';
 import 'package:fyona_flutter/features/personal/data/ledger/personal_relay_config.dart';
 import 'package:fyona_flutter/features/personal/data/ledger/personal_relay_store.dart';
@@ -216,6 +217,9 @@ void main() {
   });
 
   test('resetAccount (old server): what to delete comes from the ledger', () async {
+    // A server that still keeps Personal data (not device-only Personal).
+    PersonalLocalMode.serverDeclined = true;
+    addTearDown(() => PersonalLocalMode.serverDeclined = false);
     final (svc, api) = await service();
     await seed('personal_bank_account', {'id': 'bank-9', 'bank_name': 'Main', 'balance': 1.0, 'currency': 'SAR'});
     await seed('personal_savings_goal', {'id': 'goal-9', 'name': 'G', 'target_amount': 1.0, 'current_amount': 0.0});

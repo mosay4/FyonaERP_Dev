@@ -52,7 +52,12 @@ final class PersonalLedgerMigration {
   /// Preference keys holding Personal user data that now lives in the
   /// ledger's key/value table (same key names, so backups stay compatible).
   static const prefsExact = {'financial_trees_v1', 'financial_tree_reports_v1'};
-  static const prefsPrefixes = ['financial_tree_nodes_', 'bank_account_types_'];
+  static const prefsPrefixes = [
+    'financial_tree_nodes_',
+    'bank_account_types_',
+    // Stashed balances of removed cash currencies (Stage 6).
+    'cash_vault_',
+  ];
 
   static bool isLedgerPrefKey(String key) =>
       prefsExact.contains(key) || prefsPrefixes.any(key.startsWith);

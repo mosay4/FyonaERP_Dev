@@ -66,6 +66,7 @@ class SaraSmartCoordinator {
   /// everything already there is history, never "just added").
   Set<String>? _knownTxIds;
   Set<String> _knownOverKeys = {};
+  Set<String>? _knownLowIds;
   DateTime? _lastNewSpendAt;
   InsightTx? _lastNewSpend;
 
@@ -86,6 +87,7 @@ class SaraSmartCoordinator {
   void onUserChanged() {
     _knownTxIds = null;
     _knownOverKeys = {};
+    _knownLowIds = null;
     _lastNewSpend = null;
     _lastNewSpendAt = null;
     poke(delay: const Duration(milliseconds: 500));
@@ -164,6 +166,15 @@ class SaraSmartCoordinator {
       recurring: recurring,
       debts: pf.debts,
       liquidBalance: pf.bankAccounts.isEmpty ? null : pf.walletTotalBalance,
+      accounts: [
+        for (final a in pf.bankAccounts)
+          InsightAccount(
+            id: a.id,
+            name: a.bankName,
+            currency: a.currency,
+            balance: a.balance,
+          ),
+      ],
       convert: (a, f, t) => engine.convertSafe(a, f, t),
     );
     final analysis = SaraInsightEngine.analyze(input);
@@ -216,7 +227,26 @@ class SaraSmartCoordinator {
     final knownOver = _knownOverKeys;
     _knownTxIds = ids;
     _knownOverKeys = overKeys;
+    final low = SaraInsightEngine.lowAccounts(input);
+    final knownLow = _knownLowIds;
+    _knownLowIds = low.map((a) => a.id).toSet();
     if (known == null) return cooldown; // first look: all of it is history
+
+    // An account that just reached zero or less (any cause: an expense
+    // here or on another device): one calm heads-up per account per day.
+    final newlyLow = [
+      for (final a in low)
+        if (knownLow != null && !knownLow.contains(a.id)) a,
+    ];
+    if (newlyLow.isNotEmpty) {
+      final shown = await _instantNotice(
+        InstantAlert(kind: 'lowBalance', account: newlyLow.first),
+        input,
+        now,
+        cooldown,
+      );
+      if (shown != null) return shown;
+    }
 
     final fresh = input.transactions
         .where((t) => !known.contains(t.id) && t.isSpending && _isFresh(t, now))
@@ -246,15 +276,29 @@ class SaraSmartCoordinator {
     // A big-expense alert is only for the expense that was JUST added.
     if (alert.kind == 'bigExpense' && fresh.isEmpty) return cooldown;
 
+    final shown = await _instantNotice(alert, input, now, cooldown);
+    if (shown == null) return cooldown;
+    _lastNewSpend = null; // one heads-up per expense
+    return shown;
+  }
+
+  /// Shows one instant heads-up (cooldown, tray dedupe and the daily cap
+  /// apply). Returns the new cooldown map, null when nothing was shown.
+  Future<Map<String, SaraCooldownEntry>?> _instantNotice(
+    InstantAlert alert,
+    SaraInsightInput input,
+    DateTime now,
+    Map<String, SaraCooldownEntry> cooldown,
+  ) async {
     final today = SaraDailyPlanner.dayKey(now);
     final cdKey = alert.budgetAlert?.key ?? alert.key;
     if (!SaraDailyPlanner.cooldownAllows(cooldown, cdKey, today)) {
-      return cooldown;
+      return null;
     }
     if (!await NotificationService.tryClaimTrayKey('sara:${alert.key}')) {
-      return cooldown;
+      return null;
     }
-    if (!await SaraSmartScheduler.claimInstantSlot(today)) return cooldown;
+    if (!await SaraSmartScheduler.claimInstantSlot(today)) return null;
     final notice = SaraNoticeComposer.instant(
       alert,
       baseCurrency: input.baseCurrency,
@@ -264,9 +308,8 @@ class SaraSmartCoordinator {
     final shown = await SaraSmartScheduler.showNow(notice, alert.key);
     if (!shown) {
       await NotificationService.releaseTrayKey('sara:${alert.key}');
-      return cooldown;
+      return null;
     }
-    _lastNewSpend = null; // one heads-up per expense
     return {
       ...cooldown,
       cdKey: SaraCooldownEntry(today, 'instant'),

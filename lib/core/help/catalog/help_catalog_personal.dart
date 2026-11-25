@@ -52,6 +52,13 @@ const _kTree = ['/personal/financial-tree'];
 const List<HelpEntry> kHelpPersonal = [
   // ───────────────────────── Bottom bar & home ─────────────────────────
   HelpEntry(
+    id: 'p.local.restore',
+    keys: ['personalLocalNoticeRestoreAction'],
+    icon: Icons.settings_backup_restore_rounded,
+    ar: 'يفتح استرجاع النسخة الاحتياطية عشان ترجع بياناتك على هذا الجوال.',
+    en: 'Opens backup restore so you can bring your data back to this phone.',
+  ),
+  HelpEntry(
     id: 'p.nav.home',
     keys: ['home'],
     scopes: _kHome,

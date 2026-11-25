@@ -459,6 +459,11 @@ def main():
         env["HF_HUB_OFFLINE"] = "1"
     if invites:
         env["FYONA_QA_DIRECTORY_INVITES"] = json.dumps(invites)
+    # Device-only Personal (on by default on this service; the unit may set
+    # FYONA_QA_LOCAL_PERSONAL=0 or a different grace period).
+    for key in ("FYONA_QA_LOCAL_PERSONAL", "FYONA_PERSONAL_LOCAL_GRACE_HOURS"):
+        if os.environ.get(key):
+            env[key] = os.environ[key]
     env.update(business_flags)
     if cash_link:
         env["FYONA_QA_CASH_LINK"] = "1"
