@@ -95,7 +95,9 @@ with ZipFile(apk) as new, ZipFile(reference) as old:
         assert new.read("AndroidManifest.xml") == old.read("AndroidManifest.xml")
         assert set(check_output([aapt, "dump", "permissions", apk], text=True).splitlines()) == \
                set(check_output([aapt, "dump", "permissions", reference], text=True).splitlines())
-        assert 0 < Path(apk).stat().st_size < 35_000_000
+        # Guard against accidental bloat (e.g. a debug/unshrunk build). Raised
+        # from 35 MB when the report-opening sound cues were added (round 13).
+        assert 0 < Path(apk).stat().st_size < 36_000_000
 print(f"{abi}: signature, manifest contract and native libraries verified; {Path(apk).stat().st_size} bytes")
 PY
 install -m 600 "$apk" "$artifact"

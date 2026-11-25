@@ -1,4 +1,4 @@
-"""Synthesizes the report-gate sound cues (44.1 kHz, mono, 16-bit WAV).
+"""Synthesizes the report-gate sound cues (22.05 kHz, mono, 16-bit WAV).
 
 Every offset below is derived from the keyframes in
 lib/features/reports/presentation/widgets/report_scenes.dart
@@ -11,7 +11,7 @@ import struct
 import sys
 import wave
 
-SR = 44100
+SR = 22050  # chimes/ticks need no more; halves the APK cost
 D = 2200.0  # ms, scene duration
 OUT = sys.argv[1]
 random.seed(7)
