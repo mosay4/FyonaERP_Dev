@@ -47,3 +47,40 @@ async def test_debt_updates_and_chat_reach_the_other_side_then_leave_the_server(
         with pytest.raises(peer.PeerDenied):
             await peer.push(conn, user=stranger, device=uuid4(), link_id=link,
                             kind="chat", op_id=uuid4(), payload={"text": "x"})
+
+
+@pytest.mark.asyncio
+async def test_own_devices_state_reaches_other_devices_then_leaves_the_server(engine):
+    _, user, _, _ = await _seed(engine, f"o-{uuid4().hex[:20]}@example.test")
+    _, other, _, _ = await _seed(engine, f"x-{uuid4().hex[:20]}@example.test")
+    a, b, c, foreign = uuid4(), uuid4(), uuid4(), uuid4()
+    async with engine.begin() as conn:
+        await peer.install(conn)
+        for d in (a, b, c):
+            await peer.register(conn, user=user, device=d)
+        await peer.register(conn, user=other, device=foreign)
+        op = uuid4()
+        sent = await peer.push_self(conn, user=user, device=a, kind="account_types",
+                                    op_id=op, payload={"types": {"x": {"t": "savings", "at": 1}}})
+        assert sent["destinations"] == 2
+        # Only the same user's other devices receive it.
+        assert await peer.pull(conn, user=other, device=foreign) == []
+        assert await peer.pull(conn, user=user, device=a) == []
+        for d in (b, c):
+            assert [i["kind"] for i in await peer.pull(conn, user=user, device=d)] == ["account_types"]
+            await peer.ack(conn, user=user, device=d, ids=[op])
+        assert await conn.scalar(text("SELECT COUNT(*) FROM business_peer_transit WHERE id = :i"), {"i": op}) == 0
+        # A device of another user can't post on this user's behalf; unknown kinds refused.
+        with pytest.raises(peer.PeerDenied):
+            await peer.push_self(conn, user=user, device=foreign, kind="account_types",
+                                 op_id=uuid4(), payload={})
+        with pytest.raises(ValueError):
+            await peer.push_self(conn, user=user, device=a, kind="debt_snapshot",
+                                 op_id=uuid4(), payload={})
+        # Single device: nothing is stored at all.
+        _, solo, _, _ = await _seed(engine, f"z-{uuid4().hex[:20]}@example.test")
+        only = uuid4()
+        await peer.register(conn, user=solo, device=only)
+        r = await peer.push_self(conn, user=solo, device=only, kind="account_types_request",
+                                 op_id=uuid4(), payload={})
+        assert r["destinations"] == 0

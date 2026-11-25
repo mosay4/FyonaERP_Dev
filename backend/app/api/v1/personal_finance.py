@@ -10,7 +10,7 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func, or_, delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,8 +27,6 @@ from ...domain.entities.personal_entities import (
     PersonalBudget,
     PersonalBudgetCategory,
     PersonalRecurringTransaction,
-    effective_account_type,
-    normalize_account_type,
 )
 from ...domain.entities.auth_entities import User
 from ...domain.entities.sync_entities import EntityVersion, ConflictLog, SyncLog
@@ -197,10 +195,6 @@ def _account_to_dict(a: PersonalBankAccount) -> dict:
         "currency": a.currency,
         "balance": float(a.balance) if a.balance else 0,
         "notes": a.notes,
-        "account_type": effective_account_type(a),
-        # False only for legacy rows whose type was never stated (reads as
-        # 'current'); lets a device migrate its local-only type up once.
-        "account_type_set": getattr(a, "account_type", None) is not None,
         "is_active": a.is_active,
         "sort_order": a.sort_order if a.sort_order is not None else 0,
         "created_at": a.created_at.isoformat() if a.created_at else None,
@@ -419,13 +413,6 @@ class PersonalAccountCreate(BaseModel):
     balance: float = 0
     notes: Optional[str] = None
     is_active: bool = True
-    # 'current' (جاري) / 'savings' (توفير); omitted → 'current'.
-    account_type: Optional[str] = None
-
-    @field_validator("account_type", mode="before")
-    @classmethod
-    def _valid_account_type(cls, v):
-        return normalize_account_type(v)
 
 
 class PersonalAccountUpdate(BaseModel):
@@ -434,12 +421,6 @@ class PersonalAccountUpdate(BaseModel):
     balance: Optional[float] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
-    account_type: Optional[str] = None
-
-    @field_validator("account_type", mode="before")
-    @classmethod
-    def _valid_account_type(cls, v):
-        return normalize_account_type(v)
 
 
 class PersonalTransactionCreate(BaseModel):
@@ -823,9 +804,6 @@ async def create_my_account(
         currency=data.currency or "SAR",
         balance=Decimal(str(data.balance)) if data.balance else Decimal("0"),
         notes=data.notes,
-        # Omitted (older clients) stays NULL = "not stated" (reads as
-        # 'current'), so that device can still migrate its local type up.
-        account_type=data.account_type,
         is_active=data.is_active,
     )
     db.add(account)
@@ -884,7 +862,6 @@ async def update_my_account(
     if data.balance is not None: row.balance = Decimal(str(data.balance))
     if data.notes is not None: row.notes = data.notes
     if data.is_active is not None: row.is_active = data.is_active
-    if data.account_type is not None: row.account_type = data.account_type
     await db.commit()
     await db.refresh(row)
     await record_entity_version(

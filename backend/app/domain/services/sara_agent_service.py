@@ -614,7 +614,7 @@ APP_TOOLS = [
                     "balance": {"type": "number", "description": "الرصيد الابتدائي (افتراضي 0)"},
                     "currency": {"type": "string", "description": "العملة (SAR, USD, EUR, GBP, YER_OLD, YER_NEW, AED, EGP) — اليمني القديم والجديد عملتان مختلفتان", "default": "SAR"},
                     "notes": {"type": "string", "description": "ملاحظات (اختياري)"},
-                    "account_type": {"type": "string", "enum": ["checking", "savings"], "description": "نوع الحساب: checking=جاري (افتراضي، يُحفظ على السيرفر current)، savings=توفير. نفس البنك قد يحمل نفس العملة مرتين (جاري وتوفير). اسأل عن النوع إن كان للبنك حساب بنفس العملة"},
+                    "account_type": {"type": "string", "enum": ["checking", "savings"], "description": "نوع الحساب: checking=جاري (افتراضي)، savings=توفير. نفس البنك قد يحمل نفس العملة مرتين (جاري وتوفير)"},
                 },
                 "required": ["bank_name", "currency"],
             },
@@ -1197,9 +1197,6 @@ class SaraContextBuilder:
                 "currency": a.currency,
                 "balance": str(a.balance),
                 "type": "bank",
-                # جاري (current) / توفير (savings): one bank may hold the
-                # same currency twice, the type tells the two apart.
-                "account_type": getattr(a, "account_type", None) or "current",
             }
             for a in accounts
         ]
@@ -1615,7 +1612,7 @@ def _build_prompt_en(
         "- delete_debt: delete a debt (debt_id) — list debts first and ask for confirmation by name",
         "",
         " Bank accounts:",
-        "- create_bank_account: create a new bank account (bank name + currency + optional: balance/notes/account_type checking=current or savings)",
+        "- create_bank_account: create a new bank account (bank name + currency + optional: balance/notes)",
         "- update_bank_account: update an existing account (account_id + required fields)",
         "- delete_bank_account: delete a bank account (account_id) — list accounts first and ask for confirmation by name",
         "",
@@ -1991,7 +1988,7 @@ def _build_prompt_ar(
         "- delete_debt: لحذف دين (debt_id) — اعرض الديون أولاً واطلب التأكيد بالاسم",
         "",
         " Bank Accounts (الحسابات البنكية):",
-        "- create_bank_account: لإنشاء حساب بنكي جديد (اسم البنك + العملة + اختياري: رصيد/ملاحظات/نوع الحساب جاري أو توفير)",
+        "- create_bank_account: لإنشاء حساب بنكي جديد (اسم البنك + العملة + اختياري: رصيد/ملاحظات)",
         "- update_bank_account: لتحديث حساب موجود (account_id + الحقول المطلوبة)",
         "- delete_bank_account: لحذف حساب بنكي (account_id) — اعرض الحسابات أولاً واطلب التأكيد بالاسم",
         "",
@@ -3111,14 +3108,9 @@ def _needs_account_error(rows, bank_name, currency, is_en: bool = False) -> dict
            if _get(a, "account_type", "account_type") else {}),
     } for a in rows]
     cur = str(currency or "").strip().upper()
-    def _type_label(t):
-        if is_en:
-            return t
-        return {"current": "جاري", "checking": "جاري", "savings": "توفير"}.get(
-            str(t).strip().lower(), t)
     lines = "\n".join(
         f"• {o['bank_name']} {o['currency']} — {o['balance']}"
-        + (f" ({_type_label(o['account_type'])})" if o.get("account_type") else "")
+        + (f" ({o['account_type']})" if o.get("account_type") else "")
         for o in options)
     return {
         "error": (

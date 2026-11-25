@@ -4,7 +4,6 @@ import 'core/services/currency/currency_engine.dart';
 import 'shared/widgets/premium_switch_transition.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/router/app_router.dart';
-import 'core/router/shell_keys.dart';
 import 'core/theme/app_colors.dart';
 import 'core/theme/app_theme.dart';
 import 'core/help/information_clicker.dart';
@@ -331,34 +330,38 @@ class _AppLockOverlayState extends ConsumerState<_AppLockOverlay>
       setCurrentLocale(ref.read(localeProvider).languageCode);
     });
 
-    ref.listen<SessionTimeoutState>(sessionTimeoutProvider, (prev, next) {
-      final wasLocked = prev?.locked ?? false;
-      final rootNavigator = rootNavigatorKey.currentState;
-      if (next.locked && !wasLocked) {
-        if (rootNavigator != null) {
-          rootNavigator.push(
-            PageRouteBuilder(
-              opaque: true,
-              barrierDismissible: false,
-              transitionDuration: const Duration(milliseconds: 200),
-              reverseTransitionDuration: const Duration(milliseconds: 200),
-              pageBuilder: (_, _, _) => const SessionLockScreen(),
-              transitionsBuilder: (_, animation, _, child) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: child,
-                );
-              },
+    // The lock is a layer over the whole app (not a pushed route), so
+    // navigation underneath — splash → account entry → home — can never
+    // remove or duplicate it, and unlocking reveals exactly where the user
+    // was. Fingerprint success or the right PIN unlocks at once.
+    final locked = ref.watch(sessionTimeoutProvider.select((s) => s.locked));
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: ExcludeFocus(
+            excluding: locked,
+            child: IgnorePointer(ignoring: locked, child: widget.child),
+          ),
+        ),
+        Positioned.fill(
+          child: IgnorePointer(
+            ignoring: !locked,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              child: locked
+                  ? HeroControllerScope.none(
+                      key: const ValueKey('app-lock'),
+                      child: Navigator(
+                        onGenerateRoute: (_) => PageRouteBuilder<void>(
+                          pageBuilder: (_, _, _) => const SessionLockScreen(),
+                        ),
+                      ),
+                    )
+                  : const SizedBox.shrink(key: ValueKey('app-unlocked')),
             ),
-          );
-        }
-      } else if (!next.locked && wasLocked) {
-        if (rootNavigator != null && rootNavigator.canPop()) {
-          rootNavigator.pop();
-        }
-      }
-    });
-
-    return widget.child;
+          ),
+        ),
+      ],
+    );
   }
 }

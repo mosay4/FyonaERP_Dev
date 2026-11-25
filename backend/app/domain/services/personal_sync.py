@@ -23,8 +23,6 @@ from app.domain.entities.personal_entities import (
     PersonalRecurringTransaction,
     PersonalSavingsGoal,
     PersonalTransaction,
-    effective_account_type,
-    normalize_account_type,
 )
 from app.domain.entities.sync_entities import EntityVersion
 
@@ -244,14 +242,6 @@ async def persist_personal(
         row.balance = _dec(data.get("balance"))
         row.notes = _str(data.get("notes")) or None
         row.is_active = _bool(data.get("is_active"), True)
-        # Only a stated, valid type changes the row: older clients that do
-        # not send it never reset a savings account to current.
-        try:
-            account_type = normalize_account_type(data.get("account_type"))
-        except ValueError:
-            account_type = None
-        if account_type is not None:
-            row.account_type = account_type
     elif entity_type == "personal_debt":
         debt_type = _str(data.get("debt_type"))
         row.debt_type = debt_type if debt_type in ("payable", "receivable") else "payable"
@@ -337,8 +327,6 @@ def serialize_row(row: Any) -> Dict[str, Any]:
             "currency": row.currency or "SAR",
             "balance": _dec(row.balance),
             "notes": row.notes,
-            "account_type": effective_account_type(row),
-            "account_type_set": getattr(row, "account_type", None) is not None,
             "is_active": bool(row.is_active),
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,

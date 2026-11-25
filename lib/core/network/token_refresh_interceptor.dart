@@ -71,12 +71,22 @@ class TokenRefreshInterceptor extends Interceptor {
         err.requestOptions.headers['Authorization'] = 'Bearer $newToken';
         final retryResponse = await _dio.fetch(err.requestOptions);
         handler.resolve(retryResponse);
-      } else {
+      } else if (isDefinitiveRefreshRejection(response.statusCode)) {
         await _clearAndExpire();
         handler.next(err);
+      } else {
+        handler.next(err);
       }
+    } on DioException catch (e) {
+      // Only the server saying "this session is gone" (revoked from the
+      // sessions page, expired refresh token) ends the session. A weak or
+      // missing network, a timeout or a server restart (5xx) never logs the
+      // user out: the tokens stay and the request fails like offline.
+      if (isDefinitiveRefreshRejection(e.response?.statusCode)) {
+        await _clearAndExpire();
+      }
+      handler.next(err);
     } catch (_) {
-      await _clearAndExpire();
       handler.next(err);
     } finally {
       _isRefreshing = false;
@@ -117,3 +127,8 @@ class _PendingRequest {
     required this.handler,
   });
 }
+
+/// The refresh endpoint rejected the refresh token itself (revoked/expired
+/// session). Network errors, timeouts and 5xx are NOT a rejection.
+bool isDefinitiveRefreshRejection(int? status) =>
+    status == 400 || status == 401 || status == 403;

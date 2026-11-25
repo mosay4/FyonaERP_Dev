@@ -46,7 +46,6 @@ def _account_to_dict(a: PersonalBankAccount) -> dict:
         "currency": a.currency,
         "balance": float(a.balance) if a.balance else 0,
         "notes": a.notes,
-        "account_type": getattr(a, "account_type", None) or "current",
         "is_active": a.is_active,
         "created_at": a.created_at.isoformat() if a.created_at else None,
         "updated_at": a.updated_at.isoformat() if a.updated_at else None,

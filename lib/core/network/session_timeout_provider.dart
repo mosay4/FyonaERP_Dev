@@ -141,6 +141,29 @@ class SessionTimeoutNotifier extends StateNotifier<SessionTimeoutState> {
     } catch (_) {}
   }
 
+  /// Cold start of a signed-in account whose app is protected: fingerprint
+  /// login is on ([biometric]) or the idle timeout + app PIN are set. Shows
+  /// the in-app lock (fingerprint, then PIN) — never the login screen.
+  Future<bool> lockForStartup({required bool biometric}) async {
+    for (var i = 0; i < 40 && !state.loaded; i++) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (!mounted) return false;
+    }
+    if (!mounted) return false;
+    if (!state.loaded) state = state.copyWith(loaded: true);
+    _authenticated = true;
+    var protect = biometric;
+    if (!protect && state.duration != null) {
+      try {
+        final pin = await _localDataSource.getAppPin();
+        protect = pin != null && pin.isNotEmpty;
+      } catch (_) {}
+    }
+    if (!mounted || !protect) return false;
+    lock();
+    return true;
+  }
+
   void lock() {
     if (!state.loaded || state.locked) return;
     state = state.copyWith(locked: true, lastActivity: DateTime.now());

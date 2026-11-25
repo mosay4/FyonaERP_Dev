@@ -162,3 +162,34 @@ async def purge_expired(conn: AsyncConnection, *, now: datetime | None = None) -
     cutoff = _now_us((now or datetime.now(timezone.utc)) - RETENTION)
     result = await conn.execute(delete(transit).where(transit.c.created_us < cutoff))
     return result.rowcount or 0
+
+
+# The same user's own devices (no link): small device-to-device state such as
+# Personal account types (جاري/توفير). Carried to the user's other devices
+# and deleted once each stored it — never kept on the server.
+SELF_KINDS = frozenset({"account_types", "account_types_request"})
+MAX_SELF_PAYLOAD = 64 * 1024
+
+
+async def push_self(conn: AsyncConnection, *, user: UUID, device: UUID,
+                    kind: str, op_id: UUID, payload) -> dict:
+    if kind not in SELF_KINDS:
+        raise ValueError("Unknown kind")
+    owner = await conn.scalar(select(devices.c.user_id).where(devices.c.device_id == device))
+    if owner != user:
+        raise PeerDenied
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+    if len(data) > MAX_SELF_PAYLOAD:
+        raise ValueError("Invalid payload")
+    if await conn.scalar(select(transit.c.id).where(transit.c.id == op_id)):
+        return {"id": str(op_id), "duplicate": True, "destinations": 0}
+    audience = [str(d) for d in (await conn.execute(select(devices.c.device_id).where(
+        devices.c.user_id == user, devices.c.device_id != device,
+    ))).scalars().all()]
+    if audience:
+        await conn.execute(transit.insert().values(
+            id=op_id, link_id=user, kind=kind, from_user=user, from_device=device,
+            payload=data, destinations=sorted(audience), acked=[],
+            created_us=_now_us(),
+        ))
+    return {"id": str(op_id), "duplicate": False, "destinations": len(audience)}

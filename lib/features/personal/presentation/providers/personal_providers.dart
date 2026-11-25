@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:convert';
+import '../../data/account_type_store.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,58 +8,28 @@ import '../../../../core/services/sync_engine.dart';
 import '../../data/models/personal_models.dart';
 import '../../di/personal_providers.dart';
 import '../../domain/services/budget_aggregation.dart';
-import '../../domain/services/personal_account_type_sync.dart';
 import '../../domain/services/personal_finance_service.dart';
 import '../../services/recurring_reminder_service.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/services/currency/currency_engine.dart';
 import '../../../../shared/providers/platform_controls_provider.dart';
 
+/// Device-only account types; other devices get them through the peer relay
+/// (see [PersonalAccountTypeStore]).
 class _AccountTypesStore {
-  static const _key = 'bank_account_types_v3';
+  static Future<Map<String, String>> load() => PersonalAccountTypeStore.load();
+  static Future<void> save(String accountId, String type) =>
+      PersonalAccountTypeStore.save(accountId, type);
 
-  static Future<Map<String, String>> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key);
-    if (raw == null) return {};
-    final Map<String, dynamic> decoded = jsonDecode(raw);
-    return decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
-  }
-
-  static Future<void> save(String accountId, String type) async {
-    final map = await load();
-    map[accountId] = type;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, jsonEncode(map));
-  }
-
-  static Future<void> remove(String accountId) async {
-    final map = await load();
-    map.remove(accountId);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, jsonEncode(map));
-  }
-
-  /// Server-stated types win; the legacy device map only fills rows the
-  /// server never typed (see [resolvePersonalAccountTypes]).
-  static List<PersonalBankAccount> apply(List<PersonalBankAccount> accounts, Map<String, String> localTypes) =>
-      resolvePersonalAccountTypes(accounts, localTypes);
-
-  /// One-time push of legacy device-only types (savings) for rows the server
-  /// never typed. Queued through the outbox (works offline); the local
-  /// mirror is marked typed at once, so it is not re-pushed on every load.
-  static Future<bool> migrateToServer(
-      PersonalFinanceService service, List<PersonalBankAccount> accounts) async {
-    try {
-      final plan = planPersonalAccountTypeMigration(accounts, await load());
-      for (final e in plan.entries) {
-        await service.updateBankAccount(e.key, accountType: e.value);
+  static List<PersonalBankAccount> apply(List<PersonalBankAccount> accounts, Map<String, String> localTypes) {
+    if (localTypes.isEmpty) return accounts;
+    return accounts.map((a) {
+      final localType = localTypes[a.id];
+      if (localType != null && localType != a.accountType) {
+        return PersonalBankAccount(id: a.id, bankName: a.bankName, balance: a.balance, currency: a.currency, notes: a.notes, accountType: localType);
       }
-      return plan.isNotEmpty;
-    } catch (e) {
-      debugPrint('account type migration skipped: $e');
-      return false;
-    }
+      return a;
+    }).toList();
   }
 }
 
@@ -413,9 +383,6 @@ class PersonalFinanceNotifier extends StateNotifier<PersonalFinanceState> {
         exchangeRates: rates,
         walletTotalBalance: _convertAccountsTotal(patchedAccounts, state.walletCurrency, rates),
       );
-      unawaited(_AccountTypesStore.migrateToServer(service, accounts).then((pushed) {
-        if (pushed) _triggerAutoSync();
-      }));
 
       // Phase 1b — the rest fills in as each resolves; the cards above are
       // already painted and never flicker back to empty.

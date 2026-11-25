@@ -44,6 +44,12 @@ class PushBody(_Device):
     notify: Optional[Notify] = None
 
 
+class SelfPushBody(_Device):
+    id: UUID
+    kind: str = Field(pattern=r"^(account_types|account_types_request)$")
+    payload: dict
+
+
 class AckBody(_Device):
     ids: list[UUID] = Field(min_length=1, max_length=200)
 
@@ -121,3 +127,17 @@ async def ack(body: AckBody, user_id: UUID = Depends(get_current_user_uuid),
         raise HTTPException(403, "غير مصرح") from exc
     await db.commit()
     return ok({"deleted": gone})
+
+
+@router.post("/self-push", summary="تسليم حالة صغيرة لأجهزة المستخدم الأخرى (تُحذف بعد الاستلام)")
+async def self_push(body: SelfPushBody, user_id: UUID = Depends(get_current_user_uuid),
+                    db: AsyncSession = Depends(get_db)):
+    try:
+        result = await peer.push_self(await _conn(db), user=user_id, device=body.device_id,
+                                      kind=body.kind, op_id=body.id, payload=body.payload)
+    except peer.PeerDenied as exc:
+        raise HTTPException(403, "غير مصرح") from exc
+    except ValueError as exc:
+        raise HTTPException(422, "حمولة غير صالحة") from exc
+    await db.commit()
+    return ok({"id": result["id"], "destinations": result["destinations"]})

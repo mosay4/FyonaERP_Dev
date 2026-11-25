@@ -34,6 +34,7 @@ import '../utils/currency_formatter.dart';
 import '../../features/splash/presentation/splash_screen.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/reentry_page.dart';
+import '../../features/splash/presentation/brand_entry_view.dart';
 import '../../features/splash/presentation/brand_handoff_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/pages/verify_email_page.dart';
@@ -1910,24 +1911,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             context.go(RouteNames.splash);
         } catch (_) {}
       });
-      return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const SizedBox(height: 16),
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              Text(
-                'ط¬ط§ط±ظٹ ط§ظ„طھط­ظ…ظٹظ„...',
-                style: TextStyle(
-                  fontFamily: 'Cairo',
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
+      // Same branded entry as the splash/account entry (no spinner).
+      return const Scaffold(
+        backgroundColor: BrandEntryView.background,
+        body: BrandEntryView(),
       );
     },
   );

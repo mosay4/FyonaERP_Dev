@@ -4,14 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
-import '../../../core/theme/app_colors.dart';
 import '../../../core/router/route_names.dart';
-import '../../../core/localization/app_localizations.dart';
 import '../../../core/startup/startup_logger.dart';
 import '../../../shared/providers/auth_provider.dart';
 import '../../../shared/services/notification_router.dart';
 import '../../auth/presentation/providers/biometric_provider.dart';
-import '../../auth/domain/services/biometric_service.dart';
+import '../../../core/network/session_timeout_provider.dart';
 import 'brand_entry_view.dart';
 import 'brand_handoff_page.dart';
 import 'intro_video.dart';
@@ -205,13 +203,23 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
           t.cancel();
           _authPollTimer = null;
           StartupLogger.log('AUTH_RESTORE_CAP', 'forcing navigation');
-          // Absolute failsafe: treat the unresolved restore as logged-out so
-          // the router lets login through instead of bouncing back to splash.
-          try {
-            final notifier = ref.read(authStateProvider.notifier);
-            notifier.state = notifier.state.copyWith(status: AuthStatus.unauthenticated);
-          } catch (_) {}
-          _fadeAndNavigate();
+          // Absolute failsafe (very slow network): open the account saved on
+          // this device — a slow restore must never sign the user out. Only
+          // when no account is saved here does the login screen show.
+          unawaited(() async {
+            String? err = 'none';
+            try {
+              err = await ref.read(authProvider.notifier).restoreCachedSession();
+            } catch (_) {}
+            if (!mounted) return;
+            if (err != null && ref.read(authProvider).status == AuthStatus.initial) {
+              try {
+                final notifier = ref.read(authStateProvider.notifier);
+                notifier.state = notifier.state.copyWith(status: AuthStatus.unauthenticated);
+              } catch (_) {}
+            }
+            _fadeAndNavigate();
+          }());
         }
       });
       return;
@@ -252,27 +260,20 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       return;
     }
 
+    // A protected app opens behind the in-app lock (fingerprint first, then
+    // the app PIN). Failing or cancelling the fingerprint never signs the
+    // user out: only a manual logout or removal from the sessions page does.
     final bioState = ref.read(biometricProvider);
-    if (bioState.shouldPrompt) {
-      try {
-        final result = await ref.read(biometricProvider.notifier).authenticate()
-            .timeout(const Duration(seconds: 15), onTimeout: () => AuthResult.error);
-        if (!mounted) return;
-        if (result == AuthResult.success) {
-          _goHome(authState);
-        } else if (result == AuthResult.lockedOut || result == AuthResult.permanentlyLockedOut) {
-          _showLockedSnackBar(result);
-          _go(RouteNames.login);
-        } else {
-          _go(RouteNames.login);
-        }
-      } catch (e, st) {
-        StartupLogger.error('BIOMETRIC_ERROR', e, st);
-        _go(RouteNames.login);
-      }
-    } else {
-      _goHome(authState);
+    try {
+      await ref
+          .read(sessionTimeoutProvider.notifier)
+          .lockForStartup(biometric: bioState.shouldPrompt)
+          .timeout(const Duration(seconds: 3), onTimeout: () => false);
+    } catch (e, st) {
+      StartupLogger.error('APP_LOCK_ERROR', e, st);
     }
+    if (!mounted) return;
+    _goHome(authState);
   }
 
   void _goHome(dynamic authState) {
@@ -298,17 +299,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
         } catch (_) {}
       });
     }
-  }
-
-  void _showLockedSnackBar(AuthResult result) {
-    if (!mounted) return;
-    final l10n = AppLocalizations.of(context);
-    final msg = result == AuthResult.permanentlyLockedOut
-        ? l10n.translate('splashBiometricLockedPermanent')
-        : l10n.translate('splashBiometricLockedTemp');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg, style: const TextStyle(fontFamily: 'Cairo')), backgroundColor: AppColors.danger, duration: const Duration(seconds: 4)),
-    );
   }
 
   @override
