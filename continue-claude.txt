@@ -267,3 +267,6 @@ Commit 89e5445 (no backend change). APK 35,837,963 bytes (36MB guard close!). so
 
 ## 27. Personal device-only (2026-11-25)
 Stages 1-6 committed (f983118, a097f18, 50e8411 + asset trim), backend business-6193-relay.5c45942b, APK 35,261,057 bytes Telegram 1318/1319. Plan + API + stage notes: docs/PERSONAL_LOCAL_PLAN.md. QA: all users local Personal; old builds get 409 update_required; server Personal rows purged 7 days after each user ack (hourly). Pending: Stage 7 soak; device-approval for relay key grant (owner decision); remove ToolExecutor._exec_create_transaction server path + its tests; backups redesign awaits owner.
+
+## 28. Round 20 (2026-11-26)
+Commits cfd8088 + voice manifest fix; backend business-6193-relay.df9025be (service ~850 MB with STT preload); APK 35,299,047 bytes Telegram 1320/1321 (approx). Manifest contract: do NOT add <queries>; on-device SpeechRecognizer (API31+) used instead. financial_balance.ogg IS used (dynamic financial_${scene}.ogg) — never delete. time_format.dart builds clock strings without intl locale data.
