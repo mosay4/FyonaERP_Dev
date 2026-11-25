@@ -254,7 +254,7 @@ class _DebtLine extends ConsumerWidget {
                             Border.all(color: AppColors.danger.withAlpha(45)),
                       ),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Text(debtAmount(d['debt']),
+                        Text(debtRowAmount(d),
                             textDirection: TextDirection.ltr,
                             style: TextStyle(
                                 fontFamily: 'Cairo',

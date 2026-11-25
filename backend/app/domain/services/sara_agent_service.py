@@ -24,6 +24,7 @@ from app.domain.models.agent_models import (
     AgentContext, AgentResponse, AgentAction, IntentClassification,
 )
 from app.domain.services.agent_analytics import AgentAnalytics
+from app.domain.services.sara_screen_links import missing_open_action
 from app.domain.services.sara_tool_contract import (
     PENDING_MUTATION_TOOLS,
     normalize_result,
@@ -40,6 +41,22 @@ from app.domain.services.knowledge_base import (
 )
 
 logger = get_logger("sara_agent")
+
+# Personal: the history Sara sees is text only — buttons of earlier replies
+# are invisible to her — so every request for a screen/button must emit the
+# open action again, and no reply may promise a button it did not create.
+SCREEN_BUTTON_RULE_AR = (
+    '\nقاعدة الأزرار: كلما طلب المستخدم فتح قسم أو إرسال زر/رابط لقسم (حتى لو أرسلته من قبل في المحادثة) '
+    'استدعِ open_app_screen في هذا الرد نفسه بالاسم والمسار من دليل التطبيق — أزرار الردود السابقة لا تظهر لك في السجل '
+    'ولا تبقى أمام المستخدم. لا تكتب «الزر تحت» أو «الزر فوق» أو «اضغط الزر» إلا إذا استدعيت open_app_screen '
+    'أو open_entity أو export_report في هذا الرد. لطلب تقرير PDF استخدم export_report بنوع التقرير المناسب.'
+)
+SCREEN_BUTTON_RULE_EN = (
+    '\nButton rule: every time the user asks to open a section or to send a button/link to it (even if you sent one '
+    'earlier in the conversation) call open_app_screen in THIS reply with the catalog name and route — buttons of earlier '
+    'replies are not visible to you in the history. Never write "the button below/above" or "tap the button" unless you '
+    'called open_app_screen, open_entity or export_report in this reply. For a PDF report use export_report with the right kind.'
+)
 
 
 # In-process per-operation locks for backend create_transaction: concurrent
@@ -320,17 +337,24 @@ APP_TOOLS = [
         "type": "function",
         "function": {
             "name": "export_report",
-            "description": "تصدير تقرير مالي بصيغة PDF",
+            "description": "تصدير تقرير شخصي بصيغة PDF: يظهر للمستخدم زر يفتح التقرير المطلوب من «التقارير» ويصدّر ملف PDF منه مباشرة (نفس زر التصدير). استخدمه كلما طلب تقريراً PDF أو تصديراً أو طباعة.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["overview", "cashflow", "categories", "budgets", "goals", "debts", "banks"],
+                        "description": "نوع التقرير: overview نظرة عامة، cashflow الدخل والمصروف، categories التصنيفات، budgets الميزانيات، goals الأهداف، debts الديون، banks البنوك",
+                    },
                     "report_type": {
                         "type": "string",
                         "enum": ["financial_summary", "transactions", "goals", "full_report"],
+                        "description": "قديم — استخدم kind",
                     },
-                    "period": {"type": "string"},
+                    "period": {"type": "string", "enum": ["today", "week", "month", "year", "custom"], "description": "الفترة (افتراضي month)"},
+                    "currency": {"type": "string", "description": "عملة التقرير (اختياري، من العملات المفعلة)"},
                 },
-                "required": ["report_type"],
+                "required": [],
             },
         },
     },
@@ -610,6 +634,20 @@ APP_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "delete_bank",
+            "description": "حذف بنك بالكامل بكل عملاته وحساباته (مثل زر «حذف البنك بالكامل»). الكاش لا يُحذف بالكامل أبداً. اعرض الحسابات أولاً واكتب اسم البنك كما هو تماماً؛ يظهر للمستخدم كرت تأكيد ثم تحقق الهوية.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bank_name": {"type": "string", "description": "اسم البنك كما في قائمة الحسابات"},
+                },
+                "required": ["bank_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "delete_savings_goal",
             "description": "حذف هدف ادخار.",
             "parameters": {
@@ -731,11 +769,43 @@ APP_TOOLS = [
         "type": "function",
         "function": {
             "name": "execute_recurring_now",
-            "description": "تنفيذ معاملة متكررة فوراً: ينشئ معاملة من القاعدة المخزنة نفسها بنفس المبلغ/العملة/الحساب/التصنيف. يتطلب recurring_id فقط — لا يخمن اسماً.",
+            "description": "تنفيذ معاملة متكررة فوراً: ينشئ معاملة من القاعدة المخزنة نفسها بنفس المبلغ/العملة/الحساب/التصنيف. يتطلب recurring_id — لا يخمن اسماً. إذا كانت القاعدة تختار الحساب عند التنفيذ أو طلب المستخدم حساباً معيناً مرّر bank_account_id (وcurrency إن لزم) من قائمة الحسابات.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "recurring_id": {"type": "string", "description": "معرف المعاملة المتكررة"},
+                    "bank_account_id": {"type": "string", "description": "الحساب البنكي للتنفيذ (اختياري)"},
+                    "currency": {"type": "string", "description": "عملة التنفيذ (اختياري)"},
+                },
+                "required": ["recurring_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "skip_recurring",
+            "description": "تخطي الموعد القادم لمعاملة متكررة مفعلة مرة واحدة (زر «تخطي مرة»): ينقلها للموعد الذي بعده دون تنفيذ أي مبلغ.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recurring_id": {"type": "string", "description": "معرف المعاملة المتكررة"},
+                },
+                "required": ["recurring_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "postpone_recurring",
+            "description": "تأجيل الموعد القادم لمعاملة متكررة مفعلة (زر «تأجيل»): مرّر days (1 غداً، 3، 7) أو new_date بصيغة YYYY-MM-DD بعد اليوم. اسأل إن لم يحدد المدة.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recurring_id": {"type": "string", "description": "معرف المعاملة المتكررة"},
+                    "days": {"type": "number", "description": "عدد أيام التأجيل من اليوم"},
+                    "new_date": {"type": "string", "description": "التاريخ الجديد YYYY-MM-DD"},
                 },
                 "required": ["recurring_id"],
             },
@@ -3056,6 +3126,7 @@ class SaraAgentService:
             system_prompt = build_dynamic_prompt(ctx, intent, data, memory=memory, relationships=relationships)
             system_prompt += policy(subscription_context)
             system_prompt += '\nأنت في القسم الشخصي فقط. ارفضي بيانات الأعمال أو المخزون أو الفروع واطلبي الانتقال لقسم الأعمال. لا تقولي تم التنفيذ إلا بعد نتيجة تنفيذ ناجحة. ردود قصيرة مفيدة بفقرات متباعدة ولهجة سهلة.'
+            system_prompt += SCREEN_BUTTON_RULE_EN if is_en else SCREEN_BUTTON_RULE_AR
             from app.domain.services.sara_presentation import conversation_policy, currency_catalog, present
             system_prompt += '\n' + conversation_policy('en' if is_en else 'ar')
             system_prompt += '\nComplete available currency catalog: ' + ', '.join(currency_catalog())
@@ -3372,6 +3443,15 @@ class SaraAgentService:
 
             if pending_tools:
                 answer = ('Review and confirm the operation. Nothing has been executed yet.' if is_en else 'راجعي تفاصيل العملية وأكديها. لم تُنفذ أي عملية بعد؛ ستظهر النتيجة بعد التنفيذ.')
+            # A reply that promises a screen button (or answers a request for
+            # one) always carries it, even when the model skipped the tool.
+            missing = missing_open_action(query, answer, actions)
+            if missing:
+                actions.insert(0, AgentAction(
+                    action="open_screen",
+                    params={"screen": missing["screen_en"] if is_en else missing["screen"], "route": missing["route"]},
+                    label=f"{'Open' if is_en else 'فتح'} {missing['screen_en'] if is_en else missing['screen']}",
+                ))
             if not answer:
                 answer = ("Sorry, I couldn't process your request right now. Could you rephrase your question?" if is_en else "آسف، لم أستطع معالجة طلبك حالياً. هل يمكنك إعادة صياغة سؤالك؟")
 

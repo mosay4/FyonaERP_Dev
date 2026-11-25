@@ -72,7 +72,7 @@ void main() {
   group('contract parity: registry matches single source of truth', () {
     test('version is pinned and gateway states are frozen', () {
       final c = _loadContract();
-      expect(c['contract_version'], '1.5.0');
+      expect(c['contract_version'], '1.6.0');
       expect((c['gateway_states'] as List).cast<String>(), [
         'confirmed', 'local_pending', 'failed',
         'unverifiable', 'not_found', 'sync_failed',
@@ -124,7 +124,7 @@ void main() {
       const destructive = {
         'delete_transaction', 'delete_bank_account', 'delete_savings_goal',
         'delete_debt', 'delete_budget', 'delete_recurring',
-        'delete_currency', 'delete_category',
+        'delete_currency', 'delete_category', 'delete_bank',
       };
       const financialWrite = {
         'create_transaction', 'create_transfer',

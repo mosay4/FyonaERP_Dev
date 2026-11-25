@@ -745,6 +745,31 @@ class BudgetCategory {
   };
 }
 
+/// The date after [rt]'s next occurrence — the same rule as the «تخطي مرة»
+/// button (RecurringNotifier.skipOccurrence); used by Sara's skip_recurring.
+DateTime nextRecurringDate(RecurringTransaction rt) {
+  final current = rt.nextDate ?? DateTime.now();
+  final n = rt.intervalValue < 1 ? 1 : rt.intervalValue;
+  DateTime addMonths(DateTime date, int months) {
+    var year = date.year;
+    var month = date.month + months;
+    while (month > 12) { month -= 12; year++; }
+    while (month < 1) { month += 12; year--; }
+    final day = date.day.clamp(1, DateTime(year, month + 1, 0).day);
+    return DateTime(year, month, day);
+  }
+  switch (rt.frequency) {
+    case 'weekly':
+      return current.add(Duration(days: 7 * n));
+    case 'monthly':
+      return addMonths(current, n);
+    case 'yearly':
+      return addMonths(current, 12 * n);
+    default:
+      return current.add(Duration(days: n));
+  }
+}
+
 class RecurringTransaction {
   /// Backend UUID.
   final String id;

@@ -135,6 +135,42 @@ String? saraEntityRoute(Map<String, dynamic> params) {
   return null;
 }
 
+/// Sara's old report_type names → Personal report kinds.
+const _reportTypeKinds = {
+  'financial_summary': 'overview', 'full_report': 'overview', 'summary': 'overview',
+  'transactions': 'cashflow', 'cashflow': 'cashflow', 'income_expense': 'cashflow',
+  'goals': 'goals', 'savings': 'goals', 'debts': 'debts', 'budgets': 'budgets',
+  'budget': 'budgets', 'categories': 'categories', 'spending': 'categories',
+  'banks': 'banks', 'accounts': 'banks',
+};
+
+/// The Personal report page that exports its PDF on open (export_report).
+/// Unknown kinds/periods are dropped (the page falls back to overview/month).
+String saraPersonalReportExportRoute(Map<String, dynamic> params) {
+  String read(String key) => '${params[key] ?? ''}'.trim();
+  const kinds = {'overview', 'cashflow', 'categories', 'budgets', 'goals', 'debts', 'banks'};
+  // The report's own periods (PersonalReportWindow.of) + Sara's synonyms.
+  const periods = {
+    'today': 'today', 'day': 'today', 'daily': 'today',
+    'week': 'week', 'weekly': 'week', 'this_week': 'week',
+    'month': 'month', 'monthly': 'month', 'this_month': 'month',
+    'year': 'year', 'yearly': 'year', 'this_year': 'year',
+    'custom': 'custom',
+  };
+  final rawKind = read('kind').isNotEmpty ? read('kind') : read('report_type');
+  final kind = kinds.contains(rawKind) ? rawKind : (_reportTypeKinds[rawKind] ?? 'overview');
+  final period = periods[read('period').toLowerCase()] ?? '';
+  final currency = read('currency').toUpperCase();
+  return Uri(path: RouteNames.personalReportsView, queryParameters: {
+    'kind': kind,
+    if (period.isNotEmpty) 'period': period,
+    if (period == 'custom' && read('from').isNotEmpty) 'from': read('from'),
+    if (period == 'custom' && read('to').isNotEmpty) 'to': read('to'),
+    if (RegExp(r'^[A-Z][A-Z0-9_]{2,9}$').hasMatch(currency)) 'currency': currency,
+    'export': '1',
+  }).toString();
+}
+
 /// Opens a screen Sara offered. A screen of one record (a product, an
 /// invoice...) on a branch whose data is on this phone opens with the same
 /// device target the app's own lists use; a bare link would be refused by the
@@ -271,8 +307,10 @@ class SaraActionDispatcher {
     }
   }
 
+  /// export_report → the Personal report itself, which builds the PDF from
+  /// exactly what it shows (same button, same data) and offers save/share.
   void _showExport(Map<String, dynamic> params) {
-    _showSnackbar({'message': 'جاري تحضير التقرير للتصدير...'});
+    if (context.mounted) context.push(saraPersonalReportExportRoute(params));
   }
 
   void _showSnackbar(Map<String, dynamic> params) {

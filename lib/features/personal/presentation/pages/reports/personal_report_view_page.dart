@@ -38,9 +38,14 @@ class PersonalReportViewPage extends ConsumerStatefulWidget {
     this.from,
     this.to,
     this.playScene = true,
+    this.autoExport = false,
   });
   final String kind;
   final String? currency, period, from, to;
+
+  /// Opened by Sara's «تصدير PDF»: builds the PDF as soon as the report is
+  /// on screen (exactly the export button's path).
+  final bool autoExport;
 
   /// Off in tests/screenshots that render the report directly.
   final bool playScene;
@@ -56,8 +61,17 @@ class _PersonalReportViewPageState
   late String _period = widget.period ?? 'month';
   late DateTime? _from = DateTime.tryParse(widget.from ?? '');
   late DateTime? _to = DateTime.tryParse(widget.to ?? '');
-  bool _ready = false, _exporting = false;
+  bool _ready = false, _exporting = false, _autoExported = false;
   Route<void>? _scene;
+
+  /// Runs the Sara-requested export once, after the report is ready.
+  void _maybeAutoExport() {
+    if (!widget.autoExport || _autoExported || !_ready) return;
+    _autoExported = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_export());
+    });
+  }
 
   String get _kind =>
       personalReportKinds.contains(widget.kind) ? widget.kind : 'overview';
@@ -82,7 +96,7 @@ class _PersonalReportViewPageState
       if (widget.playScene) {
         _openScene();
       } else {
-        unawaited(PersonalReportSource.warm(ref));
+        unawaited(PersonalReportSource.warm(ref).then((_) => _maybeAutoExport()));
       }
     });
   }
@@ -114,6 +128,7 @@ class _PersonalReportViewPageState
             Navigator.of(overlay).pop();
           }
           if (mounted) setState(() => _ready = true);
+          _maybeAutoExport();
         },
         onError: (overlay, _) {
           done = true;
@@ -122,6 +137,7 @@ class _PersonalReportViewPageState
           }
           // The data is on the device: show what is there.
           if (mounted) setState(() => _ready = true);
+          _maybeAutoExport();
         },
       ),
     );
@@ -139,10 +155,16 @@ class _PersonalReportViewPageState
       _currency ?? ref.read(personalFinanceProvider).walletCurrency;
 
   Future<void> _pickCurrency() async {
+    // Only the currencies the user enabled for Personal (preferences).
+    final enabled = await PersonalReportSource.enabled(ref);
+    if (!mounted) return;
     final picked = await showPersonalReportCurrencyPicker(
       context,
-      mine: PersonalReportSource.mine(ref),
-      all: PersonalReportSource.all(ref),
+      mine: [
+        for (final c in PersonalReportSource.mine(ref))
+          if (enabled.contains(c)) c,
+      ],
+      all: enabled,
       current: _ccy,
     );
     if (picked == null || picked == _ccy || !mounted) return;

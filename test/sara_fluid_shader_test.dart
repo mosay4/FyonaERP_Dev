@@ -9,7 +9,7 @@ import 'package:fyona_flutter/features/ai/presentation/widgets/sara_ambient_scen
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('real runtime aurora shader loads and rasterizes headlessly', (
+  testWidgets('Sara background loads and paints a calm, quiet gradient', (
     tester,
   ) async {
     expect(File('assets/shaders/sara_fluid.frag').existsSync(), isTrue);
@@ -36,15 +36,17 @@ void main() {
         final picture = recorder.endRecording();
         final image = await picture.toImage(120, 240);
         final raw = (await image.toByteData())!;
-        int alphaAt(int x, int y) => raw.getUint8((y * 120 + x) * 4 + 3);
-        // Aurora: a clearly visible glow rises from the composer (bottom),
-        // the reading area in the middle stays calm, and it fades into the
-        // header instead of ending in a hard line.
+        int at(int x, int y, int ch) => raw.getUint8((y * 120 + x) * 4 + ch);
+        // Calm design (owner's request): an opaque, quiet gradient in the
+        // theme's own tones — a faint warm tint near the header fading into
+        // the plain page tone; no bright swirls anywhere.
         for (final x in [20, 60, 100]) {
-          expect(alphaAt(x, 228), inInclusiveRange(30, 150), reason: 'bottom x=$x');
-          expect(alphaAt(x, 120), lessThan(alphaAt(x, 228)), reason: 'middle x=$x');
+          expect(at(x, 228, 3), 255, reason: 'opaque bottom x=$x');
+          final top = at(x, 2, 0) - at(x, 2, 2); // red minus blue (warmth)
+          final bottom = at(x, 228, 0) - at(x, 228, 2);
+          expect(top, greaterThanOrEqualTo(bottom), reason: 'tint fades x=$x');
+          expect(top.abs(), lessThan(40), reason: 'quiet colour x=$x');
         }
-        expect(raw.getUint8(3), lessThanOrEqualTo(2));
         image.dispose();
         picture.dispose();
       }

@@ -338,6 +338,21 @@ class AgentToolRegistry {
         ParamSchema(name: 'account_id', type: ParamType.string, required: true, descriptionAr: 'معرف الحساب', descriptionEn: 'Account ID'),
       ],
     ),
+    // «حذف البنك بالكامل» on the banks screen: every currency account of
+    // one bank. Cash can never be deleted as a whole (same as the button).
+    ToolDefinition(
+      name: 'delete_bank',
+      nameAr: 'حذف البنك بالكامل',
+      descriptionAr: 'حذف بنك بكل عملاته وحساباته نهائياً (الكاش لا يُحذف)',
+      descriptionEn: 'Permanently delete a whole bank with all its currency accounts (cash cannot be deleted)',
+      category: ToolCategory.write,
+      riskLevel: RiskLevel.critical,
+      requiresConfirmation: true,
+      entityType: 'bank',
+      params: [
+        ParamSchema(name: 'bank_name', type: ParamType.string, required: true, descriptionAr: 'اسم البنك', descriptionEn: 'Bank name'),
+      ],
+    ),
 
     // ═══════════════════════════════════════════════════════════════
     //  WRITE TOOLS — SAVINGS GOALS
@@ -589,6 +604,36 @@ class AgentToolRegistry {
       requiresConfirmation: true,
       params: [
         ParamSchema(name: 'recurring_id', type: ParamType.string, required: true, descriptionAr: 'معرف المعاملة المتكررة', descriptionEn: 'Recurring ID'),
+        // «تنفيذ الآن» with a chosen bank (rules set to pick the account at
+        // execution, or the user names another account).
+        ParamSchema(name: 'bank_account_id', type: ParamType.string, required: false, descriptionAr: 'الحساب البنكي للتنفيذ (اختياري)', descriptionEn: 'Bank account to execute from/into (optional)'),
+        ParamSchema(name: 'currency', type: ParamType.string, required: false, descriptionAr: 'عملة التنفيذ (اختياري)', descriptionEn: 'Execution currency (optional)'),
+      ],
+    ),
+    ToolDefinition(
+      name: 'skip_recurring',
+      nameAr: 'تخطي مرة',
+      descriptionAr: 'تخطي الموعد القادم لمعاملة متكررة مفعلة (ينقلها للموعد الذي بعده دون تنفيذ)',
+      descriptionEn: 'Skip the next occurrence of an active recurring transaction (moves it to the following date, nothing executed)',
+      category: ToolCategory.write,
+      riskLevel: RiskLevel.low,
+      entityType: 'recurring',
+      params: [
+        ParamSchema(name: 'recurring_id', type: ParamType.string, required: true, descriptionAr: 'معرف المعاملة المتكررة', descriptionEn: 'Recurring ID'),
+      ],
+    ),
+    ToolDefinition(
+      name: 'postpone_recurring',
+      nameAr: 'تأجيل متكررة',
+      descriptionAr: 'تأجيل الموعد القادم لمعاملة متكررة مفعلة إلى تاريخ لاحق',
+      descriptionEn: 'Postpone the next occurrence of an active recurring transaction to a later date',
+      category: ToolCategory.write,
+      riskLevel: RiskLevel.low,
+      entityType: 'recurring',
+      params: [
+        ParamSchema(name: 'recurring_id', type: ParamType.string, required: true, descriptionAr: 'معرف المعاملة المتكررة', descriptionEn: 'Recurring ID'),
+        ParamSchema(name: 'days', type: ParamType.number, required: false, descriptionAr: 'عدد أيام التأجيل من اليوم (1 غداً، 3، 7...)', descriptionEn: 'Days from today (1 = tomorrow, 3, 7...)', min: 1, max: 366),
+        ParamSchema(name: 'new_date', type: ParamType.date, required: false, descriptionAr: 'التاريخ الجديد (YYYY-MM-DD)', descriptionEn: 'New date (YYYY-MM-DD)'),
       ],
     ),
     ToolDefinition(

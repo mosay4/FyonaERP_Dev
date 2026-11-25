@@ -12,6 +12,7 @@ import '../../../core_business/data/local_commerce/local_commerce_api.dart';
 import '../../../purchases/presentation/pages/barcode_scan_page.dart';
 import '../../data/inventory_api.dart';
 import 'business_product_image.dart';
+import 'inventory_list_parts.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 
 /// One product chosen in the fast picker, with its resolved unit (if any).
@@ -31,6 +32,10 @@ class PickedProduct {
 /// [checkStock] enforces the available-stock cap — ON for sales (cannot sell
 /// what is not in stock), OFF for purchases (buying ADDS stock) and for
 /// category assignment (stock is irrelevant there).
+/// [showCategories] (the merchant's categories feature) adds the inventory's
+/// «بدون تصنيف» / «مع التصنيف» pills: uncategorized products, or category
+/// squares that open their products (search + barcode inside). The selection
+/// and quantities are kept while switching between these views.
 Future<List<PickedProduct>?> showProductMultiPicker(
   BuildContext context, {
   required InventoryApi api,
@@ -41,6 +46,7 @@ Future<List<PickedProduct>?> showProductMultiPicker(
   bool checkStock = true,
   bool Function(WidgetRef)? allowed,
   Set<String> excludeIds = const {},
+  bool showCategories = false,
 }) {
   return showModalBottomSheet<List<PickedProduct>>(
     context: context,
@@ -55,6 +61,7 @@ Future<List<PickedProduct>?> showProductMultiPicker(
         showQtyStepper: showQtyStepper,
         checkStock: checkStock,
         excludeIds: excludeIds,
+        showCategories: showCategories,
       );
       if (allowed == null) return sheet;
       return Consumer(builder: (context, ref, _) {
@@ -76,8 +83,10 @@ class _MultiPickerSheet extends StatefulWidget {
   final bool checkStock;
   /// Products already where they are going (e.g. in this category).
   final Set<String> excludeIds;
+  final bool showCategories;
   const _MultiPickerSheet(
       {required this.api,
+      this.showCategories = false,
       this.excludeIds = const {},
       required this.title,
       this.initialBarcode,
@@ -97,6 +106,17 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
   final Map<String, PickedProduct> _selected = {}; // productId -> picked
   String _scanMsg = '';
   bool _scanError = false;
+
+  /// Section filter (categories feature only): '' all products, 'none'
+  /// uncategorized, 'cats' the category squares / one opened category.
+  String _section = '';
+  Map<String, dynamic>? _openCategory;
+  List<Map<String, dynamic>>? _categories;
+  bool _categoriesFailed = false;
+  int _searchSeq = 0;
+
+  bool get _showingCategoryGrid =>
+      widget.showCategories && _section == 'cats' && _openCategory == null;
 
   Future<void> _playSfx({required bool ok}) =>
       ok ? ScanSfx.success() : ScanSfx.error();
@@ -122,27 +142,101 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
   static int get _searchThreshold => 1;
 
   Future<void> _search(String q) async {
+    final seq = ++_searchSeq;
     setState(() => _loading = true);
+    final categoryId = _openCategory?['id']?.toString();
     try {
       final raw = await widget.api.listProducts(
         search: q,
         perPage: (30 + widget.excludeIds.length).clamp(30, 200),
+        categoryId: categoryId,
+        uncategorized: widget.showCategories && _section == 'none',
       );
       final shown = [
         for (final p in raw)
           if (!widget.excludeIds.contains('${p['id']}')) p,
       ];
-      if (mounted) setState(() => _results = shown);
+      if (mounted && seq == _searchSeq) setState(() => _results = shown);
     } catch (_) {
-      if (mounted) setState(() => _results = []);
+      if (mounted && seq == _searchSeq) setState(() => _results = []);
     }
-    if (mounted) setState(() => _loading = false);
+    if (mounted && seq == _searchSeq) setState(() => _loading = false);
   }
 
   void _onQuery(String q) {
     _debounce?.cancel();
+    // The category squares filter by name locally (no product search).
+    if (_showingCategoryGrid) {
+      setState(() {});
+      return;
+    }
     _debounce = Timer(const Duration(milliseconds: 300),
         () => _search(q.trim()));
+  }
+
+  void _resetQuery() {
+    _debounce?.cancel();
+    _ctrl.clear();
+  }
+
+  /// «بدون تصنيف»: uncategorized products; tapping again shows all.
+  void _toggleUncategorized() {
+    _resetQuery();
+    setState(() {
+      _section = _section == 'none' ? '' : 'none';
+      _openCategory = null;
+    });
+    _search('');
+  }
+
+  /// «مع التصنيف»: the category squares; tapping again shows all products.
+  void _toggleCategories() {
+    _resetQuery();
+    final leaving = _section == 'cats';
+    setState(() {
+      _section = leaving ? '' : 'cats';
+      _openCategory = null;
+    });
+    if (leaving) {
+      _search('');
+    } else {
+      _loadCategories();
+    }
+  }
+
+  Future<void> _loadCategories() async {
+    if (_categories != null && !_categoriesFailed) return;
+    setState(() => _categoriesFailed = false);
+    try {
+      final cats = await widget.api.categories();
+      if (mounted) setState(() => _categories = cats);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _categories = const [];
+          _categoriesFailed = true;
+        });
+      }
+    }
+  }
+
+  void _openCategoryProducts(Map<String, dynamic> category) {
+    _resetQuery();
+    setState(() {
+      _openCategory = category;
+      _results = [];
+    });
+    _search('');
+  }
+
+  /// Back from one category to the category squares (selection kept).
+  void _backToCategories() {
+    _resetQuery();
+    _searchSeq++;
+    setState(() {
+      _openCategory = null;
+      _loading = false;
+    });
   }
 
   void _toggle(Map<String, dynamic> p) {
@@ -237,7 +331,13 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final bottom = MediaQuery.of(context).viewInsets.bottom;
-    return Container(
+    return PopScope(
+      // System back inside an opened category returns to the squares first.
+      canPop: _openCategory == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _openCategory != null) _backToCategories();
+      },
+      child: Container(
       constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height * 0.9),
       decoration: BoxDecoration(
@@ -285,6 +385,9 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
               style: const TextStyle(fontFamily: 'Cairo'),
             ),
           ),
+          if (widget.showCategories) _sectionPills(l10n),
+          if (widget.showCategories && _openCategory != null)
+            _categoryHeader(l10n),
           if (_scanMsg.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
@@ -302,7 +405,9 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
           const SizedBox(height: 6),
           SizedBox(
             height: MediaQuery.of(context).size.height * 0.5,
-            child: _loading
+            child: _showingCategoryGrid
+                ? _categoryGrid(l10n)
+                : _loading
                  ? widget.api is LocalInventoryApi
                      ? const SizedBox.shrink()
                      : const Center(child: CircularProgressIndicator())
@@ -355,6 +460,118 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
           _selectionBar(l10n),
         ],
       ),
+      ),
+    );
+  }
+
+  Widget _sectionPills(AppLocalizations l10n) {
+    final inCats = _section == 'cats';
+    final openName = (_openCategory?['name'] ?? '').toString();
+    return InventoryPillBar(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+      pills: [
+        InventoryPill(
+          key: const ValueKey('picker-section-none'),
+          label: l10n.translate('invNoCategory'),
+          selected: _section == 'none',
+          onTap: _toggleUncategorized,
+        ),
+        InventoryPill(
+          key: const ValueKey('picker-section-cats'),
+          icon: Icons.category_outlined,
+          label: openName.isNotEmpty
+              ? openName
+              : l10n.translate('invWithCategory'),
+          selected: inCats,
+          onTap: _toggleCategories,
+        ),
+      ],
+    );
+  }
+
+  /// «‹ التصنيفات · `name`»: returns to the category squares.
+  Widget _categoryHeader(AppLocalizations l10n) {
+    return Padding(
+      padding: const EdgeInsetsDirectional.fromSTEB(8, 2, 16, 0),
+      child: Row(
+        children: [
+          TextButton.icon(
+            key: const ValueKey('picker-back-to-categories'),
+            onPressed: _backToCategories,
+            style: TextButton.styleFrom(
+              foregroundColor: inventoryAccent,
+              visualDensity: VisualDensity.compact,
+            ),
+            icon: const BackButtonIcon(),
+            label: Text(l10n.translate('invCategories'),
+                style: const TextStyle(
+                    fontFamily: 'Cairo', fontWeight: FontWeight.w700)),
+          ),
+          Icon(Icons.circle, size: 4, color: AppColors.textSecondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text((_openCategory?['name'] ?? '').toString(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: R.fontSize(context, 13),
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _categoryGrid(AppLocalizations l10n) {
+    final all = _categories;
+    if (all == null) {
+      return widget.api is LocalInventoryApi
+          ? const SizedBox.shrink()
+          : const Center(child: CircularProgressIndicator());
+    }
+    final q = _ctrl.text.trim().toLowerCase();
+    final cats = [
+      for (final c in all)
+        if (q.isEmpty || '${c['name'] ?? ''}'.toLowerCase().contains(q)) c,
+    ];
+    if (cats.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+              l10n.translate(_categoriesFailed
+                  ? 'falconCatLoadFail'
+                  : q.isEmpty
+                      ? 'invNoCategoriesHint'
+                      : 'invNoProducts'),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontFamily: 'Cairo', color: AppColors.textSecondary)),
+        ),
+      );
+    }
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 0.92,
+      ),
+      itemCount: cats.length,
+      itemBuilder: (_, i) {
+        final c = cats[i];
+        final image = (c['image'] ?? '').toString();
+        return InventoryCategoryTile(
+          key: ValueKey('picker-category-${c['id']}'),
+          name: (c['name'] ?? '').toString(),
+          count: c['products_count'] as num?,
+          imageUrl: image.isEmpty ? null : image,
+          onTap: () => _openCategoryProducts(c),
+        );
+      },
     );
   }
 

@@ -66,6 +66,7 @@ class PurchaseItemsSection extends ConsumerWidget {
       api: ref.read(inventoryApiProvider),
       title: l10n.translate('invPickProducts'),
       showBarcode: ref.read(warehouseSettingsProvider).barcode,
+      showCategories: ref.read(warehouseSettingsProvider).categories,
       // Buying ADDS stock: a 0-stock product must be addable without the
       // «نفذت كمية هذا المنتج» blocker.
       checkStock: false,

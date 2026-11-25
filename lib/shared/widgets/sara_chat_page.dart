@@ -47,6 +47,7 @@ import '../../features/ai/domain/agent/currency_mismatch.dart';
 import '../../features/ai/domain/agent/tts_preparation.dart';
 import '../../features/ai/domain/agent/tool_registry.dart';
 import '../../features/ai/domain/agent/sara_screen_catalog.dart';
+import '../../features/ai/domain/agent/sara_link_fallback.dart';
 import '../../features/ai/domain/agent/chat_persistence.dart';
 import '../../features/ai/domain/agent/sara_display.dart';
 import '../../features/ai/presentation/widgets/sara_premium.dart';
@@ -451,7 +452,7 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
             routeLink: pm.routeLink,
             actions: pm.actions.map((a) => SaraAction(
               type: SaraActionType.values.firstWhere((t) => t.name == (a['type'] ?? ''), orElse: () => SaraActionType.openEntity),
-              params: Map<String, String>.from(a['params'] ?? {}), label: a['label'] as String?,
+              params: Map<String, dynamic>.from(a['params'] as Map? ?? const {}), label: a['label'] as String?,
             )).toList(),
             imagePath: pm.imagePath, audioPath: pm.audioPath, audioDuration: pm.audioDuration,
             isWelcome: pm.isWelcome, fileName: pm.fileName, mimeType: pm.mimeType,
@@ -1743,8 +1744,9 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
       {
         setState(() {
           _assistantStatus = AssistantStatus.connected;
-          final routeLink = SaraActionDispatcher.resolveRouteFromActions(resp.actions);
-          _addAssistantMessage(cleaned, routeLink: routeLink, actions: resp.actions, visualGeneration: visualGeneration);
+          final actions = _withScreenLink(resp.userQuery ?? query, cleaned, resp.actions);
+          final routeLink = SaraActionDispatcher.resolveRouteFromActions(actions);
+          _addAssistantMessage(cleaned, routeLink: routeLink, actions: actions, visualGeneration: visualGeneration);
           _dynamicSuggestions = resp.suggestions;
         });
         _busy = false;
@@ -1785,6 +1787,14 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
       _saveMessages();
       _scrollDown();
     });
+  }
+
+  /// Personal: a reply that promises a screen button (or answers a request
+  /// for one) always carries it — derived from the words when the model
+  /// forgot the open-screen action (see sara_link_fallback.dart).
+  List<SaraAction> _withScreenLink(String userQuery, String reply, List<SaraAction> actions) {
+    if (widget.accountType == 'business') return actions;
+    return saraEnsureScreenAction(userQuery: userQuery, reply: reply, actions: actions, arabic: _chatLang() != 'en');
   }
 
   void _addAssistantMessage(String text, {String? routeLink, List<SaraAction> actions = const [], int? visualGeneration}) {
@@ -2575,8 +2585,9 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
       {
         setState(() {
           _assistantStatus = AssistantStatus.connected;
-          final routeLink = SaraActionDispatcher.resolveRouteFromActions(resp.actions);
-          _addAssistantMessage(cleaned, routeLink: routeLink, actions: resp.actions, visualGeneration: visualGeneration);
+          final actions = _withScreenLink(resp.userQuery ?? query, cleaned, resp.actions);
+          final routeLink = SaraActionDispatcher.resolveRouteFromActions(actions);
+          _addAssistantMessage(cleaned, routeLink: routeLink, actions: actions, visualGeneration: visualGeneration);
           _dynamicSuggestions = resp.suggestions;
         });
         _busy = false;
@@ -3032,10 +3043,10 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
         color: light ? Colors.white.withAlpha(242) : const Color(0xFF1B1C21).withAlpha(240),
         borderRadius: BorderRadius.circular(28),
         border: Border.all(
-          color: focused ? AppColors.primary.withAlpha(light ? 70 : 110) : _saraLine(context),
+          color: focused ? AppColors.primary.withAlpha(light ? 45 : 60) : _saraLine(context),
           width: focused ? 1 : 0.7),
         boxShadow: [BoxShadow(
-          color: (focused ? AppColors.primary : Colors.black).withAlpha(light ? (focused ? 26 : 12) : (focused ? 50 : 40)),
+          color: (focused ? AppColors.primary : Colors.black).withAlpha(light ? (focused ? 16 : 10) : (focused ? 30 : 34)),
           blurRadius: focused ? 26 : 18, offset: const Offset(0, 6))],
       ),
       child: Row(
@@ -3077,6 +3088,10 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
                 hintTextDirection: ui.TextDirection.rtl,
                 hintStyle: TextStyle(fontFamily: 'Cairo', fontSize: 14, color: _saraFaint(context)),
                 border: InputBorder.none,
+                // The pill is the field: no theme focus frame inside it.
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                filled: false,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               ),

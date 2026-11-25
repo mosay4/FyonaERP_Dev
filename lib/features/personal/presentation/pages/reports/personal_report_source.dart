@@ -9,6 +9,7 @@ import '../../../../../shared/providers/current_user_provider.dart';
 import '../../../data/models/personal_models.dart';
 import '../../providers/personal_providers.dart';
 import 'personal_report_data.dart';
+import '../../../../../core/services/currency/enabled_currencies_service.dart';
 
 /// Where the Personal reports read from: the same providers the Personal
 /// pages use (device-first), valued with the app's currency engine.
@@ -133,6 +134,23 @@ class PersonalReportSource {
     final out = count.keys.toList()
       ..sort((a, b) => count[b]!.compareTo(count[a]!));
     return out;
+  }
+
+  /// The currencies the user enabled for Personal (Profile › preferences):
+  /// the only ones the report currency picker offers.
+  static Future<List<String>> enabled(WidgetRef ref) async {
+    final userId = ref.read(currentUserIdProvider);
+    final set = await loadEnabledCurrencies(userId);
+    final order = mine(ref);
+    final list = set.map((c) => c.trim().toUpperCase()).toSet().toList()
+      ..sort((a, b) {
+        final ia = order.indexOf(a), ib = order.indexOf(b);
+        if (ia >= 0 && ib >= 0) return ia.compareTo(ib);
+        if (ia >= 0) return -1;
+        if (ib >= 0) return 1;
+        return a.compareTo(b);
+      });
+    return list;
   }
 
   /// Every currency this device can value right now.

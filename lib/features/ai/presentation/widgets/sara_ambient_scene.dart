@@ -278,9 +278,13 @@ class SaraAmbientPainter extends CustomPainter {
       return;
     }
     if (accents) {
-      _edges(canvas, size);
+      // Calm design: no coloured edges; only a whisper of focus on input.
+      _focus(canvas, size);
       return;
     }
+    _calm(canvas, size);
+    return;
+    // ignore: dead_code
     final effect = shader;
     // Loading is asynchronous. No CPU/static substitute is rendered meanwhile.
     if (effect == null) return;
@@ -339,6 +343,83 @@ class SaraAmbientPainter extends CustomPainter {
     canvas.drawRect(Offset.zero & size, Paint()..shader = effect);
   }
 
+  /// The calm background: a soft gradient in the theme's own tones and
+  /// faint light that reacts gently — it breathes behind Sara's portrait
+  /// while she thinks, warms above the input while typing, and softly
+  /// washes behind her reply as it arrives. No swirls, no strong colours.
+  void _calm(Canvas canvas, Size size) {
+    final c = controller, g = c.geometry;
+    final w = size.width, h = size.height;
+    final rect = Offset.zero & size;
+    final base = dark ? const Color(0xFF15161A) : const Color(0xFFF4F2F4);
+    final tint = Color.alphaBlend(
+      primary.withValues(alpha: dark ? .07 : .045),
+      base,
+    );
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [tint, base, base],
+          stops: const [0, .45, 1],
+        ).createShader(rect),
+    );
+    void glow(Offset centre, double radius, Color color, double alpha) {
+      if (alpha <= .002) return;
+      canvas.drawCircle(
+        centre,
+        radius,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [
+              color.withValues(alpha: alpha.clamp(0, .22)),
+              color.withValues(alpha: 0),
+            ],
+          ).createShader(Rect.fromCircle(center: centre, radius: radius)),
+      );
+    }
+
+    final breathe = c.reducedMotion ? 1.0 : .75 + .25 * math.sin(c.time * 1.4);
+    // Behind Sara while she thinks (a slow, soft breath).
+    final avatar = g.avatar?.center ?? Offset(w * .8, 0);
+    glow(
+      Offset(avatar.dx, math.max(0, avatar.dy)),
+      w * .62,
+      primary,
+      (dark ? .06 : .04) + c.thinkingFocus * (dark ? .10 : .07) * breathe,
+    );
+    // A cool counter-light so the page never reads as «all red».
+    glow(
+      Offset(w * .08, h * .55),
+      w * .7,
+      dark ? const Color(0xFF6A6F8F) : const Color(0xFFB9C2D6),
+      dark ? .05 : .08,
+    );
+    // Above the input while typing / on send.
+    final input = g.input?.center ?? Offset(w / 2, h * .93);
+    glow(
+      input,
+      w * .55,
+      primary,
+      c.typingAmp * (dark ? .07 : .05) + c.sendImpulse * .06,
+    );
+    // Behind the reply as it streams, fading after.
+    final reply = g.reply?.center;
+    if (reply != null) {
+      glow(reply, w * .5, primary, c.respondFlow * (dark ? .06 : .04));
+    }
+  }
+
+  void _focus(Canvas canvas, Size size) {
+    final c = controller, g = c.geometry;
+    if (g.input != null && c.focusGlow > .001) {
+      _outline(canvas, size, g.input!, .08 * c.focusGlow, 3);
+    }
+  }
+
+  // ignore: unused_element
   void _edges(Canvas canvas, Size size) {
     final c = controller, g = c.geometry;
     if (g.input != null && c.focusGlow > .001) {

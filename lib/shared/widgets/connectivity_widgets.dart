@@ -189,17 +189,19 @@ class _WifiMark extends CustomPainter {
 /// strike draws across the mark.
 class OfflineSignalArt extends StatefulWidget {
   final double width;
-  const OfflineSignalArt({super.key, this.width = 150});
+  const OfflineSignalArt({super.key, this.width = 64});
 
   @override
   State<OfflineSignalArt> createState() => _OfflineSignalArtState();
 }
 
+/// A compact «no connection» mark: a soft tile, a cloud drawn in a fine
+/// line, then a slash in the warning colour — once, about one second.
 class _OfflineSignalArtState extends State<OfflineSignalArt>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1600),
+    duration: const Duration(milliseconds: 1100),
   )..forward();
 
   @override
@@ -211,19 +213,24 @@ class _OfflineSignalArtState extends State<OfflineSignalArt>
   @override
   Widget build(BuildContext context) {
     final w = widget.width;
+    const accent = Color(0xFFE0892B);
     return Semantics(
       label: 'offline',
-      child: SizedBox(
+      child: Container(
         width: w,
-        height: w * 0.78,
+        height: w,
+        decoration: BoxDecoration(
+          color: accent.withAlpha(22),
+          borderRadius: BorderRadius.circular(w * 0.32),
+          border: Border.all(color: accent.withAlpha(46)),
+        ),
         child: AnimatedBuilder(
           animation: _c,
           builder: (_, _) => CustomPaint(
             painter: _OfflineArtPainter(
-              t: _c.value,
-              accent: const Color(0xFFE0892B),
-              track: AppColors.textTertiary,
-              cloud: AppColors.textSecondary,
+              t: Curves.easeOutCubic.transform(_c.value),
+              accent: accent,
+              line: AppColors.textSecondary,
             ),
           ),
         ),
@@ -233,107 +240,47 @@ class _OfflineSignalArtState extends State<OfflineSignalArt>
 }
 
 class _OfflineArtPainter extends CustomPainter {
-  _OfflineArtPainter({
-    required this.t,
-    required this.accent,
-    required this.track,
-    required this.cloud,
-  });
-
+  _OfflineArtPainter({required this.t, required this.accent, required this.line});
   final double t;
   final Color accent;
-  final Color track;
-  final Color cloud;
-
-  double _seg(double a, double b) => ((t - a) / (b - a)).clamp(0.0, 1.0);
+  final Color line;
 
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
-    final h = size.height;
-    final dot = Offset(w * 0.36, h * 0.80);
-    final radii = [h * 0.15, h * 0.29, h * 0.43];
-    final r3 = radii[2];
-
-    // Soft halo behind the mark (pops in once).
-    final halo = Curves.easeOutBack.transform(_seg(0, .3));
-    canvas.drawCircle(dot + Offset(0, -r3 * .55), r3 * .97 * halo,
-        Paint()..color = accent.withValues(alpha: .09));
-
-    // Cloud (top-end) drifting away and dimming once the link breaks.
-    final drift = Curves.easeInOutCubic.transform(_seg(.45, .9));
-    final cAppear = _seg(.05, .3);
-    final cc = Offset(w * 0.84 + 5 * drift, h * 0.22 - 3 * drift);
-    final cPaint = Paint()
-      ..color = cloud.withValues(alpha: (.55 - .25 * drift) * cAppear);
-    final u = w * 0.055;
-    canvas.drawCircle(cc + Offset(-u * 1.1, u * .35), u * .9, cPaint);
-    canvas.drawCircle(cc + Offset(0, -u * .15), u * 1.25, cPaint);
-    canvas.drawCircle(cc + Offset(u * 1.15, u * .4), u * .85, cPaint);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTRB(cc.dx - u * 1.9, cc.dy + u * .2, cc.dx + u * 1.95,
-            cc.dy + u * 1.25),
-        Radius.circular(u * .55),
-      ),
-      cPaint,
-    );
-
-    // Dotted link mark → cloud: appears, then the middle dots fall away.
-    final from = dot + Offset(r3 * .78, -r3 * .84);
-    final to = cc + Offset(-u * 2.0, u * 1.4);
-    for (var i = 0; i < 4; i++) {
-      final f = (i + .5) / 4;
-      final appear = _seg(.12 + i * .04, .26 + i * .04);
-      final breakAt = i == 1 || i == 2 ? _seg(.42, .6) : _seg(.62, .85) * .6;
-      final a = appear * (1 - breakAt);
-      if (a <= 0) continue;
-      final p = Offset.lerp(from, to, f)! +
-          Offset(0, (i == 1 || i == 2) ? 6 * breakAt : 0);
-      canvas.drawCircle(
-          p, w * 0.014, Paint()..color = track.withValues(alpha: .7 * a));
-    }
-
-    // Wi-Fi arcs: light inner → outer, then fade outer-first.
-    final stroke = h * 0.055;
-    final arc = Paint()
+    final stroke = w * 0.045;
+    // Cloud outline (two bumps + base), centred in the tile.
+    final cloud = Path()
+      ..moveTo(w * 0.30, w * 0.64)
+      ..lineTo(w * 0.70, w * 0.64)
+      ..arcToPoint(Offset(w * 0.70, w * 0.44),
+          radius: Radius.circular(w * 0.10), clockwise: false)
+      ..arcToPoint(Offset(w * 0.44, w * 0.38),
+          radius: Radius.circular(w * 0.15), clockwise: false)
+      ..arcToPoint(Offset(w * 0.30, w * 0.64),
+          radius: Radius.circular(w * 0.13), clockwise: false)
+      ..close();
+    final reveal = (t / 0.65).clamp(0.0, 1.0);
+    final paint = Paint()
       ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = stroke;
-    const sweep = 1.5;
-    const start = -1.5708 - sweep / 2;
-    for (var i = 0; i < 3; i++) {
-      final rect = Rect.fromCircle(center: dot, radius: radii[i]);
-      final on = Curves.easeOut.transform(_seg(.04 + i * .07, .18 + i * .07));
-      final off = Curves.easeInOut.transform(
-          _seg(.42 + (2 - i) * .07, .58 + (2 - i) * .07));
-      canvas.drawArc(rect, start, sweep, false,
-          arc..color = track.withValues(alpha: .22 * on));
-      final lit = on * (1 - off * .78);
-      if (lit > 0) {
-        canvas.drawArc(
-          rect,
-          start + sweep * (1 - on) / 2,
-          sweep * on,
-          false,
-          arc..color = accent.withValues(alpha: lit),
-        );
-      }
+      ..strokeJoin = StrokeJoin.round
+      ..color = line.withAlpha(200);
+    for (final metric in cloud.computeMetrics()) {
+      canvas.drawPath(metric.extractPath(0, metric.length * reveal), paint);
     }
-    canvas.drawCircle(dot, stroke * .95,
-        Paint()..color = accent.withValues(alpha: _seg(0, .12)));
-
-    // Strike draws across the mark.
-    final k = Curves.easeInOutCubic.transform(_seg(.62, .88));
-    if (k > 0) {
-      final p1 = dot + Offset(-r3 * .78, -r3 * .98);
-      final p2 = dot + Offset(r3 * .62, r3 * .08);
+    // The slash draws after the cloud.
+    final s = ((t - 0.55) / 0.45).clamp(0.0, 1.0);
+    if (s > 0) {
+      final from = Offset(w * 0.27, w * 0.27);
+      final to = Offset(w * 0.73, w * 0.73);
       canvas.drawLine(
-        p1,
-        Offset.lerp(p1, p2, k)!,
+        from,
+        Offset.lerp(from, to, s)!,
         Paint()
           ..color = accent
-          ..strokeWidth = stroke * .95
+          ..strokeWidth = stroke * 1.15
           ..strokeCap = StrokeCap.round,
       );
     }
@@ -341,12 +288,8 @@ class _OfflineArtPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _OfflineArtPainter old) =>
-      old.t != t ||
-      old.accent != accent ||
-      old.track != track ||
-      old.cloud != cloud;
+      old.t != t || old.accent != accent || old.line != line;
 }
-
 /// Modal dialog shown when the user tries to use an internet-required section
 /// while offline: a finite «no internet» motion, one short line, then
 /// «إعادة المحاولة» and «إخفاء».

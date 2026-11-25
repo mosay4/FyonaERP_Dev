@@ -73,6 +73,13 @@ String debtAmount(dynamic value) {
   return cf.fmtNum(n);
 }
 
+/// Amount of ONE per-currency debt row, whatever the source names it: the
+/// device ledger (BusinessDebtProjection.perCurrency) answers `total` (a
+/// major-unit decimal string such as "13500.00"), older/connected shapes use
+/// `debt`, and per-operation rows carry `remaining`.
+String debtRowAmount(Map row) =>
+    debtAmount(row['debt'] ?? row['total'] ?? row['remaining']);
+
 /// Quantities: whole numbers never show `.0` (1, 2, 3) unless the merchant
 /// actually typed a fraction (1.5 stays 1.5). No thousands separators so the
 /// value can be edited in a text field and parsed back safely.

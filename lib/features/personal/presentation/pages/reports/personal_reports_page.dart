@@ -49,10 +49,16 @@ class _PersonalReportsPageState extends ConsumerState<PersonalReportsPage> {
       _currency ?? ref.read(personalFinanceProvider).walletCurrency;
 
   Future<void> _pickCurrency() async {
+    // Only the currencies the user enabled for Personal (preferences).
+    final enabled = await PersonalReportSource.enabled(ref);
+    if (!mounted) return;
     final picked = await showPersonalReportCurrencyPicker(
       context,
-      mine: PersonalReportSource.mine(ref),
-      all: PersonalReportSource.all(ref),
+      mine: [
+        for (final c in PersonalReportSource.mine(ref))
+          if (enabled.contains(c)) c,
+      ],
+      all: enabled,
       current: _ccy,
     );
     if (picked == null || picked == _ccy || !mounted) return;

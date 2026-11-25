@@ -122,6 +122,13 @@ class ToolExecutor {
   /// The same maintenance gate the Personal buttons apply (feature route →
   /// blocked). Sara never writes where the button itself is blocked.
   final bool Function(String featureRoute)? _maintenanceBlocked;
+  /// The identity gate the banks screen asks before deleting a bank or an
+  /// account (biometric / app PIN). Sara asks it too, after the user's
+  /// confirmation card; null (tests, background) = no interactive gate.
+  final Future<bool> Function(String tool)? _identityGate;
+
+  /// Tools the Personal screens put behind [verifySensitiveAction].
+  static const identityGatedTools = {'delete_bank', 'delete_bank_account'};
 
   ToolExecutor(
     this._service, {
@@ -129,8 +136,10 @@ class ToolExecutor {
     ApiClient? apiClient,
     CurrencyEngine? fxEngine,
     bool Function(String featureRoute)? maintenanceBlocked,
+    Future<bool> Function(String tool)? identityGate,
   })  : _fxEngine = fxEngine,
         _maintenanceBlocked = maintenanceBlocked,
+        _identityGate = identityGate,
         _verify = verify ??
             SaraVerificationGateway.forService(
               _service,
@@ -218,7 +227,7 @@ class ToolExecutor {
     if (tool.contains('budget')) return '/personal/budget';
     if (tool.contains('recurring')) return '/personal/recurring';
     if (tool.contains('transfer')) return '/personal/transfer';
-    if (tool.contains('bank_account') || tool.contains('currency') || tool.contains('exchange_rate')) {
+    if (tool == 'delete_bank' || tool.contains('bank_account') || tool.contains('currency') || tool.contains('exchange_rate')) {
       return '/personal/banks';
     }
     if (tool.contains('transaction')) return '/personal/transactions';
@@ -235,7 +244,7 @@ class ToolExecutor {
         tool: tool, success: false, messageAr: ar, messageEn: en, errorCode: code, verified: false);
     final isWrite = tool.startsWith('create_') || tool.startsWith('update_') || tool.startsWith('delete_') ||
         tool.startsWith('add_') || const {'pay_debt', 'contribute_to_goal', 'execute_recurring_now',
-          'activate_recurring', 'deactivate_recurring'}.contains(tool);
+          'activate_recurring', 'deactivate_recurring', 'skip_recurring', 'postpone_recurring'}.contains(tool);
     if (!isWrite) return null;
     final feature = _featureOf(tool);
     if (feature != null && (_maintenanceBlocked?.call(feature) ?? false)) {
@@ -251,6 +260,11 @@ class ToolExecutor {
         }
       }
     }
+    // «حذف البنك بالكامل»: the banks screen never offers it for cash.
+    if (tool == 'delete_bank' && isCashAccount('${p['bank_name'] ?? ''}'.trim())) {
+      return refuse('الكاش لا يُحذف بالكامل، كما في شاشة البنوك.',
+          'Cash can never be deleted as a whole, as on the banks screen.', 'CASH_NOT_DELETABLE');
+    }
     if (tool == 'create_transfer') {
       final id = '${p['from_account_id'] ?? ''}';
       final amount = double.tryParse('${p['amount'] ?? ''}');
@@ -262,6 +276,12 @@ class ToolExecutor {
           }
         }
       }
+    }
+    // Last: the identity gate, only once every other rule allows the delete.
+    final gate = _identityGate;
+    if (gate != null && identityGatedTools.contains(tool) && !await gate(tool)) {
+      return refuse('لم يتم التحقق من هويتك، لذلك لم أحذف شيئاً.',
+          'Your identity was not verified, so nothing was deleted.', 'IDENTITY_NOT_VERIFIED');
     }
     return null;
   }
@@ -356,6 +376,7 @@ class ToolExecutor {
       case 'create_bank_account': return _createBankAccount(p);
       case 'update_bank_account': return _updateBankAccount(p);
       case 'delete_bank_account': return _deleteBankAccount(p);
+      case 'delete_bank': return _deleteBank(p);
 
       // ═══════ WRITE TOOLS — SAVINGS GOALS ═══════
       case 'create_savings_goal': return _createSavingsGoal(p);
@@ -381,6 +402,8 @@ class ToolExecutor {
       case 'execute_recurring_now': return _executeRecurringNow(p);
       case 'activate_recurring': return _activateRecurring(p);
       case 'deactivate_recurring': return _deactivateRecurring(p);
+      case 'skip_recurring': return _rescheduleRecurring(p, skip: true);
+      case 'postpone_recurring': return _rescheduleRecurring(p, skip: false);
 
       // ═══════ CURRENCIES & EXCHANGE RATES ═══════
       case 'get_currencies': return _getCurrencies();
@@ -1308,6 +1331,56 @@ class ToolExecutor {
       },
     );
     return _adapt(v, tool: 'delete_bank_account', entityType: 'bank');
+  }
+
+  /// «حذف البنك بالكامل»: every currency account of [bank_name] (exact
+  /// name, as the banks screen groups them), each delete verified.
+  Future<ToolExecutionResult> _deleteBank(Map<String, dynamic> p) async {
+    const tool = 'delete_bank';
+    final name = '${p['bank_name'] ?? ''}'.trim();
+    if (name.isEmpty) {
+      return const ToolExecutionResult(tool: tool, success: false, messageAr: 'اسم البنك مطلوب', messageEn: 'Bank name is required', errorCode: 'MISSING_NAME', retryable: false, verified: false);
+    }
+    final v = await _verify.executeOnce(
+      opKey: SaraVerificationGateway.opKeyFor(tool, {'bank_name': name}),
+      run: () async {
+        final accounts = (await _service.getBankAccounts())
+            .where((a) => a.bankName.trim() == name).toList();
+        if (accounts.isEmpty) {
+          return SaraVerificationResult(state: SaraVerificationState.notFound, tool: tool, queueEntityType: 'personal_bank_account',
+              messageAr: 'لا يوجد بنك باسم «$name»', messageEn: 'No bank named "$name"', errorCode: 'NOT_FOUND');
+        }
+        final currencies = accounts.map((a) => saraCurrencyId(a.currency)).toList();
+        var pending = false;
+        for (final account in accounts) {
+          try {
+            await _service.deleteBankAccount(account.id);
+          } catch (_) {
+            return SaraVerificationResult(state: SaraVerificationState.failed, tool: tool, queueEntityType: 'personal_bank_account',
+                messageAr: 'فشل حذف البنك «$name»', messageEn: 'Failed to delete bank "$name"', errorCode: 'SAVE_FAILED');
+          }
+          final one = await _verify.verifyDelete(
+            tool: tool, queueEntityType: 'personal_bank_account', entityId: account.id,
+            successAr: 'تم الحذف', successEn: 'Deleted',
+            failureAr: 'فشل حذف البنك «$name»', failureEn: 'Failed to delete bank "$name"');
+          if (one.state == SaraVerificationState.successLocalPendingSync) {
+            pending = true;
+          } else if (one.state != SaraVerificationState.successConfirmed) {
+            return one;
+          }
+        }
+        final list = currencies.map((c) => currencyName(c, locale: 'ar')).join('، ');
+        return SaraVerificationResult(
+          state: pending ? SaraVerificationState.successLocalPendingSync : SaraVerificationState.successConfirmed,
+          tool: tool, queueEntityType: 'personal_bank_account',
+          serverConfirmed: !pending, syncState: pending ? 'pending' : 'synced',
+          messageAr: 'تم حذف البنك «$name» بكل عملاته ($list)${pending ? ' — بانتظار المزامنة' : ''}',
+          messageEn: 'Deleted bank "$name" with all its currencies (${currencies.join(', ')})${pending ? ' — pending sync' : ''}',
+          data: {'bank_name': name, 'deleted_accounts': accounts.length, 'currencies': currencies},
+        );
+      },
+    );
+    return _adapt(v, tool: tool, entityType: 'bank', route: '/personal/banks');
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -2346,9 +2419,16 @@ class ToolExecutor {
         errorCode: 'INVALID_ID', retryable: false, verified: false,
       );
     }
+    // «تنفيذ الآن» with a chosen account (the screen's bank sheet).
+    final bankAccountId = _toId(p['bank_account_id']);
+    final overrideCurrency = '${p['currency'] ?? ''}'.trim();
     final v = await _verify.executeOnce(
       opKey: SaraVerificationGateway.opKeyFor(
-          'execute_recurring_now', {'recurring_id': recurringId}),
+          'execute_recurring_now', {
+            'recurring_id': recurringId,
+            if (bankAccountId != null) 'bank_account_id': bankAccountId,
+            if (overrideCurrency.isNotEmpty) 'currency': overrideCurrency,
+          }),
       run: () async {
         List<RecurringTransaction> recs;
         try {
@@ -2397,13 +2477,54 @@ class ToolExecutor {
             errorCode: 'INVALID_RECURRENCE',
           );
         }
+        PersonalBankAccount? chosen;
+        if (bankAccountId != null) {
+          for (final a in await _service.getBankAccounts()) {
+            if (a.id == bankAccountId) { chosen = a; break; }
+          }
+          if (chosen == null) {
+            return const SaraVerificationResult(
+              state: SaraVerificationState.notFound,
+              tool: 'execute_recurring_now',
+              queueEntityType: 'personal_bank_account',
+              messageAr: 'الحساب البنكي المختار غير موجود',
+              messageEn: 'The chosen bank account was not found',
+              errorCode: 'NOT_FOUND',
+            );
+          }
+        } else if (target.accountType != 'fixed' && (target.bankAccountId ?? '').isEmpty) {
+          // The screen asks which bank first — so does Sara.
+          final accounts = await _service.getBankAccounts();
+          return SaraVerificationResult(
+            state: SaraVerificationState.failed,
+            tool: 'execute_recurring_now',
+            queueEntityType: 'personal_recurring_transaction',
+            messageAr: 'من أي حساب أنفذ «${target.name}»؟ اختر البنك والعملة.',
+            messageEn: 'Which account should "${target.name}" run from? Pick the bank and currency.',
+            errorCode: 'NEEDS_ACCOUNT',
+            data: {
+              'accounts': [
+                for (final a in accounts)
+                  {'id': a.id, 'bank_name': a.bankName, 'currency': saraCurrencyId(a.currency), 'balance': a.balance},
+              ],
+            },
+          );
+        }
         List<PersonalTransaction> before = const [];
         try {
           before = await _service.getTransactions();
         } catch (_) {}
         final beforeIds = before.map((t) => t.id).toSet();
         try {
-          await _service.executeRecurringNow(target, manual: true);
+          try {
+            await _fxEngine?.load();
+          } catch (_) {}
+          await _service.executeRecurringNow(target,
+              overrideBankAccountId: chosen?.id,
+              overrideCurrency: chosen == null ? null
+                  : (overrideCurrency.isNotEmpty ? overrideCurrency : chosen.currency),
+              currencyEngine: _fxEngine,
+              manual: true);
         } catch (e) {
           return SaraVerificationResult(
             state: SaraVerificationState.failed,
@@ -2447,6 +2568,84 @@ class ToolExecutor {
     );
     // Transaction is the entity created — surface its id.
     return _adapt(v, tool: 'execute_recurring_now', entityType: 'transaction');
+  }
+
+  /// «تخطي مرة» / «تأجيل» of the recurring screen: only the next date moves
+  /// (skip also stamps the occurrence as handled) — nothing is executed.
+  Future<ToolExecutionResult> _rescheduleRecurring(Map<String, dynamic> p, {required bool skip}) async {
+    final tool = skip ? 'skip_recurring' : 'postpone_recurring';
+    final id = _toId(p['recurring_id']);
+    if (id == null || id.isEmpty) {
+      return ToolExecutionResult(tool: tool, success: false,
+          messageAr: 'معرف المعاملة المتكررة مطلوب', messageEn: 'Recurring ID is required',
+          errorCode: 'INVALID_ID', retryable: false, verified: false);
+    }
+    DateTime? newDate;
+    if (!skip) {
+      final days = _toInt(p['days']);
+      final explicit = DateTime.tryParse('${p['new_date'] ?? ''}'.trim());
+      final today = DateTime.now();
+      newDate = explicit ?? (days != null && days > 0 ? today.add(Duration(days: days)) : null);
+      if (newDate == null) {
+        return ToolExecutionResult(tool: tool, success: false,
+            messageAr: 'إلى متى أؤجلها؟ غداً، بعد 3 أيام، بعد أسبوع، أو تاريخ محدد.',
+            messageEn: 'Postpone until when? Tomorrow, in 3 days, in a week, or a date.',
+            errorCode: 'MISSING_DATE', retryable: false, verified: false);
+      }
+      if (!DateTime(newDate.year, newDate.month, newDate.day).isAfter(DateTime(today.year, today.month, today.day))) {
+        return ToolExecutionResult(tool: tool, success: false,
+            messageAr: 'تاريخ التأجيل يجب أن يكون بعد اليوم.',
+            messageEn: 'The postpone date must be after today.',
+            errorCode: 'INVALID_DATE', retryable: false, verified: false);
+      }
+    }
+    final v = await _verify.executeOnce(
+      opKey: SaraVerificationGateway.opKeyFor(tool, {
+        'recurring_id': id,
+        if (newDate != null) 'new_date': '${newDate.year}-${newDate.month}-${newDate.day}',
+      }),
+      run: () async {
+        RecurringTransaction? target;
+        for (final r in await _service.getRecurring()) {
+          if (r.id == id) { target = r; break; }
+        }
+        if (target == null) {
+          return SaraVerificationResult(state: SaraVerificationState.notFound, tool: tool,
+              queueEntityType: 'personal_recurring_transaction',
+              messageAr: 'المعاملة المتكررة غير موجودة', messageEn: 'Recurring transaction not found', errorCode: 'NOT_FOUND');
+        }
+        if (!target.isActive) {
+          // The screen offers skip/postpone only on active rules.
+          return SaraVerificationResult(state: SaraVerificationState.failed, tool: tool,
+              queueEntityType: 'personal_recurring_transaction',
+              messageAr: 'المعاملة المتكررة معطلة — فعّلها أولاً', messageEn: 'The recurring transaction is inactive — activate it first',
+              errorCode: 'INACTIVE');
+        }
+        final next = skip ? nextRecurringDate(target) : newDate!;
+        try {
+          await _service.updateRecurring(skip
+              ? target.copyWith(nextDate: next, lastExecutedAt: DateTime.now())
+              : target.copyWith(nextDate: next));
+        } catch (_) {
+          return SaraVerificationResult(state: SaraVerificationState.failed, tool: tool,
+              queueEntityType: 'personal_recurring_transaction',
+              messageAr: skip ? 'فشل تخطي الموعد' : 'فشل تأجيل الموعد',
+              messageEn: skip ? 'Failed to skip the occurrence' : 'Failed to postpone', errorCode: 'SAVE_FAILED');
+        }
+        final shown = '${next.year}/${next.month.toString().padLeft(2, '0')}/${next.day.toString().padLeft(2, '0')}';
+        return _verify.verifyUpdate(
+          tool: tool,
+          queueEntityType: 'personal_recurring_transaction',
+          entityId: id,
+          successAr: skip ? 'تم تخطي موعد «${target.name}» — الموعد القادم $shown' : 'تم تأجيل «${target.name}» إلى $shown',
+          successEn: skip ? 'Skipped "${target.name}" — next date $shown' : 'Postponed "${target.name}" to $shown',
+          failureAr: skip ? 'فشل تخطي الموعد' : 'فشل تأجيل الموعد',
+          failureEn: skip ? 'Failed to skip the occurrence' : 'Failed to postpone',
+          data: {'next_date': next.toIso8601String()},
+        );
+      },
+    );
+    return _adapt(v, tool: tool, entityType: 'recurring');
   }
 
   Future<ToolExecutionResult> _activateRecurring(Map<String, dynamic> p) async {

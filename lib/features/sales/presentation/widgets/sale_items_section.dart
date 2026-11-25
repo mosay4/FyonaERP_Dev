@@ -678,6 +678,7 @@ class _SaleItemsSectionState extends ConsumerState<SaleItemsSection> {
         api: ref.read(inventoryApiProvider),
         title: l10n.translate('invPickProducts'),
         showBarcode: ref.read(warehouseSettingsProvider).barcode,
+        showCategories: ref.read(warehouseSettingsProvider).categories,
       );
       if (list != null && list.isNotEmpty) {
         _addPicked(list);

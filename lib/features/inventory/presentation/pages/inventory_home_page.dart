@@ -15,7 +15,6 @@ import '../../../purchases/presentation/pages/barcode_scan_page.dart';
 import '../providers/inventory_providers.dart';
 
 import '../widgets/falcon_ambient.dart';
-import '../widgets/business_product_image.dart';
 import '../widgets/inventory_list_parts.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/data/local_commerce/local_commerce_api.dart';
@@ -585,7 +584,7 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
                       itemCount: cats.length,
                       itemBuilder: (_, i) {
                         final c = cats[i];
-                        return _CategoryTile(
+                        return InventoryCategoryTile(
                           name: (c['name'] ?? '').toString(),
                           count: c['products_count'] as num?,
                           imageUrl: (c['image'] ?? '').toString().isEmpty
@@ -604,92 +603,6 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _CategoryTile extends StatelessWidget {
-  final String name;
-  final String? imageUrl;
-  final num? count;
-  final VoidCallback onTap;
-  const _CategoryTile({
-    required this.name,
-    this.imageUrl,
-    this.count,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    return Material(
-      color: AppColors.surface,
-      shape: RoundedRectangleBorder(
-        side: BorderSide(color: AppColors.border),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                clipBehavior: Clip.antiAlias,
-                decoration: BoxDecoration(
-                  color: inventoryAccentTint,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: (imageUrl != null && imageUrl!.isNotEmpty)
-                    ? BusinessProductImage(
-                        url: imageUrl,
-                        width: 52,
-                        height: 52,
-                        fit: BoxFit.cover,
-                      )
-                    : Icon(
-                        Icons.category_outlined,
-                        size: 24,
-                        color: inventoryAccent,
-                      ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontFamily: 'Cairo',
-                  fontSize: 13,
-                  height: 1.3,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              if (count != null)
-                Text(
-                  l10n.translate(
-                    'invCatProductsCount',
-                    params: {'n': '${count!.toInt()}'},
-                  ),
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: 11,
-                    height: 1.3,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

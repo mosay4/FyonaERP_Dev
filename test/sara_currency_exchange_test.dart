@@ -270,7 +270,7 @@ void main() {
     expect(ids, contains('get_exchange_rate'));
     expect(ids, contains('add_exchange_rate'));
     expect(ids, contains('update_exchange_rate'));
-    expect(c['contract_version'], '1.5.0');
+    expect(c['contract_version'], '1.6.0');
   });
 
   test('a transfer quote cannot be reused after an account currency changes', () async {

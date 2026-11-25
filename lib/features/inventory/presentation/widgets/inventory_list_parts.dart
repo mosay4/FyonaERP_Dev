@@ -395,3 +395,92 @@ class InventorySmallAction extends StatelessWidget {
     );
   }
 }
+
+/// Category square (image or icon + name + products count), shared by the
+/// inventory categories grid and the invoice product picker.
+class InventoryCategoryTile extends StatelessWidget {
+  final String name;
+  final String? imageUrl;
+  final num? count;
+  final VoidCallback onTap;
+  const InventoryCategoryTile({
+    super.key,
+    required this.name,
+    this.imageUrl,
+    this.count,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: AppColors.border),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: inventoryAccentTint,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: (imageUrl != null && imageUrl!.isNotEmpty)
+                    ? BusinessProductImage(
+                        url: imageUrl,
+                        width: 52,
+                        height: 52,
+                        fit: BoxFit.cover,
+                      )
+                    : Icon(
+                        Icons.category_outlined,
+                        size: 24,
+                        color: inventoryAccent,
+                      ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'Cairo',
+                  fontSize: 13,
+                  height: 1.3,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              if (count != null)
+                Text(
+                  l10n.translate(
+                    'invCatProductsCount',
+                    params: {'n': '${count!.toInt()}'},
+                  ),
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: 11,
+                    height: 1.3,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

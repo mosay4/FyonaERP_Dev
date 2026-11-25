@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.5.0",
+  "contract_version": "1.6.0",
   "note": "Single source of truth for Sara tools (P2). Flutter AgentToolRegistry and Backend APP_TOOLS must match this file; drift tests on both sides fail otherwise. Behavior of protected systems (gateway/currency/analytics/timezone/TTS/sync/payments) is unchanged — this file only declares validation, ownership, confirmation, verification, idempotency, offline support and result shape.",
   "gateway_states": ["confirmed", "local_pending", "failed", "unverifiable", "not_found", "sync_failed"],
   "confirm_classes": ["none", "safe_write", "financial_write", "destructive"],
@@ -229,6 +229,19 @@
       "reason": "Critical delete (confirmation card)."
     },
     {
+      "tool_id": "delete_bank",
+      "owner": "flutter",
+      "category": "write",
+      "confirm": "destructive",
+      "verification": "gateway",
+      "idempotency": "opkey",
+      "offline": "supported",
+      "required": ["bank_name"],
+      "optional": [],
+      "result_keys": ["tool", "success", "entityId", "entityType", "verificationStatus", "verified", "retryable", "errorCode"],
+      "reason": "«حذف البنك بالكامل»: every currency account of one bank, identity-gated like the banks screen; cash never."
+    },
+    {
       "tool_id": "create_savings_goal",
       "owner": "flutter",
       "category": "write",
@@ -419,9 +432,35 @@
       "idempotency": "opkey",
       "offline": "supported",
       "required": ["recurring_id"],
-      "optional": [],
+      "optional": ["bank_account_id", "currency"],
       "result_keys": ["tool", "success", "entityId", "entityType", "verificationStatus", "verified", "retryable", "errorCode"],
       "reason": "Manual execution: creates a transaction from the stored recurring amount/currency/account/category via the existing local-first service (no value change, no schedule change beyond next-run bump)."
+    },
+    {
+      "tool_id": "skip_recurring",
+      "owner": "flutter",
+      "category": "write",
+      "confirm": "safe_write",
+      "verification": "gateway",
+      "idempotency": "opkey",
+      "offline": "supported",
+      "required": ["recurring_id"],
+      "optional": [],
+      "result_keys": ["tool", "success", "entityId", "entityType", "verificationStatus", "verified", "retryable", "errorCode"],
+      "reason": "«تخطي مرة»: next date moves one period, nothing executed; active rules only."
+    },
+    {
+      "tool_id": "postpone_recurring",
+      "owner": "flutter",
+      "category": "write",
+      "confirm": "safe_write",
+      "verification": "gateway",
+      "idempotency": "opkey",
+      "offline": "supported",
+      "required": ["recurring_id"],
+      "optional": ["days", "new_date"],
+      "result_keys": ["tool", "success", "entityId", "entityType", "verificationStatus", "verified", "retryable", "errorCode"],
+      "reason": "«تأجيل»: next date moves to a later day; active rules only."
     },
     {
       "tool_id": "activate_recurring",
@@ -706,7 +745,7 @@
       "idempotency": "none",
       "offline": "supported",
       "required": [],
-      "optional": ["report_type", "period"],
+      "optional": ["kind", "report_type", "period", "currency"],
       "result_keys": ["action", "params"],
       "reason": "Backend LLM intent → device export_pdf action."
     },

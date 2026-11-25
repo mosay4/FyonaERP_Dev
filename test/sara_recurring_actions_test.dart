@@ -102,7 +102,7 @@ void main() {
       expect(ids, contains('execute_recurring_now'));
       expect(ids, contains('activate_recurring'));
       expect(ids, contains('deactivate_recurring'));
-      expect(c['contract_version'], '1.5.0');
+      expect(c['contract_version'], '1.6.0');
     });
 
     test('25 drift: flutter registry covers all contract flutter/dual tools', () {

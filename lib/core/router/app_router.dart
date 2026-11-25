@@ -1446,6 +1446,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                 period: q['period'],
                 from: q['from'],
                 to: q['to'],
+                autoExport: q['export'] == '1',
               );
             },
           ),
