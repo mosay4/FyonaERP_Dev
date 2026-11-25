@@ -191,7 +191,9 @@ class TestPrimaryOwnership:
         rows1 = rows1.get("data", rows1) if isinstance(rows1, dict) else rows1
         assert len(rows1) == 1 and rows1[0]["is_primary"] is True
 
-    async def test_secondary_cannot_revoke_other_secondary(self, client):
+    async def test_secondary_cannot_revoke_other_secondary(self, client, monkeypatch):
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "MAX_ACTIVE_SESSIONS", 5)
         a1, r1 = await _login(client, model="Galaxy S22")
         a2, r2 = await _login(client, model="iPhone 15")
         a3, r3 = await _login(client, model="Pixel 8")

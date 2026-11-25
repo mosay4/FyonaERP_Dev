@@ -1,4 +1,6 @@
 import '../../features/ai/domain/agent/business_device_router.dart';
+import '../../features/ai/domain/agent/business_device_loop.dart';
+import '../providers/platform_controls_provider.dart' show platformControlsProvider;
 import '../../features/core_business/data/local_commerce/local_commerce_api.dart' show localCommerceBridgeProvider;
 import '../../features/core_business/presentation/providers/business_all_branches_provider.dart' show businessAllBranchesProvider;
 import 'dart:math';
@@ -67,19 +69,19 @@ bool _saraLight(BuildContext context) =>
     Theme.of(context).brightness == Brightness.light;
 
 Color _saraPageBg(BuildContext context) =>
-    _saraLight(context) ? const Color(0xFFF4F6F8) : const Color(0xFF0D0D0D);
+    _saraLight(context) ? const Color(0xFFF7F5F6) : const Color(0xFF101115);
 
 Color _saraCard(BuildContext context) =>
     _saraLight(context) ? Colors.white : const Color(0xFF1A1A1A);
 
 Color _saraBubble(BuildContext context) =>
-    _saraLight(context) ? Colors.white : const Color(0xFF1E1E1E);
+    _saraLight(context) ? Colors.white.withAlpha(232) : const Color(0xFF1B1C21).withAlpha(236);
 
 Color _saraConfirmBg(BuildContext context) =>
     _saraLight(context) ? Colors.white : const Color(0xFF1E1E2E);
 
 Color _saraLine(BuildContext context) =>
-    _saraLight(context) ? const Color(0xFFE2E6EB) : const Color(0xFF2A2A2A);
+    _saraLight(context) ? const Color(0xFFE6E1E4) : const Color(0xFF2C2E35);
 
 Color _saraText(BuildContext context) =>
     _saraLight(context) ? const Color(0xFF1B1E23) : const Color(0xFFF0F0F0);
@@ -100,34 +102,15 @@ Color _saraCardStrong(BuildContext context) =>
 Color _saraCardSoft(BuildContext context) =>
     _saraLight(context) ? const Color(0xFF6B7280) : Colors.white54;
 
-/// Soft smoky-gray blobs behind the chat in light theme only.
-class _SaraSmokeBgPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final blobs = [
-      (0.15 * w, 0.12 * h, 0.45 * w, 0xFFE8ECF1),
-      (0.90 * w, 0.30 * h, 0.40 * w, 0xFFE3E8EE),
-      (0.20 * w, 0.62 * h, 0.50 * w, 0xFFEAEEF2),
-      (0.85 * w, 0.85 * h, 0.42 * w, 0xFFE6EBF0),
-    ];
-    for (final b in blobs) {
-      final center = Offset(b.$1, b.$2);
-      final r = b.$3;
-      canvas.drawCircle(
-        center,
-        r,
-        Paint()
-          ..shader = RadialGradient(
-            colors: [Color(b.$4), const Color(0x00F4F6F8)],
-          ).createShader(Rect.fromCircle(center: center, radius: r)),
-      );
+/// «افتح: <screen>» for a Sara link, from the live screen catalog.
+String? saraRouteLinkLabel(String route, {required bool arabic}) {
+  final path = SaraScreenCatalog.liveRoute(route).split('?').first;
+  for (final entry in SaraScreenCatalog.entries(arabic: arabic)) {
+    if (entry['route'] == path && (entry['title'] ?? '').trim().isNotEmpty) {
+      return '${arabic ? 'افتح' : 'Open'}: ${entry['title']!.trim()}';
     }
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  return null;
 }
 
 String _cleanMarkdown(String text) {
@@ -418,7 +401,19 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     try {
       fx = ref.read(currencyEngineProvider);
     } catch (_) {}
-    return ToolExecutor(financeService, apiClient: api, fxEngine: fx);
+    ProviderContainer? container;
+    try {
+      container = ProviderScope.containerOf(context, listen: false);
+    } catch (_) {}
+    return ToolExecutor(financeService, apiClient: api, fxEngine: fx,
+        maintenanceBlocked: (feature) {
+          try {
+            final controls = container?.read(platformControlsProvider).valueOrNull;
+            return controls != null && (controls.isAppMaintenance || controls.isRouteUnderMaintenance(feature));
+          } catch (_) {
+            return false;
+          }
+        });
   }
 
   Future<void> _loadMessages() async {
@@ -1148,25 +1143,33 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
           : await api.askQuestion(query, accountType: 'business', language: language,
               history: _buildHistoryForLLM(query), screenCatalog: catalog, deviceRoutes: deviceRoutes);
       final spokenFirst = response.userQuery;
-      for (var round = 0; deviceRoutes != null && response.deviceCalls.isNotEmpty &&
-          response.state != null && round < 12; round++) {
-        if (!mounted || BranchScope.token != scope) return;
-        final results = <Map<String, dynamic>>[];
-        for (final call in response.deviceCalls) {
-          results.add({
-            'id': call['id'],
-            'result': await BusinessDeviceRouter.handle(ref.read,
-                method: '${call['method'] ?? 'GET'}', path: '${call['path'] ?? ''}',
-                params: call['params'] is Map ? Map<String, dynamic>.from(call['params'] as Map) : null,
-                screen: ref),
-          });
-        }
-        response = await api.continueBusiness(state: response.state!, results: results,
-            deviceRoutes: deviceRoutes, language: language, screenCatalog: catalog);
+      if (deviceRoutes != null && response.deviceCalls.isNotEmpty && response.state != null) {
+        // Every read has a deadline and the whole loop a budget, so Sara
+        // always ends with a message (also in «جميع الفروع», where one
+        // branch's read can be slow and merged answers are large).
+        final finished = await BusinessDeviceLoop.run(response,
+          arabic: language != 'en',
+          alive: () => mounted && BranchScope.token == scope,
+          onRound: (round) {
+            if (mounted && round > 0) setState(() => _assistantStatus = AssistantStatus.thinking);
+          },
+          handle: (call) => BusinessDeviceRouter.handle(ref.read,
+              method: '${call['method'] ?? 'GET'}', path: '${call['path'] ?? ''}',
+              params: call['params'] is Map ? Map<String, dynamic>.from(call['params'] as Map) : null,
+              screen: ref),
+          resume: (state, results) => api.continueBusiness(state: state, results: results,
+              deviceRoutes: deviceRoutes, language: language, screenCatalog: catalog));
+        if (finished == null) return;
+        response = finished;
       }
       if (response.userQuery == null && spokenFirst != null) {
         response = AiAgentResponse(text: response.text, actions: response.actions,
             pendingTools: response.pendingTools, userQuery: spokenFirst);
+      }
+      if (response.text.trim().isEmpty && response.pendingTools.isEmpty) {
+        response = AiAgentResponse(text: _toolText('لم تصلني إجابة مكتملة. أعد صياغة السؤال أو اجعله أضيق.',
+            'No complete answer arrived. Rephrase or narrow the question.'),
+            actions: response.actions, userQuery: response.userQuery);
       }
       _ambient.responseReady(visualGeneration);
       if (!mounted) {
@@ -1652,12 +1655,22 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
       }
 
       if (resp.pendingTools.isNotEmpty && mounted) {
-        // Without confirmation: show the confirmation card in the chat.
-        final firstTool = resp.pendingTools.first;
+        // A sensitive operation anywhere in the batch: its confirmation card
+        // comes first and nothing of the batch runs before the user decides
+        // (previously only the FIRST tool was checked, so a sensitive one
+        // later in the batch was silently dropped).
+        final firstTool = resp.pendingTools.firstWhere((t) {
+          final def = AgentToolRegistry.findByName(t['tool'] as String? ?? '');
+          return def != null && ConfirmationHandler.requiresConfirmation(def);
+        }, orElse: () => resp.pendingTools.first);
         final toolName = firstTool['tool'] as String? ?? '';
         final toolParams = (firstTool['params'] as Map<String, dynamic>?) ?? {};
         final toolDef = AgentToolRegistry.findByName(toolName);
         if (toolDef != null && ConfirmationHandler.requiresConfirmation(toolDef)) {
+          if (resp.pendingTools.length > 1) {
+            _addAssistantMessage(_toolText('في طلبك أكثر من عملية. أؤكد معك هذه أولًا، ثم اطلب الباقي بعدها.',
+                'Your request has several operations. Confirm this one first, then ask for the rest.'));
+          }
           setState(() {
             _messages.add(_ChatMessage(
               text: '',
@@ -2529,7 +2542,11 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
 
       // Execute pending tools from Sara Agent
       if (resp.pendingTools.isNotEmpty) {
-        final firstTool = resp.pendingTools.first;
+        // A sensitive tool anywhere in the batch is confirmed first.
+        final firstTool = resp.pendingTools.firstWhere((t) {
+          final def = AgentToolRegistry.findByName(t['tool'] as String? ?? '');
+          return def != null && ConfirmationHandler.requiresConfirmation(def);
+        }, orElse: () => resp.pendingTools.first);
         final toolName = firstTool['tool'] as String? ?? '';
         final toolParams = (firstTool['params'] as Map<String, dynamic>?) ?? {};
         final toolDef = AgentToolRegistry.findByName(toolName);
@@ -2740,11 +2757,6 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
         appBar: _buildAppBar(),
         body: Stack(
           children: [
-            // Light theme only: soft smoky-gray marks behind the chat.
-            if (_saraLight(context))
-              Positioned.fill(
-                child: CustomPaint(painter: _SaraSmokeBgPainter()),
-              ),
             Positioned.fill(child: SaraAmbientScene(key: _ambientSceneKey, controller: _ambient,
               activity: _ambientActivity, inputKey: _pendingAudioPath != null ? _ambientAudioKey : _ambientInputKey,
               avatarKey: _headerAvatarKey, userKey: _ambientUserKey, replyKey: _ambientReplyKey,
@@ -2946,10 +2958,11 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
         children: qs.map((q) => Listener(onPointerDown: (event) {
           if (!_busy) _ambient.suggestion(_ambientPoint(event.position));
         }, child: SaraPressable(child: ActionChip(
-          label: Text(q, style: const TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.primary)),
-          backgroundColor: AppColors.primary.withAlpha(15),
-          side: BorderSide(color: AppColors.primary.withAlpha(50), width: 0.5),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          label: Text(q, style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.w600,
+              color: _saraLight(context) ? AppColors.primary : const Color(0xFFF1B5C0))),
+          backgroundColor: _saraBubble(context),
+          side: BorderSide(color: AppColors.primary.withAlpha(_saraLight(context) ? 45 : 80), width: 0.7),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           onPressed: _busy ? null : () => _send(text: q),
         )))).toList(),
       ),
@@ -2969,8 +2982,8 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
           }, child: ActionChip(
             label: Text(q, style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: _saraSub(context))),
             backgroundColor: _saraCard(context),
-            side: const BorderSide(color: Color(0xFF2A2A2A), width: 0.5),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            side: BorderSide(color: _saraLine(context), width: 0.7),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             onPressed: _busy ? null : () { setState(() => _dynamicSuggestions = []); _send(text: q); },
           )),
         )).toList()),
@@ -2984,13 +2997,9 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     final canSend = (hasText || hasAttachment) && !_busy;
 
     return Container(
-      decoration: BoxDecoration(
-        color: _saraPageBg(context),
-        border: Border(top: BorderSide(color: _saraLine(context), width: 0.5)),
-      ),
       padding: EdgeInsets.only(
-        left: 10, right: 10, top: 8,
-        bottom: MediaQuery.of(context).padding.bottom + 8,
+        left: 12, right: 12, top: 6,
+        bottom: MediaQuery.of(context).padding.bottom + 10,
       ),
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
@@ -3006,44 +3015,60 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
   }
 
   Widget _buildTextInput(bool canSend, bool hasText) {
-    const btnSize = 44.0;
-    return Row(
+    final light = _saraLight(context);
+    final focused = _composerFocus.hasFocus;
+    Widget tool(IconData icon, VoidCallback onTap, {Color? color, String? tooltip}) => Semantics(
+      button: true, label: tooltip,
+      child: InkResponse(onTap: onTap, radius: 22, child: SizedBox(width: 40, height: 40,
+          child: Icon(icon, color: color ?? _saraSub(context), size: 22))));
+    // One floating composer (Gemini-like): attachments, text and voice in a
+    // single soft pill; the send button lights up in the brand gradient.
+    return AnimatedContainer(
       key: const ValueKey('text_input'),
-      textDirection: ui.TextDirection.ltr,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        GestureDetector(
-          onTap: canSend ? () => _send() : null,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: btnSize, height: btnSize,
-            margin: const EdgeInsets.only(bottom: 2),
-            decoration: BoxDecoration(
-              color: canSend ? AppColors.primary : _saraCard(context),
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: Transform.flip(
-              flipX: true,
-              child: Icon(_busy ? Icons.hourglass_bottom : Icons.send_rounded, color: canSend ? Colors.white : _saraFaint(context), size: 20),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: light ? Colors.white.withAlpha(242) : const Color(0xFF1B1C21).withAlpha(240),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(
+          color: focused ? AppColors.primary.withAlpha(light ? 70 : 110) : _saraLine(context),
+          width: focused ? 1 : 0.7),
+        boxShadow: [BoxShadow(
+          color: (focused ? AppColors.primary : Colors.black).withAlpha(light ? (focused ? 26 : 12) : (focused ? 50 : 40)),
+          blurRadius: focused ? 26 : 18, offset: const Offset(0, 6))],
+      ),
+      child: Row(
+        key: _ambientInputKey,
+        textDirection: ui.TextDirection.ltr,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          GestureDetector(
+            onTap: canSend ? () => _send() : null,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              width: 44, height: 44,
+              decoration: BoxDecoration(
+                gradient: canSend ? const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+                    colors: [Color(0xFFC2334F), AppColors.primary, Color(0xFF7A1020)]) : null,
+                color: canSend ? null : (light ? const Color(0xFFF1EDEF) : const Color(0xFF25272D)),
+                shape: BoxShape.circle,
+                boxShadow: canSend ? [BoxShadow(color: AppColors.primary.withAlpha(80), blurRadius: 14, offset: const Offset(0, 4))] : null,
+              ),
+              child: Transform.flip(
+                flipX: true,
+                child: Icon(_busy ? Icons.hourglass_bottom : Icons.send_rounded, color: canSend ? Colors.white : _saraFaint(context), size: 20),
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Container(
-            key: _ambientInputKey,
-            decoration: BoxDecoration(
-              color: _saraCard(context),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: _saraLine(context), width: 0.5),
-            ),
+          Expanded(
             child: FyonaTextField(
               controller: _inputCtrl,
               focusNode: _composerFocus,
               onTap: _ambient.touchInput,
               textAlign: TextAlign.right,
               textInputAction: TextInputAction.send,
-              maxLines: 4, minLines: 1,
+              maxLines: 5, minLines: 1,
               textDirection: ui.TextDirection.rtl,
               onChanged: (value) { _ambient.edit(value); setState(() {}); },
               onSubmitted: (_) => _send(),
@@ -3052,39 +3077,17 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
                 hintTextDirection: ui.TextDirection.rtl,
                 hintStyle: TextStyle(fontFamily: 'Cairo', fontSize: 14, color: _saraFaint(context)),
                 border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               ),
-              style: TextStyle(fontFamily: 'Cairo', fontSize: 14, color: _saraText(context), height: 1.3),
+              style: TextStyle(fontFamily: 'Cairo', fontSize: 14.5, color: _saraText(context), height: 1.35),
             ),
           ),
-        ),
-        const SizedBox(width: 6),
-        GestureDetector(
-          onTap: _pickImage,
-          child: Container(
-            width: btnSize, height: btnSize,
-            margin: const EdgeInsets.only(bottom: 2),
-            decoration: BoxDecoration(
-              color: _saraCard(context),
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: Icon(Icons.image_outlined, color: _saraSub(context), size: 22),
-          ),
-        ),
-        const SizedBox(width: 4),
-        GestureDetector(
-          onTap: _isRecording ? _stopRecording : _startRecording,
-          child: Container(
-            width: btnSize, height: btnSize,
-            margin: const EdgeInsets.only(bottom: 2),
-            decoration: BoxDecoration(
-              color: _saraCard(context),
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: Icon(_isRecording ? Icons.stop_rounded : Icons.mic, color: _isRecording ? AppColors.danger : _saraSub(context), size: 22),
-          ),
-        ),
-      ],
+          tool(Icons.image_outlined, _pickImage, tooltip: _isEn() ? 'Image' : 'صورة'),
+          tool(_isRecording ? Icons.stop_rounded : Icons.mic, _isRecording ? _stopRecording : _startRecording,
+              color: _isRecording ? AppColors.danger : null, tooltip: _isEn() ? 'Voice' : 'رسالة صوتية'),
+        ],
+      ),
     );
   }
 
@@ -3442,16 +3445,18 @@ class _UserBubble extends StatelessWidget {
                   },
                   child: Container(
                     key: anchorKey,
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.65),
+                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFA01530),
+                      gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+                          colors: [Color(0xFFB8243F), Color(0xFFA01530), Color(0xFF861127)]),
                       borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(18),
-                        topRight: isGrouped ? const Radius.circular(6) : const Radius.circular(18),
-                        bottomLeft: const Radius.circular(18),
+                        topLeft: const Radius.circular(20),
+                        topRight: isGrouped ? const Radius.circular(8) : const Radius.circular(20),
+                        bottomLeft: const Radius.circular(20),
                         bottomRight: const Radius.circular(6),
                       ),
+                      boxShadow: [BoxShadow(color: AppColors.primary.withAlpha(45), blurRadius: 14, offset: const Offset(0, 5))],
                     ),
                     child: Text(text, style: const TextStyle(fontFamily: 'Cairo', fontSize: 14, color: Colors.white, height: 1.4)),
                   ),
@@ -4161,16 +4166,18 @@ class _AssistantBubble extends StatelessWidget {
                   onLongPress: onCopy,
                 child: Container(
                   key: anchorKey,
-                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.65),
-                    padding: const EdgeInsets.all(13),
+                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                     decoration: BoxDecoration(
                       color: _saraBubble(context),
+                      border: Border.all(color: _saraLine(context), width: 0.6),
                       borderRadius: BorderRadius.only(
-                        topLeft: isGrouped ? const Radius.circular(6) : const Radius.circular(18),
-                        topRight: const Radius.circular(18),
-                        bottomLeft: isGrouped ? const Radius.circular(6) : const Radius.circular(6),
-                        bottomRight: const Radius.circular(18),
+                        topLeft: isGrouped ? const Radius.circular(8) : const Radius.circular(20),
+                        topRight: const Radius.circular(20),
+                        bottomLeft: const Radius.circular(6),
+                        bottomRight: const Radius.circular(20),
                       ),
+                      boxShadow: [BoxShadow(color: Colors.black.withAlpha(_saraLight(context) ? 10 : 30), blurRadius: 16, offset: const Offset(0, 4))],
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -4179,30 +4186,33 @@ class _AssistantBubble extends StatelessWidget {
                             onStart: onRevealStart, onProgress: onRevealProgress, onComplete: onRevealComplete,
                             style: TextStyle(fontFamily: 'Cairo', fontSize: 14, color: _saraText(context), height: 1.8)),
                         if (routeLink != null) ...[
-                          const SizedBox(height: 8),
-                          GestureDetector(
-                            onTap: () {
-                              if (routeLink != null) {
-                                openSaraRoute(context, routeLink!);
-                              }
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          const SizedBox(height: 10),
+                          // A real link: names the screen it opens and goes
+                          // straight to its route (with the record's id).
+                          Semantics(button: true, link: true, child: InkWell(
+                            borderRadius: BorderRadius.circular(14),
+                            onTap: () => openSaraRoute(context, routeLink!),
+                            child: Ink(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
-                                color: AppColors.primary.withAlpha(20),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: AppColors.primary.withAlpha(50)),
+                                gradient: LinearGradient(colors: [AppColors.primary.withAlpha(30), AppColors.primary.withAlpha(12)]),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: AppColors.primary.withAlpha(70)),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(l10n.translate('goToSection'), style: const TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.primary)),
+                                  const Icon(Icons.open_in_new_rounded, size: 14, color: AppColors.primary),
+                                  const SizedBox(width: 6),
+                                  Flexible(child: Text(saraRouteLinkLabel(routeLink!, arabic: isRtl) ?? l10n.translate('goToSection'),
+                                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary))),
                                   const SizedBox(width: 4),
-                                  const Icon(Icons.arrow_forward_ios, size: 10, color: AppColors.primary),
+                                  Icon(isRtl ? Icons.chevron_left_rounded : Icons.chevron_right_rounded, size: 16, color: AppColors.primary),
                                 ],
                               ),
                             ),
-                          ),
+                          )),
                         ],
                         if (actions.where((a) => a.type != SaraActionType.refreshData).isNotEmpty) ...[
                           const SizedBox(height: 10),
@@ -4311,13 +4321,14 @@ class _TypingIndicator extends StatefulWidget {
 }
 
 class _TypingIndicatorState extends State<_TypingIndicator> with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
+  late final AnimationController _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600));
 
   @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
-    _ctrl.repeat(reverse: true);
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Shown only while Sara is really working; still for reduced motion.
+    if (MediaQuery.of(context).disableAnimations) { _ctrl.value = .5; _ctrl.stop(); }
+    else if (!_ctrl.isAnimating) { _ctrl.repeat(); }
   }
 
   @override
@@ -4325,10 +4336,32 @@ class _TypingIndicatorState extends State<_TypingIndicator> with SingleTickerPro
 
   @override
   Widget build(BuildContext context) {
+    final light = _saraLight(context);
+    final base = light ? const Color(0xFFF0E6E9) : const Color(0xFF2A2B31);
+    // Gemini-like: soft lines of colour light sweep across while she thinks.
+    Widget line(double width, double delay) => AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) {
+        final t = ((_ctrl.value + delay) % 1.0) * 2.4 - 1.2;
+        return Container(
+          width: width, height: 9,
+          margin: const EdgeInsets.only(bottom: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            gradient: LinearGradient(
+              begin: Alignment(t - 1, 0), end: Alignment(t + 1, 0),
+              colors: [base, const Color(0xFFE05470).withAlpha(light ? 150 : 170), const Color(0xFFF2A65A).withAlpha(light ? 120 : 140),
+                const Color(0xFF7B5CD6).withAlpha(light ? 110 : 150), base],
+              stops: const [0, .35, .5, .65, 1],
+            ),
+          ),
+        );
+      },
+    );
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.start,
         textDirection: ui.TextDirection.ltr,
         children: [
           Padding(
@@ -4336,32 +4369,16 @@ class _TypingIndicatorState extends State<_TypingIndicator> with SingleTickerPro
             child: _SaraAvatar(size: 32),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 7),
             decoration: BoxDecoration(
               color: _saraBubble(context),
-              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: _saraLine(context), width: 0.6),
+              borderRadius: BorderRadius.circular(20),
             ),
-            child: Row(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
-              children: List.generate(3, (i) {
-                return AnimatedBuilder(
-                  animation: _ctrl,
-                  builder: (_, __) {
-                    final t = (_ctrl.value + i * 0.25) % 1.0;
-                    final scale = 0.4 + 0.6 * (1 - 4 * (t - 0.5) * (t - 0.5));
-                    return Padding(
-                      padding: const EdgeInsetsDirectional.only(end: 4),
-                      child: Transform.scale(
-                        scale: scale.clamp(0.4, 1.0),
-                        child: Container(
-                          width: 6, height: 6,
-                          decoration: BoxDecoration(shape: BoxShape.circle, color: _saraFaint(context)),
-                        ),
-                      ),
-                    );
-                  },
-                );
-              }),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [line(170, 0), line(128, .12), line(84, .24)],
             ),
           ),
         ],

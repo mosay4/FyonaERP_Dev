@@ -98,8 +98,8 @@ final personalOwnerPersona = RolePersona(
     NavGroup('الأهداف', [
       NavItem('أهداف الادخار', TwoToneIcons.savingsGoal, '/personal/savings'),
     ]),
-    NavGroup('التحليلات', [
-      NavItem('تحليلات الإنفاق', TwoToneIcons.barChart, '/personal/analytics'),
+    NavGroup('التقارير', [
+      NavItem('التقارير', TwoToneIcons.barChart, '/personal/reports'),
     ]),
     NavGroup('المساعد الذكي', [
       NavItem('سارة', TwoToneIcons.ai, '/personal/ai'),
@@ -332,7 +332,7 @@ const _navKeyByRoute = <String, String>{
   '/notifications': 'navNotifications',
   '/personal': 'navPersonal',
   '/personal/ai': 'navPersonalAi',
-  '/personal/analytics': 'navPersonalAnalytics',
+  '/personal/reports': 'navReports',
   '/personal/banks': 'navPersonalBanks',
   '/personal/budget': 'navPersonalBudget',
   '/personal/debts': 'navPersonalDebts',
@@ -355,6 +355,7 @@ const _navGroupKeyByArabic = <String, String>{
   'المعاملات': 'navGroupTransactions',
   'الأهداف': 'navGroupGoals',
   'التحليلات': 'navGroupAnalytics',
+  'التقارير': 'navGroupReports',
   'المساعد الذكي': 'navGroupSmartAssistant',
   'الميزانية': 'navGroupBudget',
 };

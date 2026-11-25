@@ -47,8 +47,6 @@ class HelpAllowlist {
     '/subscription/rejected',
     '/subscription/update-card',
     '/personal/backup',
-    '/personal/analytics',
-    '/personal/reports-center',
     '/import',
     '/design-studio',
     '/ai',

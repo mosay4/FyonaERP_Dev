@@ -1,9 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/shared/services/scan_sfx.dart';
 
 /// Scanner SFX contract: the shipped WAVs must be valid 16-bit PCM mono
-/// 44.1kHz (audioplayers media mode loads them on-device), loud enough to be
+/// 22.05kHz (audioplayers media mode loads them on-device), loud enough to be
 /// heard, and the service must fire without ever throwing.
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
@@ -16,17 +18,23 @@ void main() {
     return bytes;
   }
 
-  test('scanner beeps ship as mp3 assets (converted for APK size)', () async {
-    final ok = await loadAsset('audio/scan_success.mp3');
-    final bad = await loadAsset('audio/scan_error.mp3');
-    // MP3 frame sync (0xFF Ex/..) or ID3 header — both are valid encodings.
-    bool isMp3(Uint8List b) =>
-        (b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33) ||
-        (b[0] == 0xFF && (b[1] & 0xE0) == 0xE0);
-    expect(ok.length, greaterThan(1500));
-    expect(bad.length, greaterThan(1500));
-    expect(isMp3(ok), true, reason: 'scan_success must be a real mp3');
-    expect(isMp3(bad), true, reason: 'scan_error must be a real mp3');
+  test('product / barcode / invoice cues ship as short 22.05 kHz WAVs',
+      () async {
+    for (final name in const [
+      'barcode_capture',
+      'product_alert',
+      'product_select',
+      'invoice_done',
+    ]) {
+      final b = await loadAsset('audio/$name.wav');
+      final h = ByteData.sublistView(b);
+      expect(String.fromCharCodes(b.sublist(0, 4)), 'RIFF', reason: name);
+      expect(String.fromCharCodes(b.sublist(8, 12)), 'WAVE', reason: name);
+      expect(h.getUint16(22, Endian.little), 1, reason: '$name mono');
+      expect(h.getUint32(24, Endian.little), 22050, reason: '$name rate');
+      expect(h.getUint16(34, Endian.little), 16, reason: '$name 16-bit');
+      expect(b.length, inInclusiveRange(2000, 25 * 1024), reason: name);
+    }
   });
 
   test('recon motion sounds ship as mp3 assets', () async {
@@ -40,6 +48,8 @@ void main() {
     await binding.runAsync(() async {
       await ScanSfx.success();
       await ScanSfx.error();
+      await ScanSfx.select();
+      await ScanSfx.invoiceDone();
       await ScanSfx.warmUp();
     });
   });

@@ -12,7 +12,11 @@ class SaraFluidProgram {
       _loading ??= ui.FragmentProgram.fromAsset(asset);
 }
 
-/// Full-bleed GPU scene. The ticker only invalidates painting, never chat UI.
+/// Full-bleed GPU aurora. The ticker only invalidates painting, never chat UI,
+/// and it only runs while something happens (entrance, focus, typing,
+/// sending, thinking, a streaming reply, an operation) plus a short settle:
+/// when the chat is idle the last frame stays on screen and no frame is
+/// scheduled (battery, and `pumpAndSettle` in tests).
 class SaraAmbientScene extends StatefulWidget {
   const SaraAmbientScene({
     super.key,
@@ -38,6 +42,11 @@ class _SaraAmbientSceneState extends State<SaraAmbientScene>
   late final Ticker _ticker = createTicker(_tick);
   Duration _lastTick = Duration.zero;
   bool _appActive = true, _scheduled = false, _dependenciesActive = true;
+  bool _painting = false;
+  // Controller time (seconds) until which the scene keeps moving after the
+  // last real event, so motion eases out instead of freezing mid-flow.
+  double _awakeUntil = 0;
+  static const _settle = 1.8, _entrance = 2.4;
   int _revision = -1;
   Size? _size;
   ui.FragmentShader? _shader;
@@ -47,6 +56,7 @@ class _SaraAmbientSceneState extends State<SaraAmbientScene>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.controller.addListener(_event);
+    _awakeUntil = widget.controller.time + _entrance;
     _loadShader();
   }
 
@@ -104,9 +114,11 @@ class _SaraAmbientSceneState extends State<SaraAmbientScene>
     if (!mounted) return;
     final c = widget.controller;
     final active = widget.enabled && _appActive && _dependenciesActive;
+    final wasVisible = c.visible;
     c.setVisible(active);
+    if (active && !wasVisible) _awakeUntil = c.time + _entrance;
     if (active) c.setActivity(widget.activity);
-    if (active && c.canAnimate) {
+    if (active && c.canAnimate && (c.active || c.time < _awakeUntil)) {
       if (!_ticker.isActive) {
         _lastTick = Duration.zero;
         _ticker.start();
@@ -118,6 +130,11 @@ class _SaraAmbientSceneState extends State<SaraAmbientScene>
 
   void _event() {
     if (!mounted) return;
+    if (!_painting) {
+      // A real event (typing, focus, send, reply words, phase change…).
+      _awakeUntil = widget.controller.time + _settle;
+      if (!_ticker.isActive) _synchronize();
+    }
     if (widget.controller.layoutRevision != _revision) {
       _revision = widget.controller.layoutRevision;
       _measureSoon();
@@ -132,7 +149,14 @@ class _SaraAmbientSceneState extends State<SaraAmbientScene>
         c.phase == SaraAmbientPhase.completed) {
       _measureSoon();
     }
-    c.paintFrame();
+    _painting = true;
+    try {
+      c.paintFrame();
+    } finally {
+      _painting = false;
+    }
+    // Idle and settled: keep the last frame, schedule nothing more.
+    if (!c.active && c.time >= _awakeUntil && _ticker.isActive) _ticker.stop();
   }
 
   void _measureSoon() {
@@ -368,10 +392,10 @@ class SaraAmbientPainter extends CustomPainter {
     final mask = Path()
       ..fillType = PathFillType.evenOdd
       ..addRect(Offset.zero & size)
-      ..addRRect(RRect.fromRectAndRadius(rect, const Radius.circular(22)));
+      ..addRRect(RRect.fromRectAndRadius(rect, const Radius.circular(24)));
     canvas.clipPath(mask);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(rect.inflate(spread), const Radius.circular(24)),
+      RRect.fromRectAndRadius(rect.inflate(spread), const Radius.circular(26)),
       Paint()
         ..color = primary.withValues(alpha: alpha.clamp(0, .23))
         ..style = PaintingStyle.stroke

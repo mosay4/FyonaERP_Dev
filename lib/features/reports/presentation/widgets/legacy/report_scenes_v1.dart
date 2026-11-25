@@ -15,6 +15,7 @@ V1FinancialScene _scene(ReportScene scene) => switch (scene) {
   ReportScene.inventory => V1FinancialScene.inventory,
   ReportScene.debts => V1FinancialScene.debts,
   ReportScene.overview => V1FinancialScene.executive,
+  ReportScene.personal => V1FinancialScene.balance,
 };
 
 class ReportSceneOverlayV1 extends StatelessWidget {

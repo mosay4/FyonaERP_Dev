@@ -204,6 +204,17 @@ class SQLAlchemySessionRepository(SessionRepository):
             .values(is_active=False)
         )
 
+    async def deactivate_expired_for_user(self, user_id: UUID) -> None:
+        await self.db.execute(
+            UserSession.__table__.update()
+            .where(
+                UserSession.user_id == user_id,
+                UserSession.is_active,
+                UserSession.expires_at <= datetime.now(timezone.utc),
+            )
+            .values(is_active=False)
+        )
+
     async def list_active_for_user(self, user_id: UUID) -> List[UserSession]:
         result = await self.db.execute(
             select(UserSession)

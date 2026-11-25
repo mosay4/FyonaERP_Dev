@@ -460,13 +460,59 @@ class _PartyOperationsPageState extends ConsumerState<PartyOperationsPage> {
     ),
   );
 
+  /// Amount + currency at the row end: compact, the number shrinks in steps
+  /// with its length (and FittedBox guarantees even 13+ digits fit) so the
+  /// title column always keeps its room.
+  Widget _amount(String amount, String currency, Color color) {
+    final digits = amount.replaceAll(RegExp(r'[^0-9]'), '').length;
+    final size = digits <= 6
+        ? 13.5
+        : digits <= 8
+            ? 12.5
+            : digits <= 10
+                ? 11.5
+                : digits <= 12
+                    ? 10.5
+                    : 9.5;
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.sizeOf(context).width * 0.28,
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: AlignmentDirectional.centerEnd,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              amount,
+              maxLines: 1,
+              textDirection: TextDirection.ltr,
+              style: _text(size, weight: FontWeight.w800, color: color)
+                  .copyWith(height: 1.2),
+            ),
+            if (currency.trim().isNotEmpty)
+              Text(
+                currency,
+                maxLines: 1,
+                style: _text(10, weight: FontWeight.w600,
+                        color: color.withValues(alpha: 0.75))
+                    .copyWith(height: 1.15),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _tile(AppLocalizations l10n, Map<String, Object?> op) {
     final type = '${op['type']}';
     final look = _look(l10n, type);
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
     final currency = currencyName('${op['currency'] ?? ''}',
         locale: arabic ? 'ar' : 'en');
-    final amount = '${fmtNum(_num(op['amount']))} $currency';
+    final amount = fmtNum(_num(op['amount']));
     final number = '${op['number'] ?? ''}';
     final remaining = _num(op['remaining']);
     final hasBalance = op.containsKey('remaining');
@@ -508,63 +554,74 @@ class _PartyOperationsPageState extends ConsumerState<PartyOperationsPage> {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          look.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: _text(14, weight: FontWeight.w700),
-                        ),
-                      ),
-                      if (number.isNotEmpty) ...[
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            '#${shortDocumentNumber(number)}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: _text(12, color: AppColors.textTertiary),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  if (sub != null)
-                    Text(
-                      sub,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _text(
-                        12,
-                        color: hasBalance && remaining <= 0.004 &&
-                                !type.endsWith('_return') && type != 'payment'
-                            ? _green
-                            : AppColors.textSecondary,
+              child: LayoutBuilder(builder: (context, box) {
+                // The label and the short number are never cut: each scales
+                // down (rarely) instead of «فاتور…» / «#INV-…».
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        look.label,
+                        maxLines: 1,
+                        style: _text(13.5, weight: FontWeight.w700),
                       ),
                     ),
-                ],
-              ),
+                    if (number.isNotEmpty || sub != null)
+                      Row(
+                        children: [
+                          if (number.isNotEmpty)
+                            ConstrainedBox(
+                              // Leave room for «  ·  » and the remaining text.
+                              constraints: BoxConstraints(
+                                maxWidth: sub != null
+                                    ? box.maxWidth * 0.55
+                                    : box.maxWidth,
+                              ),
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: AlignmentDirectional.centerStart,
+                                child: Text(
+                                  '#${shortDocumentNumber(number)}',
+                                  maxLines: 1,
+                                  textDirection: TextDirection.ltr,
+                                  style: _text(11.5,
+                                      weight: FontWeight.w600,
+                                      color: AppColors.textTertiary),
+                                ),
+                              ),
+                            ),
+                          if (number.isNotEmpty && sub != null)
+                            Text('  ·  ',
+                                style: _text(11.5,
+                                    color: AppColors.textTertiary)),
+                          if (sub != null)
+                            Flexible(
+                              child: Text(
+                                sub,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: _text(
+                                  11.5,
+                                  color: hasBalance &&
+                                          remaining <= 0.004 &&
+                                          !type.endsWith('_return') &&
+                                          type != 'payment'
+                                      ? _green
+                                      : AppColors.textSecondary,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                  ],
+                );
+              }),
             ),
             const SizedBox(width: 8),
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.sizeOf(context).width * 0.38,
-              ),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: AlignmentDirectional.centerEnd,
-                child: Text(
-                  amount,
-                  maxLines: 1,
-                  style: _text(14, weight: FontWeight.w800, color: look.color),
-                ),
-              ),
-            ),
+            _amount(amount, currency, look.color),
             const SizedBox(width: 4),
             Icon(Icons.chevron_right_rounded,
                 size: 20, color: AppColors.textTertiary),

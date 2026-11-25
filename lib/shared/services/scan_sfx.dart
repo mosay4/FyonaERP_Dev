@@ -1,5 +1,6 @@
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 /// App-lifetime scanner SFX.
 ///
@@ -14,14 +15,19 @@ import 'package:flutter/foundation.dart';
 ///   NO audio focus: audible even when the media stream is muted, and they
 ///   never pause background music.
 ///
-/// Sounds (Wikimedia Commons, freely licensed):
-/// - success: "Beep 400ms" (CC BY-SA 4.0) trimmed to 250ms.
-/// - error: "Error Sound 2 (Gravity Sound)" (CC BY 4.0), doubled pulse.
+/// Sounds (synthesized originally for FYONA by tools/product_sounds.py):
+/// - barcode_capture: rounded scanner beep on a decode (success).
+/// - product_alert: gentle two-step descending alert (out of stock,
+///   insufficient quantity, unknown code).
+/// - product_select: calm soft «tock» when a product is picked.
+/// - invoice_done: short bell arpeggio when an invoice is created.
 class ScanSfx {
   ScanSfx._();
 
-  static const String _okSrc = 'audio/scan_success.mp3';
-  static const String _badSrc = 'audio/scan_error.mp3';
+  static const String _okSrc = 'audio/barcode_capture.wav';
+  static const String _badSrc = 'audio/product_alert.wav';
+  static const String _selectSrc = 'audio/product_select.wav';
+  static const String _doneSrc = 'audio/invoice_done.wav';
   // Reconciliation motion sounds — BOTH synthesized originally for FYONA
   // (license-free): a 4s scan composition synced to the motion phases, and a
   // 1.3s crystal confirmation chime for the equalization seal.
@@ -31,6 +37,8 @@ class ScanSfx {
   static final AudioPlayer _ok = AudioPlayer(playerId: 'fyona_scan_ok');
   static final AudioPlayer _bad = AudioPlayer(playerId: 'fyona_scan_bad');
   static final AudioPlayer _eq = AudioPlayer(playerId: 'fyona_recon_eq');
+  static final AudioPlayer _pick = AudioPlayer(playerId: 'fyona_pick');
+  static final AudioPlayer _done = AudioPlayer(playerId: 'fyona_invoice_done');
 
   static bool _warmed = false;
 
@@ -70,11 +78,50 @@ class ScanSfx {
     }
   }
 
-  /// QR/barcode decoded (and product added) — classic scanner beep.
+  /// QR/barcode decoded (and product added) — rounded scanner beep.
   static Future<void> success() => _fire(_ok, _okSrc);
 
-  /// Invalid/unknown code — alert buzz.
+  /// Out of stock / insufficient quantity / unknown code — gentle alert.
   static Future<void> error() => _fire(_bad, _badSrc);
+
+  /// A product was picked (tap in a picker) — calm soft tock.
+  /// Follows the motion-sound rule: silent/vibrate/DND → no sound.
+  static Future<void> select() => _cue(() => _pick, _selectSrc);
+
+  /// A sale/purchase invoice was created — short bell arpeggio, in sync
+  /// with the success motion. Same silent/vibrate/DND rule.
+  static Future<void> invoiceDone() => _cue(() => _done, _doneSrc);
+
+  static const MethodChannel _motion = MethodChannel('fyona/motion_audio');
+  static final Set<String> _cueReady = {};
+
+  /// Same gate as the other motion sounds (`fyona/motion_audio` → canPlay):
+  /// ringer normal, system volume > 0 and DND off.
+  static Future<bool> _soundOn() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return true;
+    try {
+      return await _motion.invokeMethod<bool>('canPlay') == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // The player is created only after the gate passes (static players are
+  // lazy; a muted phone or a test never opens their platform streams).
+  static Future<void> _cue(AudioPlayer Function() player, String src) async {
+    if (!await _soundOn()) return;
+    final p = player();
+    if (_cueReady.add(src)) {
+      try {
+        await p.setAudioContext(_ctx);
+        await p.setReleaseMode(ReleaseMode.stop);
+        await p.setSource(AssetSource(src));
+      } catch (e) {
+        if (kDebugMode) debugPrint('ScanSfx cue warm failed: $e');
+      }
+    }
+    await _fire(p, src);
+  }
 
   /// Reconciliation scan (4s composition, synced with the motion phases).
   /// Fired ONCE when the scan overlay mounts — never on rebuild.

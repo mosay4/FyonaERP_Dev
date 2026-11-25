@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -39,8 +41,18 @@ class PurchaseInvoicePage extends ConsumerStatefulWidget {
       _PurchaseInvoicePageState();
 }
 
-class _PurchaseInvoicePageState extends ConsumerState<PurchaseInvoicePage> {
+class _PurchaseInvoicePageState extends ConsumerState<PurchaseInvoicePage>
+    with SingleTickerProviderStateMixin {
   final _scroll = ScrollController();
+  // Fresh-invoice entrance: after «new invoice» the form fades/slides in
+  // while the list glides back to the top (no abrupt jump).
+  late final AnimationController _fresh = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 460),
+    value: 1,
+  );
+  late final Animation<double> _freshCurve =
+      CurvedAnimation(parent: _fresh, curve: Curves.easeOutCubic);
   final _itemsKey = GlobalKey();
   final _supplierKey = GlobalKey();
   final _paymentKey = GlobalKey();
@@ -80,6 +92,7 @@ class _PurchaseInvoicePageState extends ConsumerState<PurchaseInvoicePage> {
 
   @override
   void dispose() {
+    _fresh.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -165,6 +178,17 @@ class _PurchaseInvoicePageState extends ConsumerState<PurchaseInvoicePage> {
         ],
       ),
     );
+  }
+
+  /// A fresh invoice starts at the top: fade + slight rise of the reset
+  /// form, with the list gliding to its start at the same time.
+  void _startFresh() {
+    _fresh.forward(from: 0);
+    if (_scroll.hasClients && _scroll.offset > 0) {
+      unawaited(_scroll.animateTo(0,
+          duration: const Duration(milliseconds: 420),
+          curve: Curves.easeOutCubic));
+    }
   }
 
   Future<void> _scrollToItems() async {
@@ -262,11 +286,12 @@ class _PurchaseInvoicePageState extends ConsumerState<PurchaseInvoicePage> {
       // inventory list must refresh (otherwise a just-added product looks
       // "missing" until a manual pull-to-refresh).
       invalidateInventoryData(ref);
-      await showDialog(
+      final next = await showDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (_) => PurchaseSuccessDialog(invoice: res),
       );
+      if (next == 'new' && mounted) _startFresh();
     } catch (e) {
       if (!mounted) return;
       showSnackbar(context,
@@ -309,7 +334,13 @@ class _PurchaseInvoicePageState extends ConsumerState<PurchaseInvoicePage> {
         child: Column(
           children: [
             Expanded(
-              child: ListView(
+              child: FadeTransition(
+                opacity: _freshCurve,
+                child: SlideTransition(
+                  position: Tween(
+                          begin: const Offset(0, .025), end: Offset.zero)
+                      .animate(_freshCurve),
+                  child: ListView(
                 controller: _scroll,
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                 children: [
@@ -338,6 +369,8 @@ class _PurchaseInvoicePageState extends ConsumerState<PurchaseInvoicePage> {
                   const SizedBox(height: 12),
                   const _TotalsCard(),
                 ],
+              ),
+                ),
               ),
             ),
             _IssueBar(onIssue: _issue, isLocal: _source is LocalPurchaseApi),

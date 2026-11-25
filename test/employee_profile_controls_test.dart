@@ -115,6 +115,7 @@ void main() {
         expect(find.text(l10n.translate(key)), findsNothing, reason: key);
       }
       expect(find.text(l10n.translate('activeSessionsTitle')), findsNothing);
+      expect(find.text(l10n.translate('profileSessionsTile')), findsNothing);
       for (final key in [
         'invDesignHubTitle',
         'prefAllowNegative',

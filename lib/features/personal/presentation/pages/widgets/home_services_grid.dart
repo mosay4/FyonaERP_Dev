@@ -15,6 +15,7 @@ import '../../../../../shared/providers/platform_controls_provider.dart';
 import '../../../../../core/services/connectivity_service.dart';
 import '../../widgets/add_transaction_sheet.dart';
 import '../../providers/merchant_unread_provider.dart';
+import '../../../../reports/presentation/widgets/report_widgets.dart' show ReportArt, ReportArtKind;
 import 'package:fyona_flutter/core/responsive/r_api.dart';
 
 const _kPrefsKey = 'home_quick_actions_selected';
@@ -23,7 +24,8 @@ final allActionItems = [
   _ActionItem('homeServiceAddIncome', TwoToneIcons.deposit, RouteNames.personalTransactions, initialType: 'income'),
   _ActionItem('homeServiceAddExpense', TwoToneIcons.withdraw, RouteNames.personalTransactions, initialType: 'expense'),
   _ActionItem('homeServiceAccountTree', TwoToneIcons.layers, RouteNames.financialTree),
-  _ActionItem('homeServiceAccounts', TwoToneIcons.bank, RouteNames.personalBanks),
+  // Reports took the Banks tile (Banks stays in the Personal bottom bar).
+  _ActionItem('homeServiceReports', TwoToneIcons.chart, RouteNames.personalReports, art: ReportArtKind.personal),
   _ActionItem('homeServiceMerchantAccounts', TwoToneIcons.debt, RouteNames.personalMerchantAccounts),
   _ActionItem('homeServiceSara', TwoToneIcons.sara, RouteNames.personalAi),
   _ActionItem('homeServiceTransactions', TwoToneIcons.transfer, RouteNames.personalTransactions),
@@ -84,6 +86,14 @@ class _HomeServicesGridState extends ConsumerState<HomeServicesGrid> {
           .whereType<_ActionItem>()
           .where((a) => !_hiddenQuickActionKeys.contains(a.key))
           .toList();
+      // A saved action that no longer exists (e.g. the old Banks tile) is
+      // replaced by a default one instead of resetting the user's choice.
+      if (items.isNotEmpty && items.length < 3) {
+        for (final d in _defaultQuickActions) {
+          if (items.length == 3) break;
+          if (!items.any((i) => i.key == d.key)) items.add(d);
+        }
+      }
       if (items.length == 3) {
         setState(() => _selectedQuickActions = items);
         return;
@@ -130,7 +140,9 @@ class _HomeServicesGridState extends ConsumerState<HomeServicesGrid> {
                       final item = visibleActionItems[i];
                       final selected = tempSelected.any((s) => s.key == item.key);
                       return ListTile(
-                        leading: TwoToneIcon(
+                        leading: item.art != null
+                            ? ReportArt(item.art!, size: 24)
+                            : TwoToneIcon(
                           data: item.icon,
                           size: 24,
                           outlineColor: selected ? AppColors.primary : AppColors.textSecondary,
@@ -434,6 +446,9 @@ class _ActionCardState extends State<_ActionCard>
               Stack(
                 clipBehavior: Clip.none,
                 children: [
+                  if (widget.item.art != null && !isMaintenance)
+                    ReportArt(widget.item.art!, size: 32)
+                  else
                   TwoToneIcon(
                     data: widget.item.icon,
                     size: 32,
@@ -498,5 +513,7 @@ class _ActionItem {
   final TwoToneIconData icon;
   final String route;
   final String? initialType;
-  const _ActionItem(this.key, this.icon, this.route, {this.initialType});
+  /// Drawn with the report icon family instead of [icon] when set.
+  final ReportArtKind? art;
+  const _ActionItem(this.key, this.icon, this.route, {this.initialType, this.art});
 }

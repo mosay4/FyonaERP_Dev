@@ -1,6 +1,10 @@
 #version 460 core
 #include <flutter/runtime_effect.glsl>
 
+// Sara aurora: soft flowing colour light (brand crimson, rose, warm amber,
+// plum and a cool indigo note) that rises from the composer, gathers around
+// Sara while she thinks and flows along her reply while it streams.
+// Same uniform layout as before (SaraAmbientPainter writes them in order).
 uniform float u_time;
 uniform vec2 u_resolution;
 // Normalized center.xy, half-extents.zw, in scene-local coordinates.
@@ -31,58 +35,99 @@ float noise(vec2 p) {
   return mix(mix(hash21(i), hash21(i + vec2(1, 0)), f.x),
              mix(hash21(i + vec2(0, 1)), hash21(i + vec2(1, 1)), f.x), f.y);
 }
-float fbm(vec2 p) {
-  float n = 0.0, a = 0.533333;
-  mat2 rotate = mat2(0.8, -0.6, 0.6, 0.8);
-  // Fixed four octaves: no unbounded loops, textures, or offscreen passes.
-  for (int i = 0; i < 4; i++) {
-    n += a * noise(p);
-    p = rotate * p * 2.03 + vec2(13.7, 9.2);
-    a *= 0.5;
-  }
-  return n;
+// Two octaves only: silk, not smoke.
+float silk(vec2 p) {
+  return noise(p) * 0.65 + noise(p * 2.1 + vec2(7.3, 1.9)) * 0.35;
+}
+float glow(vec2 d, vec2 r) {
+  vec2 q = d / max(r, vec2(0.02));
+  return exp(-dot(q, q));
 }
 float region(vec2 uv, vec4 box, vec2 spread) {
   vec2 d = (uv - box.xy) / max(box.zw + spread, vec2(0.04));
   return exp(-dot(d, d) * 1.4);
 }
+
 void main() {
   vec2 uv = FlutterFragCoord().xy / u_resolution;
   float aspect = u_resolution.x / u_resolution.y;
-  vec2 p = uv * vec2(aspect, 1.0) * 3.8;
-  // Integrated advection keeps position continuous through phase handoffs.
-  p.y += u_flow;
-  p.x += 0.035 * sin(u_time * 0.12);
-  float inputWave = region(uv, vec4(u_input.xy - vec2(0, 0.12), u_input.zw), vec2(0.3, 0.25));
-  p.y += inputWave * u_typingAmp * 0.16 * sin(p.x * 3.0 - u_flow * 4.0);
-  float avatarFocus = region(uv, u_avatar, vec2(0.32, 0.25)) * u_thinkingFocus;
-  p += (u_avatar.xy - uv) * avatarFocus * 0.7;
-  float replyFlow = region(uv, u_reply, vec2(0.18, 0.12)) * u_respondFlow;
-  p.x += replyFlow * 0.16 * sin(u_flow * 2.0 + uv.y * 4.0);
-  float waveY = mix(u_input.y, -0.12, u_sendProgress);
-  float sendWave = exp(-pow((uv.y - waveY) / 0.12, 2.0)) * u_sendImpulse;
-  p.y += sendWave * 0.25;
-  // Double domain warping: q feeds itself, then r warps by q.
-  vec2 q = vec2(fbm(p), fbm(p + vec2(5.2, 1.3)));
-  q = vec2(fbm(p + q + vec2(1.7, 9.2)), fbm(p + q + vec2(8.3, 2.8)));
-  vec2 r = vec2(fbm(p + q * 2.0 + vec2(1.1, 3.4)),
-                fbm(p + q * 2.0 + vec2(6.7, 4.1)));
-  float smoke = fbm(p + r * 2.5);
-  float density = smoothstep(0.15, 0.87, smoke);
-  vec3 burgundy = mix(vec3(0.490, 0.106, 0.212), vec3(0.557, 0.137, 0.251), u_theme);
-  vec3 pale = mix(vec3(0.914, 0.878, 0.808), vec3(0.83, 0.84, 0.86), u_theme);
-  vec3 ink = mix(vec3(0.075, 0.055, 0.065), vec3(0.52, 0.54, 0.58), u_theme);
-  burgundy = mix(burgundy, burgundy * vec3(0.90, 0.96, 1.07), u_business * 0.45);
-  vec3 color = mix(ink, burgundy, smoothstep(0.22, 0.70, r.x));
-  color = mix(color, pale, smoothstep(0.40, 0.76, q.y) * 0.85);
-  float presence = 0.21 + 0.14 * density;
-  presence += sendWave * 0.16 + avatarFocus * density * 0.08;
-  presence += replyFlow * u_revealPulse * 0.10 + inputWave * u_typingAmp * 0.07;
-  presence *= 1.0 - 0.04 * u_completedBalance;
-  // Continuous coverage; only the outermost 2.5% reaches transparent.
-  float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-  float alpha = clamp(presence, 0.0, 0.62) * smoothstep(0.0, 0.025, edge);
-  // User geometry subtly biases the color, without introducing a new pass.
-  color = mix(color, burgundy, region(uv, u_user, vec2(0.16)) * u_sendImpulse * 0.12);
+  // Integrated clock: continuous through every phase handoff.
+  float t = u_flow * 7.0;
+
+  // Palette. Light theme uses lighter, airier tints of the same hues.
+  vec3 crimson = vec3(0.627, 0.082, 0.188);
+  vec3 rose = vec3(0.902, 0.329, 0.427);
+  vec3 amber = vec3(0.969, 0.639, 0.408);
+  vec3 plum = vec3(0.471, 0.200, 0.478);
+  vec3 indigo = vec3(0.345, 0.388, 0.871);
+  // Business leans a little cooler (indigo), Personal a little warmer.
+  amber = mix(amber, vec3(0.949, 0.553, 0.584), u_business * 0.45);
+  plum = mix(plum, indigo, u_business * 0.35);
+  float light = 1.0 - u_theme;
+  crimson = mix(crimson, vec3(0.86, 0.33, 0.43), light * 0.35);
+  plum = mix(plum, vec3(0.68, 0.52, 0.86), light * 0.40);
+
+  // Gentle domain warp so the bands drift like silk.
+  vec2 w = vec2(silk(uv * vec2(2.2 * aspect, 2.6) + vec2(t * 0.22, -t * 0.12)),
+                silk(uv * vec2(1.8 * aspect, 2.2) + vec2(-t * 0.16, t * 0.19))) - 0.5;
+  vec2 p = uv + w * (0.085 + 0.05 * u_typingAmp);
+
+  // ── Composer aurora: lives at the bottom, rises while typing/sending.
+  float baseY = clamp(u_input.y, 0.55, 1.0);
+  float rise = 0.15 + 0.08 * u_typingAmp + 0.08 * u_sendImpulse + 0.04 * u_respondFlow;
+  vec2 c1 = vec2(0.18 + 0.10 * sin(t * 0.50), baseY + 0.07);
+  vec2 c2 = vec2(0.52 + 0.12 * sin(t * 0.37 + 1.7), baseY + 0.10);
+  vec2 c3 = vec2(0.86 + 0.09 * sin(t * 0.43 + 3.1), baseY + 0.06);
+  vec2 r = vec2(0.34, rise);
+  float a1 = glow(p - c1, r * vec2(1.0, 1.05));
+  float a2 = glow(p - c2, r * vec2(1.15, 1.20));
+  float a3 = glow(p - c3, r * vec2(0.95, 0.95));
+  vec3 bottom = (crimson * a1 + mix(rose, amber, 0.5 + 0.5 * sin(t * 0.3)) * a2 + plum * a3) /
+                max(a1 + a2 + a3, 1e-3);
+  float bottomA = clamp(a1 + a2 + a3, 0.0, 1.0);
+  bottomA *= 0.60 + 0.30 * u_typingAmp + 0.15 * u_respondFlow;
+
+  // ── Send: one bright band travels from the composer to the top, once.
+  float waveY = mix(baseY, -0.15, u_sendProgress);
+  float sendD = (p.y - waveY) / 0.075;
+  float sendBand = exp(-sendD * sendD) * u_sendImpulse * 0.75;
+  vec3 sendColor = mix(rose, amber, smoothstep(0.0, 1.0, uv.x));
+
+  // ── Thinking: a slow rotating halo of colour around Sara's portrait,
+  // plus a soft veil under the header.
+  vec2 av = vec2(u_avatar.x, max(u_avatar.y, 0.0));
+  vec2 da = (p - av) * vec2(aspect, 1.0);
+  float halo = glow(da, vec2(0.40, 0.28)) * u_thinkingFocus * 0.85;
+  // Colours travel around the halo (no angle seam): a slowly turning axis.
+  vec2 axis = vec2(cos(t * 0.8), sin(t * 0.8));
+  float side = dot(normalize(da + vec2(1e-4)), axis) * smoothstep(0.0, 0.18, length(da));
+  vec3 haloColor = mix(mix(crimson, indigo, 0.5 + 0.5 * side), amber,
+                       0.20 + 0.20 * sin(t * 0.6 + da.x * 4.0));
+  float veil = smoothstep(0.30, 0.0, p.y) * u_thinkingFocus *
+               (0.55 + 0.45 * sin(p.x * 5.0 + t * 1.3));
+
+  // ── Responding: light flows along the reply as words arrive.
+  float replyFlow = region(p, u_reply, vec2(0.20, 0.14)) * u_respondFlow;
+  vec3 replyColor = mix(plum, rose, 0.5 + 0.5 * sin(uv.y * 6.0 - t * 1.2));
+  float replyA = replyFlow * (0.35 + 0.65 * u_revealPulse);
+
+  // ── The user's last message warms briefly as it is sent.
+  float userA = region(uv, u_user, vec2(0.16)) * u_sendImpulse * 0.45;
+
+  // ── Idle: a faint wash in the top corner so the page is never flat.
+  float wash = glow((p - vec2(0.95, -0.06)) * vec2(aspect, 1.0), vec2(0.42, 0.22)) * 0.16;
+
+  vec3 color = bottom * bottomA + haloColor * halo + crimson * veil * 0.6 +
+               sendColor * sendBand + replyColor * replyA + crimson * userA + plum * wash;
+  float alpha = bottomA + halo + veil * 0.6 + sendBand + replyA + userA + wash;
+  color /= max(alpha, 1e-3);
+
+  // Calm after an answer completes.
+  alpha *= 1.0 - 0.10 * u_completedBalance;
+  // Light theme: airy pastel; dark theme: richer light.
+  float cap = mix(0.40, 0.58, u_theme);
+  alpha = clamp(alpha * mix(0.62, 0.78, u_theme), 0.0, cap);
+  // Fades into the header instead of ending in a hard line.
+  alpha *= smoothstep(0.0, 0.03, uv.y);
   fragColor = vec4(color * alpha, alpha);
 }

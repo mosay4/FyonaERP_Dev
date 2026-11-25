@@ -3170,7 +3170,15 @@ class SaraAgentService:
                         }
                         screen_ok = (screen in KNOWN_SCREENS
                                      or screen in KNOWN_SCREENS_EN)
-                        route_ok = route.startswith('/personal/') and (route in KNOWN_ROUTES or route in live_routes)
+                        # A record's screen keeps its id in the route
+                        # (/personal/debts?debtId=…, /personal/savings-detail/<id>):
+                        # valid when its screen (or detail template) is known.
+                        route_base = route.split('?', 1)[0]
+                        route_ok = route.startswith('/personal/') and (
+                            route in KNOWN_ROUTES or route in live_routes
+                            or route_base in KNOWN_ROUTES or route_base in live_routes
+                            or any(r.endswith('/') and r.startswith('/personal/') and route_base.startswith(r)
+                                   and len(route_base) > len(r) for r in live_routes))
                         if route and not route.startswith('/personal/'):
                             screen_ok = False
                         if not screen_ok and not route_ok:

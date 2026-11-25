@@ -10,6 +10,7 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/responsive/r_api.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../shared/widgets/invoice_success_mark.dart';
 import '../../../invoices/presentation/pdf/invoice_pdf.dart';
 import '../../../invoices/data/invoice_design_models.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
@@ -140,17 +141,9 @@ class _SaleSuccessDialogState extends ConsumerState<SaleSuccessDialog> {
               color: AppColors.textSecondary,
             ),
           ),
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.success.withAlpha(25),
-            ),
-            child: const Icon(Icons.check_rounded,
-                size: 34, color: AppColors.success),
-          ),
-          const SizedBox(height: 12),
+          // Short finite success motion + completion chime.
+          const InvoiceSuccessMark(),
+          const SizedBox(height: 4),
           Text(
             '${l10n.translate('saleIssuedOk')} #$no',
             textAlign: TextAlign.center,
@@ -168,7 +161,8 @@ class _SaleSuccessDialogState extends ConsumerState<SaleSuccessDialog> {
             child: FilledButton.icon(
               onPressed: () {
                 ref.read(saleDraftProvider.notifier).reset();
-                Navigator.pop(context);
+                // «new» → the page glides back to the top of a fresh form.
+                Navigator.pop(context, 'new');
               },
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.primary,

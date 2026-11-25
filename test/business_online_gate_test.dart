@@ -13,8 +13,8 @@ import 'package:fyona_flutter/features/inventory/presentation/pages/product_move
 import 'package:fyona_flutter/features/inventory/presentation/providers/inventory_providers.dart';
 import 'package:fyona_flutter/shared/widgets/connectivity_widgets.dart';
 
-// Dialog's connectivity indicator pulses continuously: use bounded pumps rather
-// than pumpAndSettle while the approved dialog is visible.
+// The offline art plays one finite pass; bounded pumps keep the checks fast
+// while the approved dialog is visible.
 Future<void> _pumpDialog(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 400));
@@ -84,7 +84,7 @@ void _expectApprovedDialog(WidgetTester tester) {
     findsOneWidget,
   );
   expect(find.text(l10n.translate('offlineAutoSyncHint')), findsOneWidget);
-  expect(find.byType(ConnectivityIndicator), findsOneWidget);
+  expect(find.byType(OfflineSignalArt), findsOneWidget);
 }
 
 void main() {

@@ -18,7 +18,7 @@ import 'legacy/report_scenes_v1.dart';
 /// `true` restores the original (v1) report motions and sounds.
 const bool kUseLegacyReportScenes = false;
 
-enum ReportScene { sales, money, inventory, debts, overview }
+enum ReportScene { sales, money, inventory, debts, overview, personal }
 
 /// Whole choreography; every keyframe below is a fraction of it.
 const Duration kReportSceneDuration = Duration(milliseconds: 2200);
@@ -57,6 +57,13 @@ List<ReportSceneCue> reportSceneCues(ReportScene scene) => switch (scene) {
     ReportSceneCue(.26, 'audio/report_inventory_boxes.wav'),
     ReportSceneCue(.62, 'audio/report_inventory_scan.wav'),
     ReportSceneCue(.80, 'audio/report_inventory_settle.wav'),
+  ],
+  // Personal: the wallet + coins have their own cue; the category ring and
+  // the settle are drawn on the overview keyframes, so they share its files.
+  ReportScene.personal => const [
+    ReportSceneCue(.04, 'audio/report_personal_wallet.wav'),
+    ReportSceneCue(.50, 'audio/report_overview_ring.wav'),
+    ReportSceneCue(.80, 'audio/report_overview_settle.wav'),
   ],
   ReportScene.debts => const [
     ReportSceneCue(.02, 'audio/report_debts_open.wav'),
@@ -159,6 +166,42 @@ class ReportSceneSound {
         _players[i] = player;
       }
     } catch (_) {}
+  }
+
+  /// Plays one short interface cue (e.g. the Personal report PDF is ready)
+  /// with the same audio context and ringer/DND gate as the scene cues.
+  static Future<void> playOnce(String asset, {double gain = volume}) async {
+    AudioPlayer? player;
+    try {
+      if (defaultTargetPlatform == TargetPlatform.android &&
+          await _channel.invokeMethod<bool>('canPlay') != true) {
+        return;
+      }
+      player = AudioPlayer();
+      await player.setPlayerMode(PlayerMode.lowLatency);
+      await player.setAudioContext(
+        AudioContext(
+          android: const AudioContextAndroid(
+            contentType: AndroidContentType.sonification,
+            usageType: AndroidUsageType.assistanceSonification,
+            audioFocus: AndroidAudioFocus.none,
+          ),
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.ambient,
+            options: const {AVAudioSessionOptions.mixWithOthers},
+          ),
+        ),
+      );
+      await player.setReleaseMode(ReleaseMode.stop);
+      await player.setVolume(gain);
+      await player.play(AssetSource(asset));
+      final done = player;
+      Timer(const Duration(milliseconds: 1400), () {
+        unawaited(done.dispose().catchError((_) {}));
+      });
+    } catch (_) {
+      unawaited(player?.dispose().catchError((_) {}));
+    }
   }
 
   /// A cue whose player is not ready yet is skipped: silence is better than
@@ -520,6 +563,8 @@ class ReportScenePainter extends CustomPainter {
         _inventory(c);
       case ReportScene.debts:
         _debts(c);
+      case ReportScene.personal:
+        _personal(c);
     }
     canvas.restore();
   }
@@ -1524,6 +1569,155 @@ class ReportScenePainter extends CustomPainter {
       _seg(t, .82, .92),
       _eio(_seg(t, .87, 1)),
     );
+  }
+
+  // ── 6. Personal: the wallet opens, three coins drop in, the wallet folds
+  // into a ring of spending shares, the headline number lands, then settles.
+  // Ring + settle reuse the overview keyframes (and their sound files).
+
+  void _personal(Canvas c) {
+    const cx = 160.0, cy = 116.0;
+    const centre = Offset(cx, cy);
+    final enter = _eoq(_seg(t, 0, .12));
+    final gather = _eio(_seg(t, .46, .56));
+    final open = _eio(_seg(t, .08, .18));
+
+    if (gather < 1 && enter > 0) {
+      // Each landing nudges the wallet down a touch.
+      var bump = 0.0;
+      for (var k = 0; k < 3; k++) {
+        final land = .24 + .07 * k;
+        bump += 2.2 * math.sin(math.pi * _seg(t, land, land + .05));
+      }
+      final o = math.min(1.0, enter * 1.6) * (1 - gather);
+      c.save();
+      c.translate(cx, cy + 12 + 28 * (1 - enter) + bump);
+      c.scale(1 - .62 * gather);
+      const w = 96.0, h = 64.0, lid = 22.0;
+      final body = RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset.zero, width: w, height: h),
+        const Radius.circular(11),
+      );
+      // Back wall + slot (seen once the flap lifts).
+      final slot = RRect.fromRectAndRadius(
+        Rect.fromLTWH(-w / 2 + 8, -h / 2 - 6 * open, w - 16, 14),
+        const Radius.circular(5),
+      );
+      c.drawRRect(slot, _fill(_darker(p.card), o * open));
+
+      // Coins fall (ease-in, like gravity) into the slot.
+      for (var k = 0; k < 3; k++) {
+        final start = .16 + .07 * k, land = start + .08;
+        final q = _seg(t, start, land);
+        if (q <= 0 || t > land + .01) continue;
+        final y = -h / 2 - 92 + 96 * q * q;
+        final x = -20.0 + 20 * k;
+        _coin(c, Offset(x, y), 18, 13, o * math.min(1, q * 4));
+      }
+
+      _shadow(c, body, o);
+      c.drawRRect(body, _fill(p.card, o));
+      c.drawRRect(body, _line(p.hair, 1, opacity: o));
+      // Stitched seam + card lines.
+      c.drawLine(
+        const Offset(-w / 2 + 12, h / 2 - 14),
+        const Offset(w / 2 - 30, h / 2 - 14),
+        _line(p.mute, 2, opacity: o * .7),
+      );
+      c.drawLine(
+        const Offset(-w / 2 + 12, h / 2 - 24),
+        const Offset(-w / 2 + 40, h / 2 - 24),
+        _line(p.mute, 2, opacity: o * .5),
+      );
+
+      // Flap: hinged on the top edge; folds down over the body, then flips
+      // up and back as it opens (its extent goes 22 → −16).
+      final extent = lid - (lid + 16) * open;
+      const top = -h / 2;
+      final flap = Rect.fromLTRB(
+        -w / 2,
+        math.min(top, top + extent),
+        w / 2,
+        math.max(top, top + extent),
+      );
+      if (flap.height > .5) {
+        c.drawRRect(
+          RRect.fromRectAndCorners(
+            flap,
+            topLeft: Radius.circular(extent < 0 ? 11 : 0),
+            topRight: Radius.circular(extent < 0 ? 11 : 0),
+            bottomLeft: Radius.circular(extent > 0 ? 11 : 0),
+            bottomRight: Radius.circular(extent > 0 ? 11 : 0),
+          ),
+          _fill(extent > 0 ? p.crimson : _darker(p.crimson), o),
+        );
+      }
+      // Clasp on the flap edge.
+      final claspY = top + extent;
+      c.drawCircle(Offset(w / 2 - 16, claspY), 5.2, _fill(p.card, o));
+      c.drawCircle(
+        Offset(w / 2 - 16, claspY),
+        5.2,
+        _line(_darker(p.crimson), 1.4, opacity: o),
+      );
+      c.restore();
+    }
+
+    // Ring of spending shares (overview keyframes).
+    const radius = 58.0;
+    final ringRect = Rect.fromCircle(center: centre, radius: radius);
+    final track = _seg(t, .48, .56);
+    final trackO = track * (1 - _seg(t, .70, .78));
+    if (trackO > 0) {
+      c.drawCircle(centre, radius, _line(p.hair, 7, opacity: trackO));
+    }
+    const shares = [.38, .27, .20, .15];
+    const tones = [1.0, .78, .58, .40];
+    const gap = 6 * math.pi / 180;
+    var from = -math.pi / 2;
+    for (var i = 0; i < 4; i++) {
+      final sweep = 2 * math.pi * shares[i];
+      final q = _eio(_seg(t, .52 + .035 * i, .64 + .035 * i));
+      if (q > 0) {
+        c.drawArc(
+          ringRect,
+          from + gap / 2,
+          (sweep - gap) * q,
+          false,
+          _line(p.crimson, 7, opacity: tones[i], cap: StrokeCap.butt),
+        );
+      }
+      from += sweep;
+    }
+
+    // Headline number lands on the ring's beat (.70), fades for the badge.
+    final grow = _eoc(_seg(t, .62, .70));
+    final pop = .10 * math.sin(math.pi * _seg(t, .70, .76));
+    final fade = 1 - _seg(t, .80, .86);
+    if (grow > 0 && fade > 0) {
+      c.save();
+      c.translate(cx, cy);
+      c.scale(1 + pop);
+      c.drawLine(
+        const Offset(-12, -14),
+        const Offset(12, -14),
+        _line(p.mute, 2, opacity: fade * grow),
+      );
+      c.drawLine(
+        Offset(-22 * grow, 0),
+        Offset(22 * grow, 0),
+        _line(p.ink, 5, opacity: fade),
+      );
+      final up = Path()
+        ..moveTo(-6, 16)
+        ..lineTo(0, 9)
+        ..lineTo(6, 16);
+      c.drawPath(up, _line(p.crimson, 2, opacity: fade * grow));
+      c.restore();
+    }
+
+    _halo(c, centre, radius + 4, radius + 24, _seg(t, .80, .98));
+    _badge(c, centre, 15, _seg(t, .83, .93), _eio(_seg(t, .88, 1)));
   }
 
   /// Faint previous-entry lines on a page about to be turned.

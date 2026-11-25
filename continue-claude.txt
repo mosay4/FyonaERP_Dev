@@ -211,6 +211,21 @@ TESTS / TOOLS
      currency union, local add-debt → credit invoice, home carousel focus.
    - Category refresh quiet reload; inventory + adds category in «مع التصنيف».
 
+21. ROUND 14 (25-11-2026)
+   - Sara: aurora shader UI (sara_fluid.frag, finite ticker), Personal audit
+     (confirmation cards for sensitive tools, executor guards, routed links),
+     BusinessDeviceLoop (25 s per read, 200 s budget, 30k compaction) for
+     all-branches replies.
+   - Personal reports: new pages under personal/presentation/pages/reports/
+     (/personal/reports, /personal/reports/view); old screens deleted,
+     /personal/analytics + /personal/reports-center redirect. Home: Banks
+     tile → Reports.
+   - Sessions: tile in «الأمان والخصوصية» (owner, both sections), redesigned
+     sessions page; backend MAX_ACTIVE_SESSIONS=3 (409 on the 4th device),
+     primary device protected, kick retires relay devices, rename server-side.
+   - Polish: product/barcode/alert/invoice sounds (scan_sfx.dart), invoice
+     success mark, smooth «new invoice», offline dialog art, operations rows.
+
 OPEN ITEMS (need owner decision or next round)
 1) 10 known failing tests remain (tools/ci/known_failures.txt), both
    deliberate product changes by the previous developer — owner decision:

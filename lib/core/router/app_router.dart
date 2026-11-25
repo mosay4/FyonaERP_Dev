@@ -114,15 +114,14 @@ import '../../features/personal/presentation/pages/chat_page.dart';
 import '../../features/personal/data/merchant_api.dart';
 import '../../features/personal/presentation/pages/savings_goals_page.dart';
 import '../../features/personal/presentation/pages/savings_goal_detail_page.dart';
-import '../../features/personal/presentation/pages/spending_analytics_page.dart';
 import '../../features/personal/presentation/pages/receipt_design_hub_page.dart';
 import '../../features/personal/presentation/pages/receipt_design_editor_page.dart';
 import '../../features/personal/presentation/providers/receipt_design_models.dart';
 import '../../features/personal/presentation/pages/personal_banks_page.dart';
 import '../../features/personal/presentation/pages/personal_debts_page.dart';
 import '../../features/personal/presentation/pages/personal_transactions_page.dart';
-import '../../features/personal/presentation/pages/personal_reports_page.dart';
-import '../../features/personal/presentation/pages/personal_reports_center_page.dart';
+import '../../features/personal/presentation/pages/reports/personal_reports_page.dart';
+import '../../features/personal/presentation/pages/reports/personal_report_view_page.dart';
 import '../../features/personal/presentation/pages/personal_ai_page.dart';
 import '../../features/personal/presentation/pages/widgets/home_header.dart';
 import 'package:fyona_flutter/features/branches/data/branch_epoch.dart';
@@ -1393,10 +1392,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             name: 'debtNotifications',
             builder: (_, _) => const DebtNotificationsPage(),
           ),
+          // The old analytics screen was replaced by Personal › التقارير;
+          // its link (drawer, help, Sara) keeps working.
           GoRoute(
             path: RouteNames.personalAnalytics,
             name: 'personalAnalytics',
-            builder: (_, _) => const SpendingAnalyticsPage(),
+            redirect: (_, _) => RouteNames.personalReports,
           ),
           GoRoute(
             path: RouteNames.personalBanks,
@@ -1427,12 +1428,26 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: RouteNames.personalReportsCenter,
             name: 'personalReportsCenter',
-            builder: (_, _) => const PersonalReportsCenterPage(),
+            redirect: (_, _) => RouteNames.personalReports,
           ),
           GoRoute(
             path: RouteNames.personalReports,
             name: 'personalReports',
             builder: (_, _) => const PersonalReportsPage(),
+          ),
+          GoRoute(
+            path: RouteNames.personalReportsView,
+            name: 'personalReportsView',
+            builder: (_, state) {
+              final q = state.uri.queryParameters;
+              return PersonalReportViewPage(
+                kind: q['kind'] ?? 'overview',
+                currency: q['currency'],
+                period: q['period'],
+                from: q['from'],
+                to: q['to'],
+              );
+            },
           ),
           GoRoute(
             path: RouteNames.personalAi,

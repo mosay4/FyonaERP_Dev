@@ -22,19 +22,22 @@ class ConfirmationHandler {
     return _buildEnglishConfirmation(tool, params);
   }
 
-  /// Parse user's confirmation response.
+  /// Parse user's confirmation response. Whole words only: a refusal that
+  /// merely contains «أي» (e.g. «رأيي لا») or «ok» inside another word never
+  /// confirms; a reply with both yes and no is ambiguous.
   static ConfirmResult parseConfirmation(String response) {
-    final lower = response.toLowerCase().trim();
-    // Arabic yes
-    if (lower.contains('نعم') || lower.contains('أجل') || lower.contains('تمام') ||
-        lower.contains('موافق') || lower.contains('أي') || lower == 'y' || lower == 'yes' || lower == 'ok') {
-      return ConfirmResult.confirmed;
-    }
-    // Arabic no
-    if (lower.contains('لا') || lower.contains('لأ') || lower.contains('إلغاء') ||
-        lower == 'n' || lower == 'no' || lower == 'cancel') {
-      return ConfirmResult.cancelled;
-    }
+    final words = response.toLowerCase().trim()
+        .replaceAll(RegExp('[\u064B-\u065F]'), '')
+        .split(RegExp(r'[\s,،.!؟?؛:]+'))
+        .where((w) => w.isNotEmpty)
+        .toSet();
+    const yes = {'نعم', 'أجل', 'اجل', 'تمام', 'موافق', 'موافقة', 'أي', 'اي', 'ايوه', 'أيوه', 'إيه', 'ايه',
+      'أكد', 'اكد', 'أكّد', 'نفذ', 'نفّذ', 'y', 'yes', 'ok', 'okay', 'sure', 'confirm'};
+    const no = {'لا', 'لأ', 'كلا', 'إلغاء', 'الغاء', 'ألغ', 'الغ', 'ألغي', 'الغي', 'n', 'no', 'cancel', 'stop'};
+    final saidYes = words.any(yes.contains);
+    final saidNo = words.any(no.contains);
+    if (saidYes && !saidNo) return ConfirmResult.confirmed;
+    if (saidNo && !saidYes) return ConfirmResult.cancelled;
     return ConfirmResult.unknown;
   }
 

@@ -58,13 +58,20 @@ class SaraAction {
   }
 }
 
+/// Personal «التقارير». TODO(personal-reports): the Personal reports page is
+/// being rebuilt in parallel; when its RouteNames constant lands (or
+/// RouteNames.personalReports is pointed at the new page), change only this
+/// line — every Sara link/button to Personal reports goes through it.
+const saraPersonalReportsRoute = RouteNames.personalReports;
+
 /// Route mapping for deep links from Sara (Arabic + English).
 const _routeMap = <String, String>{
   'البنوك': RouteNames.personalBanks, 'Banks': RouteNames.personalBanks, 'bank': RouteNames.personalBanks,
   'المحفظة': RouteNames.personalTransactions, 'Transactions': RouteNames.personalTransactions, 'transaction': RouteNames.personalTransactions,
   'الميزانية': RouteNames.personalBudget, 'Budget': RouteNames.personalBudget, 'budget': RouteNames.personalBudget,
   'الأهداف': RouteNames.personalSavings, 'Goals': RouteNames.personalSavings, 'goal': RouteNames.personalSavings,
-  'التقارير': RouteNames.personalReports, 'Reports': RouteNames.personalReports, 'report': RouteNames.personalReports,
+  'التقارير': saraPersonalReportsRoute, 'Reports': saraPersonalReportsRoute, 'report': saraPersonalReportsRoute,
+  'reports': saraPersonalReportsRoute, 'مركز التقارير': saraPersonalReportsRoute,
   'الإعدادات': RouteNames.settings, 'Settings': RouteNames.settings, 'setting': RouteNames.settings,
   'الرئيسية': RouteNames.personalDashboard, 'Dashboard': RouteNames.personalDashboard, 'home': RouteNames.personalDashboard,
   // NOTE: analytics intentionally has no entry — financial questions are
@@ -78,14 +85,78 @@ const _routeMap = <String, String>{
   'الملف الشخصي': RouteNames.profile, 'Profile': RouteNames.profile, 'profile': RouteNames.profile,
   'الاشتراك': RouteNames.subscription, 'Subscription': RouteNames.subscription, 'subscription': RouteNames.subscription,
   'الإشعارات': RouteNames.notifications, 'Notifications': RouteNames.notifications, 'notification': RouteNames.notifications,
+  // Enum names of open_screen (tool_registry) resolve exactly too, so the
+  // reply always carries a tappable link to the right Personal screen.
+  'personal': RouteNames.personalDashboard, 'dashboard': RouteNames.personalDashboard, 'settings': RouteNames.settings,
+  'banks': RouteNames.personalBanks, 'transactions': RouteNames.personalTransactions,
+  'wallet': RouteNames.personalTransactions, 'savings': RouteNames.personalSavings,
+  'goals': RouteNames.personalSavings, 'الادخار': RouteNames.personalSavings,
+  'debts': RouteNames.personalDebts, 'budgets': RouteNames.personalBudget,
+  'categories': RouteNames.personalCategories, 'transfers': RouteNames.personalTransfer,
+  'backup': RouteNames.personalBackup, 'النسخ الاحتياطي': RouteNames.personalBackup,
+  'financial_tree': RouteNames.financialTree, 'الشجرة المالية': RouteNames.financialTree,
+  'merchants': RouteNames.personalMerchantAccounts, 'حسابات التجار': RouteNames.personalMerchantAccounts,
+  'all_banks_report': RouteNames.personalAllBanksReport, 'executive': RouteNames.personalExecutive,
+  'bank_statement': RouteNames.personalBankStatement, 'كشف حساب': RouteNames.personalBankStatement,
 };
+
+/// The exact Personal screen of one record (open_entity). Accepts the
+/// registry's `entity_id` as well as `id`, and a bank's `name`/`bank_name`
+/// (+ optional `currency`). Null when the type is unknown.
+String? saraEntityRoute(Map<String, dynamic> params) {
+  String read(String key) => '${params[key] ?? ''}'.trim();
+  final type = read('entity_type');
+  final id = read('id').isNotEmpty ? read('id') : read('entity_id');
+  final name = read('name').isNotEmpty ? read('name') : read('bank_name');
+  final currency = read('currency').toUpperCase();
+  final q = Uri.encodeQueryComponent;
+  switch (type) {
+    case 'bank':
+      if (name.isEmpty) return RouteNames.personalBanks;
+      final base = RouteNames.personalBankDetail.replaceFirst(':bankName', Uri.encodeComponent(name));
+      return currency.isEmpty ? base : '$base?currency=${q(currency)}';
+    case 'goal':
+      return id.isNotEmpty ? RouteNames.personalSavingsDetail.replaceFirst(':goalId', Uri.encodeComponent(id)) : RouteNames.personalSavings;
+    case 'debt':
+      return id.isNotEmpty ? '${RouteNames.personalDebts}?debtId=${q(id)}' : RouteNames.personalDebts;
+    case 'account':
+    case 'transaction':
+      return id.isNotEmpty ? RouteNames.personalAccountDetail.replaceFirst(':id', Uri.encodeComponent(id)) : RouteNames.personalTransactions;
+    case 'budget':
+      return id.isNotEmpty ? '${RouteNames.personalBudgetDetail}?id=${q(id)}' : RouteNames.personalBudget;
+    case 'recurring':
+      return id.isNotEmpty ? '${RouteNames.personalRecurringDetail}?id=${q(id)}' : RouteNames.personalRecurring;
+    case 'category':
+      return RouteNames.personalCategories;
+    case 'report':
+    case 'reports':
+      return saraPersonalReportsRoute;
+  }
+  return null;
+}
 
 /// Opens a screen Sara offered. A screen of one record (a product, an
 /// invoice...) on a branch whose data is on this phone opens with the same
 /// device target the app's own lists use; a bare link would be refused by the
 /// router and land on the home screen.
 void openSaraRoute(BuildContext context, String link) {
-  final live = SaraScreenCatalog.liveRoute(link.trim());
+  var live = SaraScreenCatalog.liveRoute(link.trim());
+  // A detail template without its record (e.g. «/personal/savings-detail/»
+  // or «?debtId=») opens the screen that lists those records instead.
+  const bareDetail = {
+    '/personal/savings-detail/': RouteNames.personalSavings,
+    '/personal/bank-detail/': RouteNames.personalBanks,
+    '/personal/account-detail/': RouteNames.personalTransactions,
+  };
+  final bare = Uri.tryParse(live);
+  if (bare != null) {
+    if (bareDetail.containsKey(bare.path)) {
+      live = bareDetail[bare.path]!;
+    } else if (bare.hasQuery && bare.queryParameters.values.every((v) => v.trim().isEmpty)) {
+      live = bare.path == RouteNames.personalBudgetDetail ? RouteNames.personalBudget
+          : bare.path == RouteNames.personalRecurringDetail ? RouteNames.personalRecurring : bare.path;
+    }
+  }
   final uri = Uri.tryParse(live);
   if (uri != null && commerceDocumentRoutes.containsKey(uri.path)) {
     final query = uri.queryParameters;
@@ -137,44 +208,10 @@ class SaraActionDispatcher {
     }
   }
 
-  /// Deep navigation — open a specific entity (bank, goal, customer, invoice...).
+  /// Deep navigation — open a specific entity (bank, goal, debt, budget...).
   void _openEntity(Map<String, dynamic> params) {
-    final type = (params['entity_type'] as String? ?? '').trim();
-    final name = (params['name'] as String? ?? '').trim();
-    final id = (params['id'] as String? ?? '').trim();
-    if (type.isEmpty) return;
-
-    String? route;
-    dynamic navigateExtra;
-    switch (type) {
-      case 'bank':
-        route = name.isNotEmpty
-            ? RouteNames.personalBankDetail.replaceFirst(':bankName', Uri.encodeComponent(name))
-            : RouteNames.personalBanks;
-      case 'goal':
-        route = id.isNotEmpty
-            ? RouteNames.personalSavingsDetail.replaceFirst(':goalId', id)
-            : RouteNames.personalSavings;
-      case 'debt':
-        route = id.isNotEmpty
-            ? '${RouteNames.personalDebts}/$id'
-            : RouteNames.personalDebts;
-      case 'account':
-      case 'transaction':
-        route = id.isNotEmpty
-            ? RouteNames.personalAccountDetail.replaceFirst(':id', id)
-            : RouteNames.personalTransactions;
-      case 'budget':
-        route = RouteNames.personalBudget;
-      case 'recurring':
-        route = RouteNames.personalTransactions;
-        navigateExtra = 1;
-        break;
-    }
-
-    if (route != null && context.mounted) {
-      context.push(route, extra: navigateExtra);
-    }
+    final route = saraEntityRoute(params);
+    if (route != null && context.mounted) context.push(route);
   }
 
   void _openScreen(Map<String, dynamic> params) {
@@ -189,9 +226,14 @@ class SaraActionDispatcher {
       return;
     }
 
-    // Handle recurring specially - open transactions page with recurring tab
-    if (screen.contains('المتكررة') || screen.contains('متكرر')) {
-      if (context.mounted) context.push(RouteNames.personalTransactions, extra: 1);
+    // Exact name first (enum values like 'savings', 'reports').
+    final exact = resolveRoute(screen);
+    if (exact != null) {
+      if (context.mounted) context.push(exact);
+      return;
+    }
+    if (screen.contains('متكرر')) {
+      if (context.mounted) context.push(RouteNames.personalRecurring);
       return;
     }
 
@@ -298,6 +340,8 @@ class SaraActionDispatcher {
   static String? resolveRoute(String screenName) {
     // Try exact match first
     if (_routeMap.containsKey(screenName)) return _routeMap[screenName];
+    final lower = screenName.trim().toLowerCase();
+    if (_routeMap.containsKey(lower)) return _routeMap[lower];
     // Then try word-level matching (split on whitespace/punctuation)
     final words = screenName.split(RegExp(r'[\s,،.؟\n]+'));
     for (final entry in _routeMap.entries) {
@@ -320,33 +364,8 @@ class SaraActionDispatcher {
         if (screen.isNotEmpty) return resolveRoute(screen);
       }
       if (action.type == SaraActionType.openEntity) {
-        final params = action.params;
-        final type = (params['entity_type'] as String? ?? '').trim();
-        final name = (params['name'] as String? ?? '').trim();
-        final id = (params['id'] as String? ?? '').trim();
-        switch (type) {
-          case 'bank':
-            return name.isNotEmpty
-                ? RouteNames.personalBankDetail.replaceFirst(':bankName', Uri.encodeComponent(name))
-                : RouteNames.personalBanks;
-          case 'goal':
-            return id.isNotEmpty
-                ? RouteNames.personalSavingsDetail.replaceFirst(':goalId', id)
-                : RouteNames.personalSavings;
-          case 'debt':
-            return id.isNotEmpty
-                ? '${RouteNames.personalDebts}/$id'
-                : RouteNames.personalDebts;
-          case 'account':
-          case 'transaction':
-            return id.isNotEmpty
-                ? RouteNames.personalAccountDetail.replaceFirst(':id', id)
-                : RouteNames.personalTransactions;
-          case 'budget':
-            return RouteNames.personalBudget;
-          case 'recurring':
-            return RouteNames.personalTransactions;
-        }
+        final route = saraEntityRoute(action.params);
+        if (route != null) return route;
       }
     }
     return null;

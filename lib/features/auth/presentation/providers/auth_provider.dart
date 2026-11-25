@@ -576,6 +576,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
     if (msg.contains('تسجيل دخول خارجي')) {
       return AppLocalizations.t('authErrExternalLogin');
     }
+    // Device cap reached (server 409): "... ({limit} أجهزة) ...".
+    if (msg.contains('الحد الأقصى للأجهزة')) {
+      final limit = RegExp(r'\((\d+)').firstMatch(msg)?.group(1) ?? '3';
+      return AppLocalizations.t('authErrSessionLimit', {'limit': limit});
+    }
     return msg;
   }
 

@@ -2018,6 +2018,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         children: [
           _buildAccountSecuritySection(),
           _settingsDivider(),
+          // Account-wide (Personal + Business): devices signed in, max 3.
+          _buildSessionsTile(),
+          _settingsDivider(),
           _buildBiometricTile(true),
           _settingsDivider(),
           _buildSessionTimeoutTile(),
@@ -2030,6 +2033,20 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildSessionsTile() {
+    return _settingsTile(
+      HugeIcons.strokeRoundedSmartPhone01,
+      AppLocalizations.of(context).translate('profileSessionsTile'),
+      AppColors.info,
+      trailing: const Icon(
+        Icons.chevron_right,
+        size: 18,
+        color: AppColors.textDisabled,
+      ),
+      onTap: () => context.push(RouteNames.sessions),
     );
   }
 

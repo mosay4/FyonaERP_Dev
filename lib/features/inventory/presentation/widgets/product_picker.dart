@@ -163,7 +163,7 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
       _playSfx(ok: false);
       return;
     }
-    _playSfx(ok: true);
+    unawaited(ScanSfx.select());
     setState(() => _selected[pid] = PickedProduct(p));
   }
 

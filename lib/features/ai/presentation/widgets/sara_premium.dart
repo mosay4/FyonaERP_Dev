@@ -19,14 +19,28 @@ class SaraPremiumAvatar extends StatefulWidget {
 }
 
 class _SaraPremiumAvatarState extends State<SaraPremiumAvatar> with TickerProviderStateMixin {
-  late final _light = AnimationController(vsync: this, duration: const Duration(milliseconds: 3600))..repeat();
+  late final _light = AnimationController(vsync: this, duration: const Duration(milliseconds: 3600));
   late final _spring = AnimationController.unbounded(vsync: this, value: 1);
   Offset _tilt = Offset.zero;
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (MediaQuery.of(context).disableAnimations) { _light.stop(); }
-    else if (!_light.isAnimating) { _light.repeat(); }
+    _syncLight();
+  }
+  @override
+  void didUpdateWidget(SaraPremiumAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) _syncLight();
+  }
+  /// The halo turns while Sara works; when she is ready it finishes one
+  /// calm turn and rests (never an endless idle animation).
+  void _syncLight() {
+    if (MediaQuery.of(context).disableAnimations) { _light.stop(); return; }
+    if (widget.state != SaraVisualState.ready) {
+      if (!_light.isAnimating) _light.repeat();
+    } else if (_light.isAnimating || _light.value == 0) {
+      _light.forward(from: _light.value >= 1 ? 0 : _light.value);
+    }
   }
   @override
   void dispose() { _light.dispose(); _spring.dispose(); super.dispose(); }

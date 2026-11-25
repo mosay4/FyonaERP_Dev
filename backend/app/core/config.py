@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    # Hard cap on devices signed into ONE account at the same time (active,
+    # non-revoked, non-expired sessions). The same physical device signing in
+    # again (same fingerprint) reuses its slot. Env: MAX_ACTIVE_SESSIONS.
+    MAX_ACTIVE_SESSIONS: int = 3
 
     # ── Firebase Auth ──
     FIREBASE_CREDENTIALS_PATH: Optional[str] = None  # Service Account JSON path

@@ -7,6 +7,8 @@ class SessionModel extends Equatable {
   final String? deviceInfo;
   final String? deviceModel;
   final String? osVersion;
+  final String? appVersion;
+  final String? platform;
   final String? fingerprint;
   final String? country;
   final String? region;
@@ -18,6 +20,9 @@ class SessionModel extends Equatable {
   final DateTime lastActivity;
   final DateTime createdAt;
 
+  /// Server-side cap on devices per account (null on old servers).
+  final int? sessionLimit;
+
   const SessionModel({
     required this.id,
     required this.userId,
@@ -25,6 +30,8 @@ class SessionModel extends Equatable {
     this.deviceInfo,
     this.deviceModel,
     this.osVersion,
+    this.appVersion,
+    this.platform,
     this.fingerprint,
     this.country,
     this.region,
@@ -35,6 +42,7 @@ class SessionModel extends Equatable {
     this.customName,
     required this.lastActivity,
     required this.createdAt,
+    this.sessionLimit,
   });
 
   factory SessionModel.fromJson(Map<String, dynamic> json) {
@@ -45,6 +53,8 @@ class SessionModel extends Equatable {
       deviceInfo: json['device_info'] as String?,
       deviceModel: json['device_model'] as String?,
       osVersion: json['os_version'] as String?,
+      appVersion: json['app_version'] as String?,
+      platform: json['platform'] as String?,
       fingerprint: json['fingerprint'] as String?,
       country: json['country'] as String?,
       region: json['region'] as String?,
@@ -55,6 +65,7 @@ class SessionModel extends Equatable {
       customName: json['custom_name'] as String?,
       lastActivity: DateTime.tryParse(json['last_activity'].toString()) ?? DateTime.now(),
       createdAt: DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now(),
+      sessionLimit: (json['session_limit'] as num?)?.toInt(),
     );
   }
 
@@ -65,6 +76,8 @@ class SessionModel extends Equatable {
         if (deviceInfo != null) 'device_info': deviceInfo,
         if (deviceModel != null) 'device_model': deviceModel,
         if (osVersion != null) 'os_version': osVersion,
+        if (appVersion != null) 'app_version': appVersion,
+        if (platform != null) 'platform': platform,
         if (fingerprint != null) 'fingerprint': fingerprint,
         if (country != null) 'country': country,
         if (region != null) 'region': region,
@@ -75,6 +88,7 @@ class SessionModel extends Equatable {
         if (customName != null) 'custom_name': customName,
         'last_activity': lastActivity.toIso8601String(),
         'created_at': createdAt.toIso8601String(),
+        if (sessionLimit != null) 'session_limit': sessionLimit,
       };
 
   /// Human-readable location, e.g. "اليمن، صنعاء" / empty when unknown.
@@ -91,5 +105,5 @@ class SessionModel extends Equatable {
   }
 
   @override
-  List<Object?> get props => [id, userId, ipAddress, deviceInfo, deviceModel, osVersion, fingerprint, country, region, city, isActive, isCurrent, isPrimary, customName];
+  List<Object?> get props => [id, userId, ipAddress, deviceInfo, deviceModel, osVersion, appVersion, platform, fingerprint, country, region, city, isActive, isCurrent, isPrimary, customName];
 }

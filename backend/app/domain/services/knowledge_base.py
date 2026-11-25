@@ -68,7 +68,7 @@ APP_KNOWLEDGE: dict = {
     "التقارير": {
         "description": "التقارير المالية الشاملة: تقارير الإيرادات والمصروفات والأرباح مع تصدير PDF",
         "usage": """
-1. افتح التقارير من القائمة في القسم الشخصي (مركز التقارير)
+1. افتح «التقارير» من الشاشة الرئيسية في القسم الشخصي
 2. اختر نوع التقرير (إيرادات، مصروفات، أرباح، صافي)
 3. حدد الفترة الزمنية
 4. يمكن تصدير التقرير بصيغة PDF
@@ -563,8 +563,7 @@ EXTRA_SCREENS: list = [
     ("لوحة العملاء", "Customers Board", "/crm-dashboard", "نظرة على العملاء والفرص والمهام", "A view of customers, opportunities and tasks", ["لوحة العملاء", "العملاء"], True),
     ("لوحة المشاريع", "Projects Board", "/projects-dashboard", "نظرة على المشاريع وتقدمها ومواعيدها", "A view of projects, progress and deadlines", ["لوحة المشاريع", "المشاريع"], True),
     ("التحويل", "Transfer", "/personal/transfer", "حوّل بين حساباتك مع احتساب سعر الصرف تلقائياً", "Move money between accounts with automatic FX conversion", ["تحويل", "حوالة", "نقل"], False),
-    ("التحليلات", "Analytics", "/personal/analytics", "رسوم بيانية تلخّص دخلك ومصروفك وتطور رصيدك", "Charts summarising income, expenses and balance trends", ["تحليلات", "رسوم", "إحصاء"], False),
-    ("مركز التقارير", "Reports Center", "/personal/reports-center", "كل تقاريرك المالية في مكان واحد", "All your financial reports in one place", ["مركز التقارير", "التقارير"], False),
+    ("التقارير", "Reports", "/personal/reports", "تقاريرك المالية برسوم واضحة: الدخل والمصروف والتصنيفات والميزانيات والأهداف والديون والبنوك، بأي عملة مع تصدير PDF", "Your financial reports with clear charts: income, spending, categories, budgets, goals, debts and banks, in any currency with PDF export", ["التقارير", "مركز التقارير", "تحليلات", "رسوم", "إحصاء"], False),
     ("شجرة الحسابات", "Account Tree", "/personal/account-tree", "عرض هرمي لحساباتك وأرصدتها", "A hierarchical view of your accounts and balances", ["شجرة", "شجرة الحسابات"], False),
     ("الشجرة المالية", "Financial Tree", "/personal/financial-tree", "خريطة شاملة لأصولك وخصومك", "A full map of your assets and liabilities", ["الشجرة المالية", "أصول", "خصوم"], False),
     ("الملخص التنفيذي", "Executive Summary", "/personal/executive", "أهم مؤشراتك المالية في صفحة واحدة", "Your key financial indicators on one page", ["تنفيذي", "ملخص"], False),

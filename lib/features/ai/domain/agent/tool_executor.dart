@@ -119,13 +119,18 @@ class ToolExecutor {
   final PersonalFinanceService _service;
   final SaraVerificationGateway _verify;
   final CurrencyEngine? _fxEngine;
+  /// The same maintenance gate the Personal buttons apply (feature route →
+  /// blocked). Sara never writes where the button itself is blocked.
+  final bool Function(String featureRoute)? _maintenanceBlocked;
 
   ToolExecutor(
     this._service, {
     SaraVerificationGateway? verify,
     ApiClient? apiClient,
     CurrencyEngine? fxEngine,
+    bool Function(String featureRoute)? maintenanceBlocked,
   })  : _fxEngine = fxEngine,
+        _maintenanceBlocked = maintenanceBlocked,
         _verify = verify ??
             SaraVerificationGateway.forService(
               _service,
@@ -206,12 +211,69 @@ class ToolExecutor {
     return best?['id']?.toString();
   }
 
+  /// Feature route of each write tool (the screen whose buttons do it).
+  static String? _featureOf(String tool) {
+    if (tool.contains('debt')) return '/personal/debts';
+    if (tool.contains('goal')) return '/personal/savings';
+    if (tool.contains('budget')) return '/personal/budget';
+    if (tool.contains('recurring')) return '/personal/recurring';
+    if (tool.contains('transfer')) return '/personal/transfer';
+    if (tool.contains('bank_account') || tool.contains('currency') || tool.contains('exchange_rate')) {
+      return '/personal/banks';
+    }
+    if (tool.contains('transaction')) return '/personal/transactions';
+    if (tool.contains('category')) return '/personal/categories';
+    return null;
+  }
+
+  /// The checks the Personal buttons make before the same operation, so
+  /// Sara can do exactly what the user can — no more: maintenance gate,
+  /// the cash account can never be deleted, and a transfer cannot take more
+  /// than the source account holds.
+  Future<ToolExecutionResult?> _buttonGuard(String tool, Map<String, dynamic> p) async {
+    ToolExecutionResult refuse(String ar, String en, String code) => ToolExecutionResult(
+        tool: tool, success: false, messageAr: ar, messageEn: en, errorCode: code, verified: false);
+    final isWrite = tool.startsWith('create_') || tool.startsWith('update_') || tool.startsWith('delete_') ||
+        tool.startsWith('add_') || const {'pay_debt', 'contribute_to_goal', 'execute_recurring_now',
+          'activate_recurring', 'deactivate_recurring'}.contains(tool);
+    if (!isWrite) return null;
+    final feature = _featureOf(tool);
+    if (feature != null && (_maintenanceBlocked?.call(feature) ?? false)) {
+      return refuse('هذه الخدمة تحت الصيانة الآن، لذلك لم أنفذ العملية.',
+          'This feature is under maintenance, so nothing was executed.', 'MAINTENANCE');
+    }
+    if (tool == 'delete_bank_account') {
+      final id = '${p['account_id'] ?? ''}';
+      for (final account in await _service.getBankAccounts()) {
+        if (account.id == id && isCashAccount(account.bankName.trim())) {
+          return refuse('حساب الكاش لا يُحذف، كما في شاشة البنوك.',
+              'The cash account cannot be deleted, as on the banks screen.', 'CASH_NOT_DELETABLE');
+        }
+      }
+    }
+    if (tool == 'create_transfer') {
+      final id = '${p['from_account_id'] ?? ''}';
+      final amount = double.tryParse('${p['amount'] ?? ''}');
+      if (amount != null) {
+        for (final account in await _service.getBankAccounts()) {
+          if (account.id == id && account.balance < amount) {
+            return refuse('الرصيد غير كافٍ في ${account.bankName} (${account.balance} ${account.currency}). لم يتم التحويل.',
+                'Insufficient balance in ${account.bankName}. Nothing was transferred.', 'INSUFFICIENT_BALANCE');
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   /// Execute a tool by name with params.
   Future<ToolExecutionResult> execute(String toolName, Map<String, dynamic> params) async {
     final trace = AgentTraceBuilder()..start('')..setTool(toolName)..setToolArgs(params);
     final sw = Stopwatch()..start();
 
     try {
+      final refused = await _buttonGuard(toolName, params);
+      if (refused != null) return refused;
       if (const {'create_transaction', 'create_transfer', 'create_bank_account', 'create_debt', 'pay_debt', 'contribute_to_goal', 'create_recurring', 'create_budget', 'create_savings_goal'}.contains(toolName)) {
         final enabled = await loadEnabledCurrencies(_service.currentUserId.toString());
         final requested = params.entries.where((e) => e.key == 'currency' || e.key.endsWith('_currency'))

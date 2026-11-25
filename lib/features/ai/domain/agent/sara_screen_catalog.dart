@@ -52,6 +52,9 @@ class SaraScreenCatalog {
     '/invitations': '/branches/invitations',
     '/users': '/employees',
     '/payroll': '/employees',
+    // Personal reports: one entry point (see saraPersonalReportsRoute in
+    // sara_action_dispatcher.dart — the new Personal reports page).
+    '/personal/reports-center': '/personal/reports',
   };
 
   /// Screens with no equivalent in this app.
@@ -94,6 +97,36 @@ class SaraScreenCatalog {
 
   static const List<Map<String, String>> _extrasAr = [
     {
+      'route': '/personal/debts?debtId=',
+      'title': 'تفاصيل دين',
+      'summary': 'دين واحد في القسم الشخصي بدفعاته. أكملي الرابط بمعرف الدين: /personal/debts?debtId=<id>.',
+    },
+    {
+      'route': '/personal/budget/detail?id=',
+      'title': 'تفاصيل ميزانية',
+      'summary': 'ميزانية واحدة وأصنافها وصرفها. /personal/budget/detail?id=<id>.',
+    },
+    {
+      'route': '/personal/recurring/detail?id=',
+      'title': 'تفاصيل عملية متكررة',
+      'summary': 'عملية متكررة واحدة: التنفيذ الآن، التخطي، التأجيل. /personal/recurring/detail?id=<id>.',
+    },
+    {
+      'route': '/personal/savings-detail/',
+      'title': 'تفاصيل هدف ادخار',
+      'summary': 'هدف واحد ومساهماته. /personal/savings-detail/<goal id>.',
+    },
+    {
+      'route': '/personal/bank-detail/',
+      'title': 'تفاصيل بنك شخصي',
+      'summary': 'بنك واحد بعملاته وحركاته. /personal/bank-detail/<اسم البنك>?currency=<رمز العملة>.',
+    },
+    {
+      'route': '/personal/account-detail/',
+      'title': 'تفاصيل حساب شخصي',
+      'summary': 'حساب واحد وحركاته. /personal/account-detail/<account id>.',
+    },
+    {
       'route': '/inventory/product',
       'title': 'تفاصيل منتج',
       'summary': 'بطاقة منتج واحد: الكمية والأسعار والدفعات والإحصاءات. أضيفي ?id=<معرف المنتج>.',
@@ -131,6 +164,36 @@ class SaraScreenCatalog {
   ];
 
   static const List<Map<String, String>> _extrasEn = [
+    {
+      'route': '/personal/debts?debtId=',
+      'title': 'Debt details',
+      'summary': 'One Personal debt with its payments: /personal/debts?debtId=<id>.',
+    },
+    {
+      'route': '/personal/budget/detail?id=',
+      'title': 'Budget details',
+      'summary': 'One budget with its categories and spending: /personal/budget/detail?id=<id>.',
+    },
+    {
+      'route': '/personal/recurring/detail?id=',
+      'title': 'Recurring details',
+      'summary': 'One recurring item: run now, skip, postpone. /personal/recurring/detail?id=<id>.',
+    },
+    {
+      'route': '/personal/savings-detail/',
+      'title': 'Savings goal details',
+      'summary': 'One goal and its contributions: /personal/savings-detail/<goal id>.',
+    },
+    {
+      'route': '/personal/bank-detail/',
+      'title': 'Personal bank details',
+      'summary': 'One bank with its currencies and movements: /personal/bank-detail/<bank name>?currency=<code>.',
+    },
+    {
+      'route': '/personal/account-detail/',
+      'title': 'Personal account details',
+      'summary': 'One account and its movements: /personal/account-detail/<account id>.',
+    },
     {
       'route': '/inventory/product',
       'title': 'Product details',

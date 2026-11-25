@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fyona_flutter/core/localization/app_localizations.dart';
+import 'package:fyona_flutter/core/services/connectivity_service.dart';
 import 'package:fyona_flutter/core/services/audit_service.dart';
 import 'package:fyona_flutter/core/storage/secure_storage.dart';
 import 'package:fyona_flutter/core/theme/app_colors.dart';
@@ -18,6 +19,8 @@ import 'package:fyona_flutter/features/auth/domain/services/firebase_auth_servic
 import 'package:fyona_flutter/features/auth/presentation/pages/sessions_page.dart'
     show
         SessionsPage,
+        canRenameSession,
+        canSignOutSession,
         orderedSessions,
         sessionCardBorder,
         relativeTimeParts;
@@ -71,6 +74,8 @@ class _FakeDomainService extends AuthService {
 
 class _FakeAuthNotifier extends AuthNotifier {
   final List<SessionModel> sessions;
+  final List<String> kicked = [];
+  final Map<String, String> renamed = {};
 
   _FakeAuthNotifier(
     AuthService service,
@@ -83,6 +88,16 @@ class _FakeAuthNotifier extends AuthNotifier {
   @override
   Future<List<SessionModel>> getActiveSessions(String userId) async =>
       sessions;
+
+  @override
+  Future<void> logoutSession(String sessionId) async {
+    kicked.add(sessionId);
+  }
+
+  @override
+  Future<void> updateSessionName(String sessionId, String customName) async {
+    renamed[sessionId] = customName;
+  }
 }
 
 void main() {
@@ -123,7 +138,7 @@ void main() {
   }
 
   group('pure session rules', () {
-    test('ordering is current, then primary, then newest', () {
+    test('ordering is primary, then current, then oldest first', () {
       final now = DateTime.now();
       final secondaryOld = session(
           id: 's-old', createdAt: now.subtract(const Duration(days: 3)));
@@ -131,10 +146,27 @@ void main() {
           id: 's-primary', primary: true, createdAt: now.subtract(const Duration(days: 5)));
       final current = session(
           id: 's-current', current: true, createdAt: now.subtract(const Duration(days: 1)));
+      final newest = session(
+          id: 's-new', createdAt: now.subtract(const Duration(hours: 1)));
       final ordered = orderedSessions(
-          [secondaryOld, primary, current], (s) => s.isCurrent);
+          [newest, secondaryOld, primary, current], (s) => s.isCurrent);
       expect(ordered.map((s) => s.id).toList(),
-          ['s-current', 's-primary', 's-old']);
+          ['s-primary', 's-current', 's-old', 's-new']);
+    });
+
+    test('sign-out and rename rules', () {
+      final primary = session(id: 'p', primary: true);
+      final other = session(id: 'o');
+      // The primary can never be signed out, by anyone.
+      expect(canSignOutSession(primary, amPrimary: true, isMine: true), isFalse);
+      expect(canSignOutSession(primary, amPrimary: false, isMine: false), isFalse);
+      // The primary device signs others out; a secondary only itself.
+      expect(canSignOutSession(other, amPrimary: true, isMine: false), isTrue);
+      expect(canSignOutSession(other, amPrimary: false, isMine: false), isFalse);
+      expect(canSignOutSession(other, amPrimary: false, isMine: true), isTrue);
+      expect(canRenameSession(other, amPrimary: false, isMine: true), isTrue);
+      expect(canRenameSession(primary, amPrimary: false, isMine: false), isFalse);
+      expect(canRenameSession(other, amPrimary: true, isMine: false), isTrue);
     });
 
     test('red frame only on current', () {
@@ -267,6 +299,175 @@ void main() {
           reason: '10-minute activity must render. got: $texts');
       expect(texts.contains('5'), isTrue,
           reason: '5-day activity must render. got: $texts');
+    });
+  });
+
+  group('sessions page management', () {
+    Future<_FakeAuthNotifier> pumpPage(
+        WidgetTester tester, List<SessionModel> canned) async {
+      tester.view.physicalSize = const Size(400, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+      late _FakeAuthNotifier notifier;
+      final router = GoRouter(
+        initialLocation: '/sessions',
+        routes: [
+          GoRoute(path: '/sessions', builder: (_, __) => const SessionsPage()),
+        ],
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            connectivityServiceProvider.overrideWithValue(
+                ConnectivityService(debugOnline: true)),
+            authProvider.overrideWith((ref) {
+              notifier = _FakeAuthNotifier(
+                _FakeDomainService(
+                  repository: _FakeRepo(),
+                  auditService: _FakeAudit(),
+                ),
+                _FakeLocal(),
+                FirebaseAuthService(),
+                ref,
+                canned,
+              );
+              notifier.state = const AuthState(
+                status: AuthStatus.authenticated,
+                user: UserModel(id: 'u1'),
+              );
+              return notifier;
+            }),
+          ],
+          child: MaterialApp.router(
+            locale: const Locale('ar'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            routerConfig: router,
+          ),
+        ),
+      );
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      return notifier;
+    }
+
+    List<SessionModel> threeDevices({required bool currentIsPrimary}) {
+      final now = DateTime.now();
+      return [
+        SessionModel(
+          id: 's-third',
+          userId: 'u1',
+          deviceInfo: 'Xiaomi 13',
+          deviceModel: '2211133G',
+          osVersion: 'Android 13',
+          createdAt: now.subtract(const Duration(days: 1)),
+          lastActivity: now,
+          sessionLimit: 3,
+        ),
+        SessionModel(
+          id: 's-primary',
+          userId: 'u1',
+          deviceInfo: 'Samsung SM-S918B',
+          deviceModel: 'SM-S918B',
+          osVersion: 'Android 14',
+          appVersion: '2.4.1+77',
+          platform: 'android',
+          isPrimary: true,
+          isCurrent: currentIsPrimary,
+          customName: 'جوال المحل',
+          ipAddress: '10.0.0.5',
+          createdAt: now.subtract(const Duration(days: 9)),
+          lastActivity: now.subtract(const Duration(hours: 2)),
+          sessionLimit: 3,
+        ),
+        SessionModel(
+          id: 's-second',
+          userId: 'u1',
+          deviceInfo: 'iPhone15,2',
+          deviceModel: 'iPhone15,2',
+          osVersion: 'iOS 18.1',
+          platform: 'ios',
+          isCurrent: !currentIsPrimary,
+          createdAt: now.subtract(const Duration(days: 4)),
+          lastActivity: now.subtract(const Duration(minutes: 5)),
+          sessionLimit: 3,
+        ),
+      ];
+    }
+
+    double topOf(WidgetTester tester, String id) =>
+        tester.getTopLeft(find.byKey(ValueKey('session-card-$id'))).dy;
+
+    testWidgets('primary first, usage meter, primary cannot be signed out',
+        (tester) async {
+      await pumpPage(tester, threeDevices(currentIsPrimary: true));
+      expect(tester.takeException(), isNull);
+      // Primary on top, then the remaining devices oldest first.
+      expect(topOf(tester, 's-primary'), lessThan(topOf(tester, 's-second')));
+      expect(topOf(tester, 's-second'), lessThan(topOf(tester, 's-third')));
+      // Usage: 3 of 3 and the limit-reached note.
+      expect(find.textContaining('3 من 3'), findsOneWidget);
+      expect(find.textContaining('الحد الأقصى'), findsOneWidget);
+      // Real device details on the card.
+      expect(find.text('جوال المحل'), findsOneWidget);
+      expect(find.text('Samsung SM-S918B'), findsOneWidget);
+      expect(find.text('2.4.1+77'), findsOneWidget);
+      expect(find.text('iOS 18.1'), findsOneWidget);
+      // The primary has no sign-out button, only the protected chip.
+      expect(find.byKey(const ValueKey('session-signout-s-primary')),
+          findsNothing);
+      expect(find.byKey(const ValueKey('session-locked-s-primary')),
+          findsOneWidget);
+      // The primary device may sign the others out.
+      final btn = tester.widget<ButtonStyleButton>(
+          find.byKey(const ValueKey('session-signout-s-third')));
+      expect(btn.onPressed, isNotNull);
+    });
+
+    testWidgets('primary signs another device out', (tester) async {
+      final n = await pumpPage(tester, threeDevices(currentIsPrimary: true));
+      await tester.tap(find.byKey(const ValueKey('session-signout-s-third')));
+      await tester.pump(const Duration(milliseconds: 400));
+      // Confirm dialog: tap its confirm button (same label as the action).
+      final confirm = find.descendant(
+          of: find.byType(AlertDialog), matching: find.text('تسجيل خروج'));
+      expect(confirm, findsOneWidget);
+      await tester.tap(confirm);
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(n.kicked, ['s-third']);
+    });
+
+    testWidgets('secondary device cannot sign others out', (tester) async {
+      await pumpPage(tester, threeDevices(currentIsPrimary: false));
+      expect(find.textContaining('الجهاز الرئيسي'), findsWidgets);
+      final other = tester.widget<ButtonStyleButton>(
+          find.byKey(const ValueKey('session-signout-s-third')));
+      expect(other.onPressed, isNull);
+      final self = tester.widget<ButtonStyleButton>(
+          find.byKey(const ValueKey('session-signout-s-second')));
+      expect(self.onPressed, isNotNull);
+      final renameOther = tester.widget<ButtonStyleButton>(
+          find.byKey(const ValueKey('session-rename-s-third')));
+      expect(renameOther.onPressed, isNull);
+    });
+
+    testWidgets('rename is saved on the server', (tester) async {
+      final n = await pumpPage(tester, threeDevices(currentIsPrimary: true));
+      await tester.tap(find.byKey(const ValueKey('session-rename-s-second')));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.enterText(
+          find.descendant(
+              of: find.byKey(const Key('sessionRenameField')),
+              matching: find.byType(EditableText)),
+          'آيفون المخزن');
+      await tester.tap(find.byKey(const Key('sessionRenameSave')));
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(n.renamed, {'s-second': 'آيفون المخزن'});
     });
   });
 }

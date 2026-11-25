@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 from uuid import UUID, uuid4
 from datetime import datetime, timedelta, timezone
@@ -45,6 +46,41 @@ from app.domain.services.admin_permissions import (
 from app.core import firebase as firebase_auth
 
 logger = get_logger("auth_service")
+
+
+class SessionLimitReached(ValueError):
+    """A new device tried to sign in while the account already has the
+    maximum number of live sessions (settings.MAX_ACTIVE_SESSIONS)."""
+
+    def __init__(self, limit: int):
+        self.limit = limit
+        super().__init__(
+            f"وصلت إلى الحد الأقصى للأجهزة ({limit} أجهزة) على هذا الحساب. "
+            "سجّل الخروج من أحد أجهزتك من «الأمان والخصوصية ← الجلسات والأجهزة» ثم حاول مجدداً، "
+            "أو أعد تعيين كلمة المرور لتسجيل الخروج من كل الأجهزة."
+        )
+
+
+def session_limit() -> int:
+    return max(int(getattr(settings, "MAX_ACTIVE_SESSIONS", 3) or 3), 1)
+
+
+_APP_UA = re.compile(r"FyonaERP/(?P<ver>[^\s(]+)(?:\s*\((?P<plat>[^)]*)\))?")
+
+
+def parse_app_agent(user_agent: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """(app_version, platform) the app prefixed to the stored user agent."""
+    m = _APP_UA.search(user_agent or "")
+    if not m:
+        return None, None
+    plat = (m.group("plat") or "").strip() or None
+    return m.group("ver"), plat
+
+
+def _aware(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 SYSTEM_ROLES = {
     "super_admin": "مدير المنصة",
@@ -192,6 +228,7 @@ class AuthService:
         if user:
             if user.status != "active":
                 raise ValueError("الحساب غير نشط. يرجى التواصل مع الدعم")
+            await self.ensure_session_slot(user.id, fingerprint)
             user.firebase_uid = uid
             user.auth_provider = provider
             user.email_verified = email_verified
@@ -253,7 +290,12 @@ class AuthService:
             city=city,
         )
 
-    async def refresh_token(self, refresh_token: str) -> TokenResponse:
+    async def refresh_token(
+        self,
+        refresh_token: str,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> TokenResponse:
         token_hash = hash_refresh_token(refresh_token)
         session = await self._session_repo.get_by_refresh_token(token_hash)
         if not session:
@@ -280,6 +322,12 @@ class AuthService:
             days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
         )
         session.last_activity = datetime.now(timezone.utc)
+        # Keep "last seen from" and the app version current for the
+        # sessions screen (never blank them out).
+        if ip_address:
+            session.ip_address = ip_address
+        if user_agent and parse_app_agent(user_agent)[0]:
+            session.user_agent = user_agent
         await self._session_repo.update(session)
 
         return TokenResponse(
@@ -306,6 +354,50 @@ class AuthService:
                 await self._user_repo.update(user)
         logger.info("user_logged_out", user_id=str(user_id))
 
+    async def live_sessions(self, user_id: UUID) -> list[UserSession]:
+        """Active, non-expired sessions, primary first then oldest first.
+
+        Housekeeping on the way: expired rows still flagged active are closed
+        (the refresh endpoint already rejects them), and when the primary
+        device is gone (signed out / expired) the OLDEST remaining session
+        becomes primary: the primary is always the account's first device.
+        """
+        # list_active_for_user filters expired rows out; close them for real
+        # so they never hold a primary flag (unique index) or a device slot.
+        closer = getattr(self._session_repo, "deactivate_expired_for_user", None)
+        if closer is not None:
+            await closer(user_id)
+        rows = await self._session_repo.list_active_for_user(user_id)
+        rows.sort(key=lambda s: (_aware(s.created_at) or datetime.min.replace(tzinfo=timezone.utc)))
+        primaries = [s for s in rows if s.is_primary]
+        if not primaries and rows:
+            rows[0].is_primary = True
+            await self._session_repo.update(rows[0])
+            logger.info("session_primary_promoted", user_id=str(user_id),
+                        session_id=str(rows[0].id))
+        elif len(primaries) > 1:
+            for extra in primaries[1:]:
+                extra.is_primary = False
+                await self._session_repo.update(extra)
+        rows.sort(key=lambda s: 0 if s.is_primary else 1)
+        return rows
+
+    async def ensure_session_slot(
+        self, user_id: UUID, fingerprint: Optional[str] = None
+    ) -> None:
+        """Refuse a NEW device when the account already has the maximum of
+        live sessions. The same device signing in again (fingerprint match)
+        reuses its own slot and is never refused."""
+        if fingerprint:
+            dup = await self._session_repo.get_active_by_fingerprint(user_id, fingerprint)
+            if dup is not None:
+                return
+        limit = session_limit()
+        live = await self.live_sessions(user_id)
+        if len(live) >= limit:
+            logger.info("session_limit_reached", user_id=str(user_id), limit=limit)
+            raise SessionLimitReached(limit)
+
     async def revoke_session(
         self,
         user_id: UUID,
@@ -314,11 +406,14 @@ class AuthService:
     ) -> None:
         """Kick a single session, verifying it belongs to the caller.
 
-        Only the primary device may revoke OTHER sessions; any device may
-        always revoke its OWN session (self logout).
+        The primary (first) device can never be kicked. Only the primary
+        device may revoke OTHER sessions; any device may always revoke its
+        OWN session (self logout). The kicked device's access token dies on
+        its next request (sid check) and its refresh token is refused.
         """
+        await self.live_sessions(user_id)
         session = await self._session_repo.get(session_id)
-        if not session or session.user_id != user_id:
+        if not session or session.user_id != user_id or not session.is_active:
             raise ValueError("الجلسة غير موجودة")
         if session.is_primary:
             raise ValueError("لا يمكن حذف الجهاز الرئيسي")
@@ -329,27 +424,49 @@ class AuthService:
         await self._session_repo.deactivate(session.id)
         logger.info("session_revoked", user_id=str(user_id), session_id=str(session_id))
 
-    async def update_session_custom_name(self, user_id: UUID, session_id: UUID, custom_name: str) -> None:
-        """Update the custom name for a session."""
+    async def update_session_custom_name(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        custom_name: str,
+        caller_session_id: Optional[UUID] = None,
+    ) -> None:
+        """Rename a device (stored on the server, seen on every device).
+
+        A device may rename itself; the primary device may rename any
+        device of the account. An empty name restores the device's own name.
+        """
         session = await self._session_repo.get(session_id)
-        if not session or session.user_id != user_id:
+        if not session or session.user_id != user_id or not session.is_active:
             raise ValueError("الجلسة غير موجودة")
-        await self._session_repo.update_custom_name(session_id, custom_name)
+        if caller_session_id is not None and str(session_id) != str(caller_session_id):
+            caller = await self._session_repo.get(caller_session_id)
+            if not caller or caller.user_id != user_id or not caller.is_primary:
+                raise PermissionError("فقط الجهاز الرئيسي يمكنه تعديل أسماء الأجهزة الأخرى")
+        name = " ".join((custom_name or "").split())
+        if len(name) > 60:
+            raise ValueError("اسم الجهاز طويل جداً (60 حرفاً كحد أقصى)")
+        await self._session_repo.update_custom_name(session_id, name or None)
         logger.info("session_renamed", user_id=str(user_id), session_id=str(session_id))
 
     async def get_active_sessions(
         self, user_id: UUID, current_refresh_token: Optional[str] = None
     ) -> list[dict]:
-        sessions = await self._session_repo.list_active_for_user(user_id)
+        sessions = await self.live_sessions(user_id)
         current_hash = (
             hash_refresh_token(current_refresh_token) if current_refresh_token else None
         )
-        return [
-            {
+        limit = session_limit()
+        out = []
+        for s in sessions:
+            app_version, platform = parse_app_agent(s.user_agent)
+            out.append({
                 "id": str(s.id),
                 "device_info": _describe_device(s.device_name, s.user_agent),
                 "device_model": s.device_model,
                 "os_version": s.os_version,
+                "app_version": app_version,
+                "platform": platform,
                 "fingerprint": s.fingerprint,
                 "country": s.country,
                 "region": s.region,
@@ -364,9 +481,9 @@ class AuthService:
                 "expires_at": s.expires_at.isoformat() if s.expires_at else None,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
                 "is_active": True,
-            }
-            for s in sessions
-        ]
+                "session_limit": limit,
+            })
+        return out
 
     async def get_user_by_id(self, user_id: UUID) -> Optional[User]:
         return await self._user_repo.get_by_id(user_id)
@@ -578,6 +695,9 @@ class AuthService:
                 "يرجى تأكيد بريدك الإلكتروني أولاً. تحقق من الرسالة المرسلة إلى بريدك"
             )
 
+        # Hard device cap: refuse a 4th device BEFORE any alert goes out.
+        await self.ensure_session_slot(user.id, fingerprint)
+
         previous = await self._session_repo.list_active_for_user(user.id)
         is_new_device = not previous or not any(
             s.ip_address == ip_address and s.device_name == device_name
@@ -782,7 +902,13 @@ class AuthService:
             "cooldown_seconds": otp_service.OTP_COOLDOWN_SECONDS,
         }
 
-    async def verify_email_change(self, user: User, otp: str, new_email: str) -> AuthResponse:
+    async def verify_email_change(
+        self,
+        user: User,
+        otp: str,
+        new_email: str,
+        current_session_id: Optional[UUID] = None,
+    ) -> AuthResponse:
         """Verify the code sent to the OLD email, then update the email address."""
         new_email = new_email.strip().lower()
         if not new_email:
@@ -820,7 +946,10 @@ class AuthService:
             ),
         )
 
-        return await self._generate_auth_response(user)
+        # Same device, same session: rotate its tokens in place instead of
+        # opening a second session (which would eat a device slot).
+        return await self._generate_auth_response(
+            user, reuse_session_id=current_session_id, enforce_limit=False)
 
     async def _generate_auth_response(
         self,
@@ -834,6 +963,8 @@ class AuthService:
         country: Optional[str] = None,
         region: Optional[str] = None,
         city: Optional[str] = None,
+        reuse_session_id: Optional[UUID] = None,
+        enforce_limit: bool = True,
     ) -> AuthResponse:
         session, raw_refresh_token = await self._create_session(
             user,
@@ -846,6 +977,8 @@ class AuthService:
             country=country,
             region=region,
             city=city,
+            reuse_session_id=reuse_session_id,
+            enforce_limit=enforce_limit,
         )
         org = await self._org_repo.get_by_id(user.organization_id)
         user_resp = await self.get_user_response(user, org)
@@ -870,12 +1003,22 @@ class AuthService:
         country: Optional[str] = None,
         region: Optional[str] = None,
         city: Optional[str] = None,
+        reuse_session_id: Optional[UUID] = None,
+        enforce_limit: bool = True,
     ) -> tuple[UserSession, str]:
         expires_at = datetime.now(timezone.utc) + timedelta(
             days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
         )
         raw_token = create_refresh_token(str(user.id))
         now = datetime.now(timezone.utc)
+        if reuse_session_id is not None:
+            own = await self._session_repo.get(reuse_session_id)
+            if (own is not None and own.user_id == user.id and own.is_active
+                    and (_aware(own.expires_at) or now) > now):
+                own.refresh_token = hash_refresh_token(raw_token)
+                own.expires_at = expires_at
+                own.last_activity = now
+                return await self._session_repo.update(own), raw_token
         # Fingerprint re-login: the SAME physical device must never pile up
         # duplicate rows. Rotate its existing active session in place
         # (fresh tokens + current device info/geo), preserving ownership.
@@ -907,8 +1050,11 @@ class AuthService:
                 dup.last_activity = now
                 updated = await self._session_repo.update(dup)
                 return updated, raw_token
+        # Hard device cap (all users): a NEW device beyond the limit is refused.
+        existing = await self.live_sessions(user.id)
+        if enforce_limit and len(existing) >= session_limit():
+            raise SessionLimitReached(session_limit())
         # Check if a primary session already exists to avoid race condition
-        existing = await self._session_repo.list_active_for_user(user.id)
         has_primary = any(s.is_primary for s in existing)
         is_primary = not has_primary
         session = UserSession(
@@ -937,15 +1083,8 @@ class AuthService:
                 created = await self._session_repo.create(session)
             else:
                 raise
-        # Cap concurrent devices: keep only the 5 most recent sessions alive.
-        # The primary row is EXEMPT — evicting it would silently migrate
-        # ownership to whatever logs in next.
-        active = await self._session_repo.list_active_for_user(user.id)
-        primaries = [s for s in active if s.is_primary]
-        others = [s for s in active if not s.is_primary]
-        keep_others = 5 - (1 if primaries else 0)
-        for old in others[keep_others:]:
-            await self._session_repo.deactivate(old.id)
+        # No silent eviction any more: the device cap is enforced up front
+        # (SessionLimitReached), so signing in never kicks another device.
         return created, raw_token
 
     async def get_user_response(self, user: User, org: Optional[Organization] = None) -> UserResponse:

@@ -9,7 +9,7 @@ import 'package:fyona_flutter/features/ai/presentation/widgets/sara_ambient_scen
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('real runtime shader asset loads and rasterizes headlessly', (
+  testWidgets('real runtime aurora shader loads and rasterizes headlessly', (
     tester,
   ) async {
     expect(File('assets/shaders/sara_fluid.frag').existsSync(), isTrue);
@@ -36,18 +36,14 @@ void main() {
         final picture = recorder.endRecording();
         final image = await picture.toImage(120, 240);
         final raw = (await image.toByteData())!;
-        // Clearly visible smoke across the interior, not disconnected ribbons.
-        for (final xy in [
-          const Offset(30, 60),
-          const Offset(60, 120),
-          const Offset(90, 180),
-        ]) {
-          final alpha = raw.getUint8(
-            (xy.dy.toInt() * 120 + xy.dx.toInt()) * 4 + 3,
-          );
-          expect(alpha, inInclusiveRange(45, 100));
+        int alphaAt(int x, int y) => raw.getUint8((y * 120 + x) * 4 + 3);
+        // Aurora: a clearly visible glow rises from the composer (bottom),
+        // the reading area in the middle stays calm, and it fades into the
+        // header instead of ending in a hard line.
+        for (final x in [20, 60, 100]) {
+          expect(alphaAt(x, 228), inInclusiveRange(30, 150), reason: 'bottom x=$x');
+          expect(alphaAt(x, 120), lessThan(alphaAt(x, 228)), reason: 'middle x=$x');
         }
-        // Pixel-centered sampling is slightly inside the true screen edge.
         expect(raw.getUint8(3), lessThanOrEqualTo(2));
         image.dispose();
         picture.dispose();
@@ -205,4 +201,30 @@ void main() {
       },
     );
   }
+
+  testWidgets('idle aurora settles and stops scheduling frames; events wake it', (tester) async {
+    final c = SaraAmbientController();
+    final keys = List.generate(4, (_) => GlobalKey());
+    await tester.pumpWidget(MaterialApp(home: SizedBox.expand(child: SaraAmbientScene(
+      controller: c, activity: SaraAmbientActivity.none,
+      inputKey: keys[0], avatarKey: keys[1], userKey: keys[2], replyKey: keys[3]))));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(c.time, greaterThan(0)); // entrance bloom
+    // Idle: finite — pumpAndSettle returns, the clock stops.
+    await tester.pumpAndSettle();
+    final rested = c.time;
+    await tester.pump(const Duration(seconds: 5));
+    expect(c.time, rested);
+    // Typing wakes it, then it settles again.
+    c.edit('سارة');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(c.time, greaterThan(rested));
+    await tester.pumpAndSettle();
+    final again = c.time;
+    await tester.pump(const Duration(seconds: 3));
+    expect(c.time, again);
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
 }

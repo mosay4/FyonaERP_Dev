@@ -12,7 +12,7 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/currency/money_format_service.dart';
 
 /// Custom FYONA-identity report illustrations (paint-only, theme-aware).
-enum ReportArtKind { sales, money, inventory, debts, profit, overview }
+enum ReportArtKind { sales, money, inventory, debts, profit, overview, personal }
 
 class ReportArt extends StatelessWidget {
   final ReportArtKind kind;
@@ -161,6 +161,27 @@ class _ReportArtPainter extends CustomPainter {
             ..lineTo(21.2, 7.7),
           accent,
         );
+      case ReportArtKind.personal:
+        // Personal report: a wallet with a crimson coin dropping in and a
+        // rising share bar on its face (the Personal opening motion).
+        final wallet = RRect.fromRectAndRadius(
+          const Rect.fromLTWH(3, 8, 18, 12.5),
+          const Radius.circular(2.6),
+        );
+        c.drawRRect(wallet, wash);
+        c.drawRRect(wallet, ink);
+        c.drawPath(
+          Path()
+            ..moveTo(3, 11.5)
+            ..lineTo(21, 11.5),
+          ink,
+        );
+        c.drawCircle(const Offset(17.2, 11.5), 1.3, dot);
+        c.drawLine(const Offset(6.5, 17.5), const Offset(6.5, 16), accent);
+        c.drawLine(const Offset(9.5, 17.5), const Offset(9.5, 14.6), accent);
+        c.drawLine(const Offset(12.5, 17.5), const Offset(12.5, 15.4), ink);
+        c.drawCircle(const Offset(10, 4.6), 2.4, wash);
+        c.drawCircle(const Offset(10, 4.6), 2.4, accent);
       case ReportArtKind.overview:
         // Overview ring with a pulse through it.
         const o = Offset(12, 12);
@@ -201,6 +222,7 @@ ReportArtKind reportArtKindFor(String kind) => switch (kind) {
   'inventory' => ReportArtKind.inventory,
   'debts' => ReportArtKind.debts,
   'profit' => ReportArtKind.profit,
+  'personal' => ReportArtKind.personal,
   _ => ReportArtKind.overview,
 };
 

@@ -27,7 +27,7 @@ from app.domain.models.auth_models import (
     ResetTokenResponse,
     EmailChangeVerifyRequest,
 )
-from app.domain.services.auth_service import AuthService
+from app.domain.services.auth_service import AuthService, SessionLimitReached
 from app.infrastructure.repositories.sql_alchemy_auth_repository import (
     SQLAlchemyOrganizationRepository,
     SQLAlchemyUserRepository,
@@ -61,6 +61,15 @@ def _get_auth_service(db: AsyncSession) -> AuthService:
 
 def _client_info(request: Request) -> dict:
     ua = request.headers.get("User-Agent")
+    # The app reports its own version + platform; they ride on the stored
+    # user agent (no schema change) and are parsed back for the sessions
+    # screen (auth_service.parse_app_agent).
+    app_version = (request.headers.get("X-App-Version") or "").strip()[:40]
+    platform = (request.headers.get("X-Device-Platform") or "").strip()[:30]
+    if app_version and all(c.isalnum() or c in ".+-_" for c in app_version):
+        plat = "".join(c for c in platform if c.isalnum() or c in " ._-")
+        prefix = f"FyonaERP/{app_version}" + (f" ({plat})" if plat else "")
+        ua = f"{prefix} {ua or ''}".strip()
     if ua and len(ua) > 200:
         ua = ua[:200]
     # Behind nginx/docker the peer is the proxy: prefer X-Forwarded-For.
@@ -232,6 +241,8 @@ async def login(
             )
 
         return result
+    except SessionLimitReached as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
@@ -331,6 +342,7 @@ async def email_change_otp(
 async def email_change_verify(
     request: EmailChangeVerifyRequest,
     user_id: UUID = Depends(get_current_user_uuid),
+    caller_sid: Optional[UUID] = Depends(get_current_session_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Verify the OTP sent to the OLD email and apply a new email address."""
@@ -341,7 +353,8 @@ async def email_change_verify(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
         )
     try:
-        return await service.verify_email_change(user, request.otp, request.new_email)
+        return await service.verify_email_change(
+            user, request.otp, request.new_email, current_session_id=caller_sid)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -388,15 +401,26 @@ async def firebase_login(request: FirebaseAuthRequest, http_request: Request, db
                 action_payload="sessions",
             )
         return result
+    except SessionLimitReached as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
+async def refresh(
+    request: RefreshRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     service = _get_auth_service(db)
+    info = _client_info(http_request)
     try:
-        return await service.refresh_token(request.refresh_token)
+        return await service.refresh_token(
+            request.refresh_token,
+            ip_address=info["ip_address"],
+            user_agent=info["user_agent"],
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
@@ -509,6 +533,36 @@ async def update_my_phone(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+async def _retire_relay_devices(db: AsyncSession, session_ids: list[UUID]) -> None:
+    """A kicked device stops receiving Business relay operations at once:
+    its replica(s) are retired (it rejoins with a full copy if it signs in
+    again — business_relay.register). Best-effort: the relay tables exist
+    only on PostgreSQL deployments that enabled the relay."""
+    if not session_ids:
+        return
+    try:
+        if db.get_bind().dialect.name != "postgresql":
+            return
+        from sqlalchemy import select as _select, text as _text
+        from app.domain.services import business_relay as relay
+
+        conn = await db.connection()
+        present = await conn.scalar(
+            _text("SELECT to_regclass('business_relay_replicas') IS NOT NULL"))
+        if not present:
+            return
+        async with db.begin_nested():
+            rows = (await conn.execute(
+                _select(relay.replicas.c.id, relay.replicas.c.organization_id).where(
+                    relay.replicas.c.session_id.in_(session_ids),
+                    relay.replicas.c.retired.is_(False),
+                ))).all()
+            for rid, org in rows:
+                await relay._retire(conn, org, rid)
+    except Exception as exc:  # never fail the kick itself
+        logger.warning("relay_retire_on_kick_failed", error=str(exc))
+
+
 @router.get("/sessions")
 async def get_sessions(
     request: Request,
@@ -542,6 +596,7 @@ async def logout_session(
         try:
             await service.revoke_session(
                 user_id, UUID(str(session_id)), caller_session_id=caller_sid)
+            await _retire_relay_devices(db, [UUID(str(session_id))])
         except PermissionError as e:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail=str(e)
@@ -558,13 +613,22 @@ async def update_session_name(
     session_id: UUID,
     request: Request,
     user_id: UUID = Depends(get_current_user_uuid),
+    caller_sid: Optional[UUID] = Depends(get_current_session_id),
     db: AsyncSession = Depends(get_db),
 ):
     body = await request.json()
-    custom_name = body.get("custom_name", "")
+    custom_name = str(body.get("custom_name") or "")
     service = _get_auth_service(db)
+    if caller_sid is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="فقط الجهاز الرئيسي يمكنه إدارة الجلسات",
+        )
     try:
-        await service.update_session_custom_name(user_id, session_id, custom_name)
+        await service.update_session_custom_name(
+            user_id, session_id, custom_name, caller_session_id=caller_sid)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
@@ -596,6 +660,7 @@ async def logout_all_sessions(
         )
     # Only the primary device may wipe other sessions. The caller always
     # keeps its own session (self-logout happens via /sessions/logout).
+    await service.live_sessions(user_id)
     caller = await service._session_repo.get(caller_sid)
     if not caller or caller.user_id != user_id or not caller.is_primary:
         raise HTTPException(
@@ -607,12 +672,15 @@ async def logout_all_sessions(
     # can only ever be the caller's own here, so a sweep can never wipe it.
     # (Legacy path with no resolvable caller keeps the old safeguard below.)
     sessions = await service._session_repo.list_active_for_user(user_id)
+    kicked: list[UUID] = []
     for s in sessions:
         if exclude_session_id and str(s.id) == str(exclude_session_id):
             continue
         if s.is_primary and not exclude_session_id:
             continue  # Don't deactivate primary if no exclude specified
         await service._session_repo.deactivate(s.id)
+        kicked.append(s.id)
+    await _retire_relay_devices(db, kicked)
     # Invalidate old access tokens
     user = await service._user_repo.get_by_id(user_id)
     if user:

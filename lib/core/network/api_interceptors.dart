@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:dio/dio.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../storage/secure_storage.dart';
 
@@ -15,6 +16,7 @@ class DeviceIdentity {
   static String? _model;
   static String? _os;
   static String? _fingerprint;
+  static String? _appVersion;
   static bool _warming = false;
 
   /// Fire-and-forget warmup, call once at app start.
@@ -25,6 +27,12 @@ class DeviceIdentity {
   }
 
   static Future<void> refresh() async {
+    try {
+      final pkg = await PackageInfo.fromPlatform();
+      final v = pkg.version.trim();
+      final b = pkg.buildNumber.trim();
+      if (v.isNotEmpty) _appVersion = b.isNotEmpty ? '$v+$b' : v;
+    } catch (_) {}
     try {
       final plugin = DeviceInfoPlugin();
       if (Platform.isAndroid) {
@@ -74,6 +82,18 @@ class DeviceIdentity {
   static String? get model => _model;
   static String? get os => _os;
 
+  /// App version as "1.2.3+45" (null until warmed / in tests).
+  static String? get appVersion => _appVersion;
+
+  /// Platform family reported with every request (android, ios, …).
+  static String get platform {
+    try {
+      return Platform.operatingSystem;
+    } catch (_) {
+      return 'unknown';
+    }
+  }
+
   /// Stable per-device id, or null until warmed (tests / first launch).
   static String? get fingerprint => _fingerprint;
 
@@ -92,6 +112,7 @@ class DeviceIdentity {
     _model = null;
     _os = null;
     _fingerprint = null;
+    _appVersion = null;
     _warming = false;
   }
 }
@@ -131,6 +152,12 @@ class AuthInterceptor extends Interceptor {
     if (fingerprint != null && fingerprint.isNotEmpty) {
       options.headers['X-Device-Fingerprint'] = fingerprint;
     }
+    // App version + platform: shown per device on the sessions screen.
+    final appVersion = DeviceIdentity.appVersion;
+    if (appVersion != null && appVersion.isNotEmpty) {
+      options.headers['X-App-Version'] = appVersion;
+    }
+    options.headers['X-Device-Platform'] = DeviceIdentity.platform;
     handler.next(options);
   }
 

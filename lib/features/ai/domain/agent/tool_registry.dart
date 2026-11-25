@@ -315,6 +315,8 @@ class AgentToolRegistry {
       category: ToolCategory.write,
       riskLevel: RiskLevel.medium,
       entityType: 'bank',
+      // Moves money / changes a balance: a confirmation card first.
+      requiresConfirmation: true,
       params: [
         ParamSchema(name: 'account_id', type: ParamType.string, required: true, descriptionAr: 'معرف الحساب', descriptionEn: 'Account ID'),
         ParamSchema(name: 'bank_name', type: ParamType.string, required: false, descriptionAr: 'الاسم الجديد', descriptionEn: 'New name'),
@@ -381,6 +383,8 @@ class AgentToolRegistry {
       category: ToolCategory.write,
       riskLevel: RiskLevel.low,
       entityType: 'goal',
+      // Moves money / changes a balance: a confirmation card first.
+      requiresConfirmation: true,
       params: [
         ParamSchema(name: 'goal_id', type: ParamType.string, required: true, descriptionAr: 'معرف الهدف', descriptionEn: 'Goal ID'),
         ParamSchema(name: 'amount', type: ParamType.number, required: true, descriptionAr: 'المبلغ', descriptionEn: 'Amount', min: 0.01),
@@ -430,6 +434,8 @@ class AgentToolRegistry {
       category: ToolCategory.write,
       riskLevel: RiskLevel.medium,
       entityType: 'debt',
+      // Moves money / changes a balance: a confirmation card first.
+      requiresConfirmation: true,
       params: [
         ParamSchema(name: 'debt_id', type: ParamType.string, required: true, descriptionAr: 'معرف الدين', descriptionEn: 'Debt ID'),
         ParamSchema(name: 'person_name', type: ParamType.string, required: false, descriptionAr: 'الاسم الجديد', descriptionEn: 'New name'),
@@ -446,6 +452,8 @@ class AgentToolRegistry {
       category: ToolCategory.write,
       riskLevel: RiskLevel.medium,
       entityType: 'debt',
+      // Moves money / changes a balance: a confirmation card first.
+      requiresConfirmation: true,
       params: [
         ParamSchema(name: 'debt_id', type: ParamType.string, required: true, descriptionAr: 'معرف الدين', descriptionEn: 'Debt ID'),
         ParamSchema(name: 'amount', type: ParamType.number, required: true, descriptionAr: 'المبلغ المدفوع', descriptionEn: 'Payment amount', min: 0.01),
@@ -577,6 +585,8 @@ class AgentToolRegistry {
       category: ToolCategory.write,
       riskLevel: RiskLevel.medium,
       entityType: 'recurring',
+      // Moves money / changes a balance: a confirmation card first.
+      requiresConfirmation: true,
       params: [
         ParamSchema(name: 'recurring_id', type: ParamType.string, required: true, descriptionAr: 'معرف المعاملة المتكررة', descriptionEn: 'Recurring ID'),
       ],

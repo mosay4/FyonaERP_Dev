@@ -53,6 +53,22 @@ void main() {
       expect(m.isPrimary, isFalse);
       expect(m.ipAddress, isNull);
     });
+
+    test('app version, platform and device limit round-trip', () {
+      final m = SessionModel.fromJson({
+        ...base(),
+        'app_version': '2.4.1+77',
+        'platform': 'android',
+        'session_limit': 3,
+      });
+      expect(m.appVersion, '2.4.1+77');
+      expect(m.platform, 'android');
+      expect(m.sessionLimit, 3);
+      final again = SessionModel.fromJson(m.toJson());
+      expect(again.appVersion, '2.4.1+77');
+      expect(again.sessionLimit, 3);
+      expect(SessionModel.fromJson(base()).sessionLimit, isNull);
+    });
   });
 
   group('UserModel avatar', () {

@@ -37,6 +37,7 @@ static const String subscription = '/subscription';
   static const String personalAnalytics = '/personal/analytics';
   static const String personalReportsCenter = '/personal/reports-center';
   static const String personalReports = '/personal/reports';
+  static const String personalReportsView = '/personal/reports/view';
   static const String personalBanks = '/personal/banks';
   static const String personalDebts = '/personal/debts';
   static const String personalAi = '/personal/ai';
