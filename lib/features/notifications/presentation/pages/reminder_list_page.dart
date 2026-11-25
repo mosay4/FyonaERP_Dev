@@ -12,6 +12,7 @@ import '../../data/models/notification_models.dart';
 import '../../../../core/localization/app_localizations.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../../../core/utils/time_format.dart';
 
 class ReminderListPage extends ConsumerStatefulWidget {
   ReminderListPage({super.key});
@@ -188,9 +189,7 @@ class _ReminderListPageState extends ConsumerState<ReminderListPage> {
     } else {
       dayLabel = '${local.day}/${local.month}/${local.year}';
     }
-    final hh = local.hour.toString().padLeft(2, '0');
-    final mm = local.minute.toString().padLeft(2, '0');
-    return '$dayLabel $hh:$mm';
+    return '$dayLabel ${formatClock(local, context: context)}';
   }
 
   String _repeatLabel(String repeat) {

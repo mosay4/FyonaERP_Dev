@@ -8,6 +8,7 @@ import '../../../../core/utils/currency_formatter.dart' as cf;
 import '../../data/invoice_design_models.dart';
 import '../../data/invoice_doc.dart';
 import '../../data/invoice_labels.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// Invoice PDF templates (Business).
 ///
@@ -73,8 +74,7 @@ String _date(DateTime? dt, String raw) {
 
 String _time(DateTime? dt) {
   if (dt == null) return '';
-  String two(int n) => n.toString().padLeft(2, '0');
-  return '${two(dt.hour)}:${two(dt.minute)}';
+  return formatClock(dt);
 }
 
 pw.Widget _logoOrBrand(InvoiceDesignPreset d, double size) {

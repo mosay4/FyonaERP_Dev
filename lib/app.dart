@@ -23,6 +23,8 @@ import 'shared/services/notification_service.dart';
 import 'shared/services/notification_router.dart';
 import 'features/personal/services/recurring_reminder_service.dart';
 import 'core/services/fcm_service.dart';
+import 'features/subscription/domain/section_access.dart';
+import 'features/subscription/presentation/providers/subscription_providers.dart';
 import 'features/personal/presentation/providers/merchant_unread_provider.dart';
 import 'features/employees/presentation/widgets/employee_presence_host.dart';
 import 'features/auth/presentation/auth_forced_dark.dart';
@@ -197,6 +199,19 @@ class _AppLockOverlayState extends ConsumerState<_AppLockOverlay>
     WidgetsBinding.instance.addObserver(this);
     setCurrentLocale(ref.read(localeProvider).languageCode);
     MoneyFormatService.loadAll();
+    // A Personal reminder (debt, recurring, Sara) tapped while the app was
+    // left in Business opens in Personal — never the Business home.
+    NotificationRouter.prepareSection = (route) async {
+      if (!route.startsWith('/personal')) return;
+      final auth = ref.read(authProvider);
+      if (!auth.isAuthenticated) return;
+      if (auth.user?.preferredUsageMode != 'business') return;
+      // Never into a section this account has no access to.
+      final status = ref.read(subscriptionStatusProvider).valueOrNull;
+      if (status != null && !hasSectionAccess(status, 'personal')) return;
+      ref.read(activeSectionProvider.notifier).state = AppSection.personal;
+      await ref.read(authProvider.notifier).setUsageMode('personal');
+    };
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       setCurrentLocale(ref.read(localeProvider).languageCode);
@@ -334,6 +349,16 @@ class _AppLockOverlayState extends ConsumerState<_AppLockOverlay>
     // navigation underneath — splash → account entry → home — can never
     // remove or duplicate it, and unlocking reveals exactly where the user
     // was. Fingerprint success or the right PIN unlocks at once.
+    // A tap that waited while the app was locked opens right after unlock.
+    ref.listen<bool>(sessionTimeoutProvider.select((s) => s.locked), (was, now) {
+      if (was == true && !now) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          try {
+            NotificationRouter.flushPending();
+          } catch (_) {}
+        });
+      }
+    });
     final locked = ref.watch(sessionTimeoutProvider.select((s) => s.locked));
     return Stack(
       children: [

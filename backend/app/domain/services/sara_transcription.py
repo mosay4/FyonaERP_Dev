@@ -1,6 +1,7 @@
 """Bounded local speech recognition, separate from the chat model."""
 import asyncio
 import os
+import sys
 import tempfile
 from app.core.config import settings
 
@@ -8,12 +9,35 @@ _gate = asyncio.Semaphore(1)
 _model = None
 
 
-def _transcribe(content, language):
+def _load():
     global _model
-    from faster_whisper import WhisperModel, BatchedInferencePipeline
     if _model is None:
-        _model = WhisperModel(settings.SARA_STT_MODEL, device='cpu',
-                             compute_type='int8', cpu_threads=2, num_workers=1)
+        from faster_whisper import WhisperModel
+        options = dict(device='cpu', compute_type='int8', cpu_threads=2, num_workers=1)
+        try:
+            # Cached model: no round trip to the model hub on load.
+            _model = WhisperModel(settings.SARA_STT_MODEL, local_files_only=True, **options)
+        except Exception:
+            _model = WhisperModel(settings.SARA_STT_MODEL, **options)
+    return _model
+
+
+async def preload():
+    """Loads the model once at startup, off the event loop, so the first
+    voice message does not also pay the model load (several seconds).
+    Phones recognize speech themselves now; this path is the fallback."""
+    if not settings.SARA_STT_PRELOAD or 'pytest' in sys.modules:
+        return
+    try:
+        async with _gate:
+            await asyncio.to_thread(_load)
+    except Exception:  # pragma: no cover - optional dependency / model files
+        pass
+
+
+def _transcribe(content, language):
+    from faster_whisper import BatchedInferencePipeline
+    model = _load()
     name = None
     try:
         with tempfile.NamedTemporaryFile(suffix='.audio', delete=False) as file:
@@ -21,9 +45,10 @@ def _transcribe(content, language):
             name = file.name
         # Batch short speech windows instead of decoding the entire recording
         # serially with five competing beams on a two-core server.
-        segments, info = BatchedInferencePipeline(model=_model).transcribe(
+        segments, info = BatchedInferencePipeline(model=model).transcribe(
             name, language=language, batch_size=4,
-            vad_filter=True, beam_size=1, condition_on_previous_text=False)
+            vad_filter=True, beam_size=1, condition_on_previous_text=False,
+            without_timestamps=True)
         if info.duration > 660:
             raise ValueError('التسجيل أطول من عشر دقائق. أرسل تسجيلًا أقصر.')
         # Consume every segment, never a truncated first chunk.
@@ -36,7 +61,7 @@ def _transcribe(content, language):
             samples = decode_audio(name)
             rms = float(np.sqrt(np.mean(samples * samples))) if len(samples) else 0
             if rms > 0.001:
-                retry, _ = _model.transcribe(samples, language=language, beam_size=1,
+                retry, _ = model.transcribe(samples, language=language, beam_size=1,
                     vad_filter=False, condition_on_previous_text=False)
                 text = ' '.join(segment.text.strip() for segment in retry).strip()
         return text

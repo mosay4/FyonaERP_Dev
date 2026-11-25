@@ -26,6 +26,7 @@ import 'package:fyona_flutter/features/employees/presentation/providers/employee
 import 'package:fyona_flutter/shared/providers/current_user_provider.dart';
 import 'package:fyona_flutter/shared/widgets/currency_selector.dart';
 import 'package:fyona_flutter/shared/widgets/dots_loader.dart';
+import 'package:fyona_flutter/shared/widgets/exchange_rate_override.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -503,6 +504,99 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       await withDisk(lab.store.close);
+    },
+    skip: !DirectoryPilotBuild.signupEnabled,
+  );
+
+  testWidgets(
+    'المصارفة: a manual rate (pencil) drives the preview and the stored leg',
+    (tester) async {
+      final lab = _BankLab();
+      final till = _id();
+      final office = _id();
+      await tester.runAsync(() async {
+        await lab.setup();
+        await AppLocalizations.preload('ar');
+        await lab.seed('صندوق الدولار', 'USD', 10000, till);
+        await lab.seed('بنك الريال', 'SAR', 0, office);
+        await lab.seed('كاش', 'SAR', 0, _id());
+      });
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: lab.container,
+          child: MaterialApp(
+            locale: const Locale('ar'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            home: const Scaffold(body: BusinessBanksPage()),
+          ),
+        ),
+      );
+      Future<void> until(Finder target) async {
+        for (var i = 0; i < 80; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 12)),
+          );
+          await tester.pump(const Duration(milliseconds: 25));
+          if (target.evaluate().isNotEmpty) return;
+        }
+        expect(target, findsWidgets);
+      }
+
+      Future<void> tap(Finder finder) async {
+        await tester.tap(finder);
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> choose(String field, String bank) async {
+        await tap(find.text(field));
+        await tap(
+          find.descendant(of: find.byType(BottomSheet), matching: find.text(bank)),
+        );
+      }
+
+      await until(find.text('صندوق الدولار'));
+      await tap(find.text('المصارفة'));
+      await choose('من حساب', 'صندوق الدولار');
+      await choose('إلى حساب', 'بنك الريال');
+      await tester.enterText(find.byType(EditableText).last, '2');
+      await tester.pumpAndSettle();
+      final sar = currencySymbol('SAR');
+      expect(find.text(fmtNum(7.5)), findsWidgets);
+      expect(find.text(formatCurrencyRateLine('USD', 3.75, 'SAR')), findsOneWidget);
+
+      await tap(find.byKey(ExchangeRateOverrideLine.editKey));
+      await tester.enterText(find.byKey(ExchangeRateOverrideLine.fieldKey), '4');
+      await tap(find.byKey(ExchangeRateOverrideLine.saveKey));
+      expect(find.text(fmtNum(8)), findsWidgets,
+          reason: 'the received preview follows the manual rate live');
+      expect(find.text('يدوي'), findsOneWidget);
+
+      final save = tester
+          .widget<ElevatedButton>(
+            find.ancestor(
+              of: find.text('تحويل'),
+              matching: find.byWidgetPredicate((w) => w is ElevatedButton),
+            ),
+          )
+          .onPressed!;
+      await tester.runAsync(() async => save());
+      await until(find.text('تمت المصارفه بنجاح'));
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      List<Map<String, dynamic>>? rows;
+      await tester.runAsync(() async {
+        rows = await lab.bank.history([till, office]);
+      });
+      final received = rows!.where((row) => row['tx_type'] == 'transfer_in');
+      expect(received.map((row) => double.parse('${row['amount']}')), [8.0]);
+      expect(received.map((row) => row['exchange_rate']), ['4.00000000']);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(lab.store.close);
     },
     skip: !DirectoryPilotBuild.signupEnabled,
   );

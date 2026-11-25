@@ -20,6 +20,7 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 import 'account_tree_report_pdf.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 class PersonalAccountTreePage extends ConsumerStatefulWidget {
   const PersonalAccountTreePage({super.key});
@@ -521,7 +522,7 @@ class _AccountLeaf extends StatelessWidget {
           child: Text(typeLabel, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 9), color: AppColors.textDisabled)),
         ),
         const SizedBox(width: 10),
-        Text('${fmtNum(account.balance)} ${currencySymbol(account.currency)}', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        MoneyText(amount: fmtNum(account.balance), currency: currencySymbol(account.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
       ]),
     );
   }
@@ -609,7 +610,7 @@ class _DebtTreeNode extends StatelessWidget {
         const SizedBox(height: 8),
         Row(children: [
           Text('${AppLocalizations.of(context).translate('remainingLabel')}: ', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), color: AppColors.textSecondary)),
-          Text('${fmtNum(debt.remaining)} ${currencySymbol(debt.currency)}', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 12), fontWeight: FontWeight.w700, color: color)),
+          MoneyText(amount: fmtNum(debt.remaining), currency: currencySymbol(debt.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 12), fontWeight: FontWeight.w700, color: color)),
         ]),
         const SizedBox(height: 8),
         ClipRRect(

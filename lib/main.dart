@@ -339,14 +339,19 @@ class _AppWithSyncState extends ConsumerState<_AppWithSync>
       try {
         RecurringReminderService.rescheduleAll();
       } catch (_) {}
+      // A tapped debt reminder is seen: its in-app alarm page must not pop
+      // over the debt the tap opens.
+      AlarmTapBridge.onTap = (kind, refId) {
+        if (kind == 'debt') unawaited(DebtReminderService.acknowledgeTap(refId));
+      };
+      // Native alarm tap (new bridge) first — before any store work, so the
+      // tap is queued the moment the app starts (killed app, offline).
+      final bridgedTap = AlarmTapBridge.consumeAndRoute().catchError((_) => false);
       DebtReminderService.init().then((_) async {
         await DebtReminderService.rescheduleAll();
-        // Native alarm tap (new bridge) wins; the legacy debt-id flow is
-        // the fallback when no generic payload is pending.
-        var bridged = false;
-        try {
-          bridged = await AlarmTapBridge.consumeAndRoute();
-        } catch (_) {}
+        // The legacy debt-id flow is the fallback when no generic payload
+        // was pending.
+        final bridged = await bridgedTap;
         if (bridged) return;
         final initialId = await DebtReminderService.getInitialAlarmDebtId();
         if (initialId != null && initialId.isNotEmpty && mounted) {

@@ -15,6 +15,8 @@ import '../widgets/add_transaction_sheet.dart';
 import 'package:intl/intl.dart';
 import 'package:fyona_flutter/core/utils/currency_formatter.dart' show fmtNum, currencySymbol, currencyName;
 import 'package:fyona_flutter/core/responsive/r_api.dart';
+import '../../../../core/utils/time_format.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 String _currencySymbol(String code) => currencySymbol(code);
 
@@ -177,7 +179,7 @@ class _PersonalAccountDetailPageState extends ConsumerState<PersonalAccountDetai
       title: typeLabel,
       amount: t.amount,
       currencySymbol: currencySymbol(t.currency),
-      dateTime: DateFormat('yyyy/MM/dd HH:mm').format(t.date ?? DateTime.now()),
+      dateTime: formatDateTimeDisplay(t.date ?? DateTime.now()),
       details: [
         if (account != null)
           ReceiptDetail(label: _l10n.translate('currencyDetail'), value: '${isCashAccount(account.bankName) ? cashDisplayName() : account.bankName} (${currencySymbol(account.currency)})'),
@@ -209,7 +211,7 @@ class _PersonalAccountDetailPageState extends ConsumerState<PersonalAccountDetai
       title: _l10n.translate('bankStatementTitle', params: {'bankName': account.bankName}),
       amount: _groupBalance(ref.read(personalFinanceProvider), account, currency),
       currencySymbol: sym,
-      dateTime: DateFormat('yyyy/MM/dd HH:mm').format(DateTime.now()),
+      dateTime: formatDateTimeDisplay(DateTime.now()),
       details: [
         ReceiptDetail(label: _l10n.translate('currencyDetail'), value: currency),
         ReceiptDetail(label: _l10n.translate('statementPeriod'), value: '$fromStr / $toStr'),
@@ -356,15 +358,12 @@ class _PersonalAccountDetailPageState extends ConsumerState<PersonalAccountDetai
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: AlignmentDirectional.centerEnd,
-                child: Text('${fmtNum(balance)} $sym',
-                maxLines: 1,
-                style: TextStyle(
+                child: MoneyText(amount: fmtNum(balance), currency: sym, style: TextStyle(
                   fontFamily: 'Cairo',
                   fontSize: R.fontSize(context, 17),
                   fontWeight: FontWeight.w700,
                   color: balance >= 0 ? AppColors.success : AppColors.danger,
-                ),
-              ),
+                )),
             ),
           ),
         ],

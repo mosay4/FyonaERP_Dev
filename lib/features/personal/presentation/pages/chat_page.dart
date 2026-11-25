@@ -36,6 +36,7 @@ import '../../data/active_chat.dart';
 import '../widgets/chat_style.dart';
 import '../widgets/chat_video_surface.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// Isolated chat between a merchant and one LINKED customer/supplier.
 /// Direction is SIDE-based (merchant/personal), so the same account can be
@@ -3480,8 +3481,7 @@ class _ChatBubbleState extends State<_ChatBubble>
     final d = DateTime.tryParse(iso);
     if (d == null) return '';
     final l = d.toLocal();
-    return '${l.hour.toString().padLeft(2, '0')}:'
-        '${l.minute.toString().padLeft(2, '0')}';
+    return formatClock(l, context: context);
   }
 }
 

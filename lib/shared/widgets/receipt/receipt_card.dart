@@ -1,8 +1,8 @@
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:fyona_flutter/core/localization/app_localizations.dart';
 import 'package:fyona_flutter/core/utils/currency_formatter.dart';
 import 'receipt_data.dart';
+import '../money_text.dart';
 import '../../../features/personal/presentation/providers/receipt_design_models.dart';
 
 class ReceiptCard extends StatelessWidget {
@@ -113,10 +113,12 @@ class ReceiptCard extends StatelessWidget {
           style: TextStyle(fontFamily: 'Cairo', fontSize: 11 * s, fontWeight: FontWeight.w600, color: _p.secondaryTextColor, letterSpacing: 0.5 * s),
         ),
         SizedBox(height: 10 * s),
-        Text('${fmtNum(data.amount)} ${data.currencySymbol}',
+        MoneyText(
+          amount: fmtNum(data.amount),
+          currency: data.currencySymbol,
+          alignment: Alignment.center,
+          currencyScale: .45,
           style: TextStyle(fontFamily: 'Cairo', fontSize: 34 * s, fontWeight: FontWeight.w800, color: _p.amountColor, height: 1.1),
-          textDirection: ui.TextDirection.ltr,
-          textAlign: TextAlign.center,
         ),
       ],
     );
@@ -233,10 +235,14 @@ class ReceiptCard extends StatelessWidget {
             ),
             SizedBox(width: 8 * s),
             Flexible(
-              child: Text(data.dateTime,
-                textAlign: TextAlign.end,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontFamily: 'Cairo', fontSize: 9 * s, color: _p.secondaryTextColor.withAlpha(200)),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: AlignmentDirectional.centerEnd,
+                child: Text(data.dateTime,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(fontFamily: 'Cairo', fontSize: 9 * s, color: _p.secondaryTextColor.withAlpha(200)),
+                ),
               ),
             ),
           ],

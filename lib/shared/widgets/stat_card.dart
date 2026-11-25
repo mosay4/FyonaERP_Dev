@@ -109,8 +109,13 @@ class StatCard extends StatelessWidget {
               ],
             ),
              SizedBox(height: 14),
-            Text(
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: AlignmentDirectional.centerStart,
+              child: Text(
               value,
+              maxLines: 1,
+              softWrap: false,
               style: TextStyle(
                 fontFamily: 'Cairo',
                 fontSize: R.fontSize(context, 24),
@@ -118,6 +123,7 @@ class StatCard extends StatelessWidget {
                 color: AppColors.textPrimary,
                 height: 1.1,
               ),
+            ),
             ),
              SizedBox(height: 4),
             Text(

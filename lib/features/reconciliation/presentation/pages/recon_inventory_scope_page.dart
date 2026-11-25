@@ -10,7 +10,6 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/services/scan_sfx.dart';
 import '../../../inventory/presentation/providers/warehouse_settings.dart';
 import '../widgets/recon_art.dart';
-import '../widgets/recon_scenes.dart';
 import '../widgets/recon_widgets.dart';
 
 /// Inventory reconciliation scope — THREE SQUARE cards (icon + name +
@@ -50,10 +49,7 @@ class ReconInventoryScopePage extends ConsumerWidget {
         'full'
       ),
     ];
-    // Opening motion (shelf count) before the scope cards.
-    return ReconOpeningGate(
-      scene: ReconOpenScene.inventory,
-      child: Scaffold(
+    return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
@@ -94,7 +90,6 @@ class ReconInventoryScopePage extends ConsumerWidget {
           ),
         ),
       ),
-    ),
     );
   }
 }

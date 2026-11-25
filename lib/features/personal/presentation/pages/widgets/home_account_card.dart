@@ -409,8 +409,13 @@ class _WalletCard extends StatelessWidget {
                       return Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            '${fmtNum(account.balance)}',
+                          // Long balances shrink to fit — never cut.
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                            fmtNum(account.balance),
+                            maxLines: 1,
+                            softWrap: false,
                             style: TextStyle(
                               fontFamily: 'Cairo',
                               fontSize: R.fontSize(context, 22),
@@ -418,6 +423,7 @@ class _WalletCard extends StatelessWidget {
                               color: Colors.white,
                               height: 1.0,
                             ),
+                          ),
                           ),
                           const SizedBox(height: 6),
                           Container(
@@ -427,16 +433,19 @@ class _WalletCard extends StatelessWidget {
                               borderRadius: BorderRadius.circular(5),
                               border: Border.all(color: Colors.white.withAlpha(40), width: 0.5),
                             ),
-                            child: Text(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
                               curLabel,
                               maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                              softWrap: false,
                               style: TextStyle(
                                 fontFamily: 'Cairo',
                                 fontSize: R.fontSize(context, 9),
                                 fontWeight: FontWeight.w600,
                                 color: Colors.white.withAlpha(220),
                               ),
+                            ),
                             ),
                           ),
                         ],

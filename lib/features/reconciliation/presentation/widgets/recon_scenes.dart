@@ -1,8 +1,8 @@
 // Reconciliation motions (2026-11):
-//  - [ReconOpeningGate]: one short opening scene per reconciliation section
+//  - [runReconMatching]: one short matching scene per reconciliation section
 //    (financial: a ledger balance levelling; inventory: boxes landing on a
-//    shelf and being counted), played while the page warms underneath, then
-//    revealed with a soft fade. Back during the motion leaves the page.
+//    shelf and being counted), played after «بدء المطابقة» while the check
+//    runs, then the results open. Back during the motion leaves it.
 //  - [ReconSettleMark]: the «balanced» moment after a settlement — two bars
 //    (system / actual) converge, merge, and a check draws (< 1 s).
 // Sounds: tools/recon_scene_sounds.py renders every cue from these keyframes.
@@ -141,40 +141,85 @@ class ReconSceneSound {
   }
 }
 
-// ─────────────────────────────────────────────────────────────── opening
+// ─────────────────────────────────────────────────────────────── matching
 
-/// Wraps a reconciliation section page: the scene covers it while it warms
-/// (the page is built underneath from the first frame), then fades away.
-/// With reduced motion the page shows at once, silently.
-class ReconOpeningGate extends StatefulWidget {
-  const ReconOpeningGate({
+/// What [runReconMatching] ended with.
+class ReconMatchOutcome<T> {
+  const ReconMatchOutcome._(this.result, this.error, this.left);
+  const ReconMatchOutcome.done(T result) : this._(result, null, false);
+  const ReconMatchOutcome.failed(Object error) : this._(null, error, false);
+
+  /// The user went back during the motion (the check itself still runs).
+  const ReconMatchOutcome.left() : this._(null, null, true);
+
+  final T? result;
+  final Object? error;
+  final bool left;
+  bool get ok => !left && error == null;
+}
+
+/// Plays the section's matching motion over the page after «بدء المطابقة»
+/// (financial: ledger balance levelling; inventory: boxes counted on a
+/// shelf). The motion holds before its last beat until [future] completes,
+/// then the closing cue plays and the scene closes with the outcome so the
+/// caller can open the results. A failure closes it at once (no chime).
+Future<ReconMatchOutcome<T>> runReconMatching<T>(
+  BuildContext context, {
+  required ReconOpenScene scene,
+  required Future<T> future,
+  Duration duration = kReconOpenDuration,
+}) async {
+  final outcome = await Navigator.of(context).push<ReconMatchOutcome<T>>(
+    PageRouteBuilder<ReconMatchOutcome<T>>(
+      transitionDuration: const Duration(milliseconds: 180),
+      reverseTransitionDuration: kReconRevealDuration,
+      pageBuilder: (_, _, _) => ReconMatchingScene<T>(
+        scene: scene,
+        future: future,
+        duration: duration,
+      ),
+      transitionsBuilder: (_, animation, _, child) => FadeTransition(
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+        child: child,
+      ),
+    ),
+  );
+  return outcome ?? ReconMatchOutcome<T>.left();
+}
+
+/// The full-screen matching motion; pops its route with a
+/// [ReconMatchOutcome]. With reduced motion it stays still and silent and
+/// closes as soon as [future] completes.
+class ReconMatchingScene<T> extends StatefulWidget {
+  const ReconMatchingScene({
     super.key,
     required this.scene,
-    required this.child,
-    this.ready = true,
+    required this.future,
     this.duration = kReconOpenDuration,
   });
   final ReconOpenScene scene;
-  final Widget child;
-
-  /// `false` holds the motion before its final beat (data still loading).
-  final bool ready;
+  final Future<T> future;
   final Duration duration;
 
   @override
-  State<ReconOpeningGate> createState() => _ReconOpeningGateState();
+  State<ReconMatchingScene<T>> createState() => _ReconMatchingSceneState<T>();
 }
 
-class _ReconOpeningGateState extends State<ReconOpeningGate>
-    with TickerProviderStateMixin {
+class _ReconMatchingSceneState<T> extends State<ReconMatchingScene<T>>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _timeline = AnimationController(vsync: this);
-  late final AnimationController _reveal = AnimationController(
-    vsync: this,
-    duration: kReconRevealDuration,
-  );
-  final Completer<void> _ready = Completer<void>();
+  final Completer<ReconMatchOutcome<T>> _outcome = Completer();
   ReconSceneSound? _sound;
-  bool _started = false, _covered = true, _waiting = false;
+  bool _started = false, _waiting = false, _closed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.future.then(
+      (value) => _outcome.complete(ReconMatchOutcome<T>.done(value)),
+      onError: (Object e) => _outcome.complete(ReconMatchOutcome<T>.failed(e)),
+    );
+  }
 
   @override
   void didChangeDependencies() {
@@ -182,17 +227,18 @@ class _ReconOpeningGateState extends State<ReconOpeningGate>
     if (_started) return;
     _started = true;
     if (_reducedMotion(context)) {
-      _covered = false;
+      _timeline.value = kReconOpenHold;
+      _waiting = true;
+      unawaited(_outcome.future.then(_close));
       return;
     }
-    if (widget.ready) _ready.complete();
     unawaited(_run());
   }
 
-  @override
-  void didUpdateWidget(covariant ReconOpeningGate old) {
-    super.didUpdateWidget(old);
-    if (widget.ready && !_ready.isCompleted) _ready.complete();
+  void _close(ReconMatchOutcome<T> outcome) {
+    if (!mounted || _closed) return;
+    _closed = true;
+    Navigator.of(context).pop(outcome);
   }
 
   Future<void> _run() async {
@@ -212,21 +258,23 @@ class _ReconOpeningGateState extends State<ReconOpeningGate>
             curve: Curves.linear,
           )
           .orCancel;
-      if (!_ready.isCompleted) {
+      if (!_outcome.isCompleted) {
         setState(() => _waiting = true);
-        await _ready.future;
-        if (!mounted) return;
-        setState(() => _waiting = false);
       }
+      final outcome = await _outcome.future;
+      if (!mounted) return;
+      if (!outcome.ok) {
+        _close(outcome);
+        return;
+      }
+      setState(() => _waiting = false);
       sound.fire(1);
       await _timeline
           .animateTo(1, duration: widget.duration * (1 - kReconOpenHold))
           .orCancel;
-      await _reveal.forward().orCancel;
-      if (!mounted) return;
       unawaited(sound.dispose(linger: true));
       _sound = null;
-      setState(() => _covered = false);
+      _close(outcome);
     } on TickerCanceled {
       // Left (back) during the motion.
     }
@@ -235,35 +283,16 @@ class _ReconOpeningGateState extends State<ReconOpeningGate>
   @override
   void dispose() {
     _timeline.dispose();
-    _reveal.dispose();
     unawaited(_sound?.dispose());
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    // The page keeps the same slot (index 0) before and after the reveal,
-    // so its state is never rebuilt from scratch.
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        widget.child,
-        if (_covered)
-          AnimatedBuilder(
-            animation: _reveal,
-            builder: (context, child) => Opacity(
-              opacity: 1 - Curves.easeOut.transform(_reveal.value),
-              child: child,
-            ),
-            child: _OpeningStage(
-              scene: widget.scene,
-              timeline: _timeline,
-              waiting: _waiting,
-            ),
-          ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => _OpeningStage(
+    scene: widget.scene,
+    timeline: _timeline,
+    waiting: _waiting,
+  );
 }
 
 class _OpeningStage extends StatelessWidget {

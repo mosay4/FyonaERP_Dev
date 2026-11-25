@@ -727,9 +727,12 @@ class _BranchInventoryPickerPageState
                             (u) => DropdownMenuItem(
                               value: '${u['id']}',
                               child: Row(children: [
-                                if (BusinessUnitImage.has(u['image'])) ...[
+                                if (businessUnitDisplayImage(u,
+                                        product: selection.product) !=
+                                    null) ...[
                                   BusinessUnitImage(
-                                      image: '${u['image']}',
+                                      image: businessUnitDisplayImage(u,
+                                          product: selection.product),
                                       size: 22,
                                       radius: 6),
                                   const SizedBox(width: 6),

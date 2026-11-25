@@ -18,7 +18,7 @@ import '../../../core_business/data/local_directory/directory_scope.dart';
 import '../../../inventory/presentation/providers/inventory_providers.dart';
 import '../../../purchases/presentation/pages/barcode_scan_page.dart';
 import '../../data/reconciliation_api.dart';
-import '../widgets/recon_motion.dart';
+import '../widgets/recon_scenes.dart';
 import '../widgets/recon_widgets.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 
@@ -309,46 +309,26 @@ class _ReconInventoryCountPageState
       if (!_active) throw const DirectoryAccessDenied();
       return api.inventoryCheck(reconId: id);
     }();
-    void openResult(Map<String, dynamic> result) =>
-        context.push(RouteNames.reconciliationInventoryResult, extra: {
-          'record': result,
-          if (widget.localLink != null) 'local': widget.localLink!,
-        });
-    if (api.isDeviceLedger) {
-      try {
-        final checked = await future;
-        if (_active) openResult(checked);
-      } catch (e) {
-        if (_active) showReconError(context, e);
-      } finally {
-        if (mounted) setState(() => _busy = false);
-      }
+    // The inventory matching motion plays now (after «تنفيذ المطابقة»),
+    // while the counts are saved and checked; the results open after it.
+    final outcome = await runReconMatching(
+      context,
+      scene: ReconOpenScene.inventory,
+      future: future,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (outcome.left) return;
+    final error = outcome.error;
+    if (error != null) {
+      showReconError(context, error);
       return;
     }
-    unawaited(Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ReconCoreOverlay(
-        variant: switch ('${_rec['scope']}') {
-          'product' => ReconSceneVariant.inventoryProduct,
-          'category' => ReconSceneVariant.inventoryCategory,
-          _ => ReconSceneVariant.inventoryFull,
-        },
-        processingText: l10n.translate('reconProcessing'),
-        future: future,
-        onResult: (_, result) {
-          if (!mounted) return;
-          setState(() => _busy = false);
-          context.pop();
-          if (_active) openResult(Map<String, dynamic>.from(result as Map));
-        },
-        onError: (_, e) {
-          if (mounted) {
-            setState(() => _busy = false);
-            context.pop();
-            showReconError(context, e);
-          }
-        },
-      ),
-    )));
+    if (!_active) return;
+    unawaited(context.push(RouteNames.reconciliationInventoryResult, extra: {
+      'record': Map<String, dynamic>.from(outcome.result as Map),
+      if (widget.localLink != null) 'local': widget.localLink!,
+    }));
   }
 
   @override

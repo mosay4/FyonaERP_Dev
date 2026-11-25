@@ -22,6 +22,7 @@ import '../../../../shared/widgets/two_tone_icon.dart';
 import '../../../../shared/widgets/two_tone_icons.dart';
 import '../../data/models/session_model.dart';
 import '../providers/auth_provider.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// Default device cap when an older server does not report one.
 const int kDefaultSessionLimit = 3;
@@ -951,7 +952,7 @@ class _SessionsPageState extends ConsumerState<SessionsPage> {
   String _absolute(DateTime date) {
     final d = date.toLocal();
     String two(int v) => v.toString().padLeft(2, '0');
-    return '${d.year}/${two(d.month)}/${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
+    return '${d.year}/${two(d.month)}/${two(d.day)} ${formatClock(d)}';
   }
 }
 

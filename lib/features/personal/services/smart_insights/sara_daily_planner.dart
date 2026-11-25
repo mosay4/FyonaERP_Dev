@@ -13,8 +13,11 @@ import 'sara_notice_composer.dart';
 //
 // Guarantees:
 //  - at most ONE digest per calendar day;
-//  - a day whose digest already fired is never scheduled again (even if
-//    the user moves the time later the same day);
+//  - a day whose digest already fired is not scheduled again — unless the
+//    user changed the time AFTER it fired and the new time is still ahead
+//    that day: the chosen time always holds (one pending alarm per day);
+//  - the chosen time always gets a notification: when nothing new is
+//    worth saying, a short check-in is sent;
 //  - warnings respect a cooldown (same warning ≤ once every 3 days,
 //    and never in a digest after an instant alert said it already).
 // ─────────────────────────────────────────────────────────────
@@ -101,8 +104,15 @@ class SaraDailyPlanner {
     required SaraTr tr,
     required SaraMoney money,
     int days = daysAhead,
+    int? lastFiredAtMs,
+    int? timeChangedAtMs,
   }) {
     final out = <SaraSlot>[];
+    // The time was changed after the last digest fired: its day may get
+    // one more digest at the new time (the owner expects the new time to
+    // hold the same day).
+    final retimed = timeChangedAtMs != null &&
+        timeChangedAtMs > (lastFiredAtMs ?? _dayStartMs(lastFiredDay));
     final h = (minutesOfDay ~/ 60).clamp(0, 23);
     final m = (minutesOfDay % 60).clamp(0, 59);
     var first = true;
@@ -111,7 +121,10 @@ class SaraDailyPlanner {
       final fireAt = DateTime(day.year, day.month, day.day, h, m);
       if (!fireAt.isAfter(now.add(const Duration(seconds: 30)))) continue;
       final key = dayKey(day);
-      if (lastFiredDay != null && key.compareTo(lastFiredDay) <= 0) continue;
+      if (lastFiredDay != null && key.compareTo(lastFiredDay) <= 0 &&
+          !(retimed && key == lastFiredDay)) {
+        continue;
+      }
       final analysis = SaraInsightEngine.analyze(input.atTime(fireAt));
       final notice = SaraNoticeComposer.digest(
         analysis,
@@ -119,13 +132,24 @@ class SaraDailyPlanner {
         allowed: (k) => cooldownAllows(cooldown, k, key),
         tr: tr,
         money: money,
-      );
+      ) ?? checkIn(tr);
       first = false;
-      if (notice == null) continue;
       out.add(SaraSlot(fireAt: fireAt, dayKey: key, notice: notice));
     }
     return out;
   }
+
+  static int _dayStartMs(String? day) =>
+      (day == null ? null : parseDayKey(day))?.millisecondsSinceEpoch ?? 0;
+
+  /// The digest of a day with nothing new to say: the user chose this time,
+  /// so Sara still shows up — a calm check-in that opens the wallet.
+  static SaraNotice checkIn(SaraTr tr) => SaraNotice(
+        kind: 'checkIn',
+        title: tr('saraNotifCheckInTitle'),
+        body: tr('saraNotifCheckInBody'),
+        route: SaraRoutes.transactions,
+      );
 
   /// Cooldown map after scheduling [slots]: releases the reservations of
   /// digests that have NOT fired yet (they are being re-planned now), then

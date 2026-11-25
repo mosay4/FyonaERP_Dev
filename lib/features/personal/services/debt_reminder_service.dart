@@ -11,6 +11,7 @@ import '../data/ledger/personal_reminder_store.dart';
 import '../data/models/personal_models.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/router/shell_keys.dart';
+import '../../../shared/services/alarm_tap_bridge.dart';
 import '../../../shared/services/reminder_codec.dart';
 import '../../../shared/widgets/two_tone_icon.dart';
 import '../../../shared/widgets/two_tone_icons.dart';
@@ -46,27 +47,46 @@ class DebtReminderService {
       try {
         await _native.invokeMethod('createAlarmChannel');
       } catch (_) {}
-      // Listen for alarm fired while app is in foreground
+      // A reminder notification tapped while the app is running (debt:
+      // onAlarmReceived, recurring / Sara: onReminderReceived). The native
+      // side stored the tap's payload just before calling: route it to the
+      // reminder's exact screen (the lifecycle resume may arrive before the
+      // tap, so it cannot be relied on).
       _native.setMethodCallHandler((call) async {
-        if (call.method == 'onAlarmReceived') {
-          final debtId = call.arguments is Map ? (call.arguments as Map)['debtId']?.toString() : null;
-          if (debtId != null && debtId.isNotEmpty) {
-            final debt = await _findDebtById(debtId);
-            if (debt != null) {
-              final ctx = _contextProvider?.call();
-              if (ctx != null && ctx.mounted) {
-                await markAlarmShown(debt);
-                final all = _decodeAll(await PersonalReminderStore.read(_prefsKey));
-                all.remove(_keyFor(debt));
-                await PersonalReminderStore.write(_prefsKey, jsonEncode(all));
-                try { await showAlarm(ctx, debt); } catch (_) {}
-              }
-            }
-          }
+        if (call.method == 'onAlarmReceived' || call.method == 'onReminderReceived') {
+          final args = call.arguments is Map ? call.arguments as Map : const {};
+          final routed = await AlarmTapBridge.consumeAndRoute();
+          if (routed) return;
+          // Payload already taken: route from the call's own arguments.
+          final kind = call.method == 'onAlarmReceived' ? 'debt' : '${args['kind'] ?? ''}';
+          final refId = '${args['debtId'] ?? args['refId'] ?? ''}';
+          final route = AlarmTapBridge.routeFor(kind, refId, '${args['route'] ?? ''}');
+          if (route.isEmpty) return;
+          if (kind == 'debt') await acknowledgeTap(refId);
+          final ctx = _contextProvider?.call();
+          if (ctx != null && ctx.mounted) ctx.go(route);
         }
       });
     }
     _initialized = true;
+  }
+
+  /// The user tapped this debt's reminder: it is seen (the in-app alarm
+  /// page must not pop over the debt the tap opens) and done.
+  static Future<void> acknowledgeTap(String debtId) async {
+    if (debtId.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('${_shownKey}debt_$debtId', true);
+      final all = _decodeAll(await PersonalReminderStore.read(_prefsKey));
+      final entry = all['debt_$debtId'];
+      final millis = entry is Map ? (entry['millis'] as num?)?.toInt() ?? 0 : 0;
+      // Only a reminder that already fired is done; a future one stays.
+      if (entry != null && millis <= DateTime.now().millisecondsSinceEpoch) {
+        all.remove('debt_$debtId');
+        await PersonalReminderStore.write(_prefsKey, jsonEncode(all));
+      }
+    } catch (_) {}
   }
 
   static Future<String?> getInitialAlarmDebtId() async {

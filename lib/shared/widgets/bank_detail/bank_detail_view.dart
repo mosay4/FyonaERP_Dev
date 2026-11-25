@@ -10,9 +10,11 @@ import '../../../core/utils/currency_formatter.dart';
 import '../app_icon_badge.dart';
 import '../fyona_refresh.dart';
 import '../fyona_text_field.dart';
+import '../money_text.dart';
 import '../two_tone_icon.dart';
 import '../two_tone_icons.dart';
 import 'bank_detail_data.dart';
+import '../../../core/utils/time_format.dart';
 
 export 'bank_detail_data.dart';
 
@@ -1530,46 +1532,61 @@ class _AccountTile extends StatelessWidget {
               style: TextStyle(fontSize: flag.isEmpty ? 10 : 22)),
         ),
         const SizedBox(width: 12),
+        // Name + type on the start side, amount + currency on the end side;
+        // each half scales down instead of being ellipsized or overlapping.
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('${currencyShort(account.currency)} — ${account.typeLabel}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontFamily: 'Cairo',
-                      fontSize: R.fontSize(context, 13),
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
-              Text(
-                  (account.note ?? '').isNotEmpty
-                      ? account.note!
-                      : currencyName(account.currency),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontFamily: 'Cairo',
-                      fontSize: R.fontSize(context, 10.5),
-                      color: AppColors.textDisabled)),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(currencyName(account.currency),
+                    maxLines: 1,
+                    softWrap: false,
+                    style: TextStyle(
+                        fontFamily: 'Cairo',
+                        fontSize: R.fontSize(context, 13),
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+              ),
+              if (account.typeLabel.isNotEmpty)
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(account.typeLabel,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: R.fontSize(context, 11),
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textSecondary)),
+                ),
+              if ((account.note ?? '').isNotEmpty)
+                Text(account.note!,
+                    maxLines: 2,
+                    style: TextStyle(
+                        fontFamily: 'Cairo',
+                        fontSize: R.fontSize(context, 10.5),
+                        color: AppColors.textDisabled)),
             ],
           ),
         ),
-        if (showBalance)
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: AlignmentDirectional.centerEnd,
-              child: Text(fmtNum(account.balance),
-                  maxLines: 1,
-                  textDirection: TextDirection.ltr,
-                  style: TextStyle(
-                      fontFamily: 'Cairo',
-                      fontSize: R.fontSize(context, 15),
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary)),
-            ),
+        if (showBalance) ...[
+          const SizedBox(width: 8),
+          Expanded(
+            child: MoneyText(
+                amount: fmtNum(account.balance),
+                currency: currencySymbol(account.currency),
+                alignment: AlignmentDirectional.centerEnd,
+                style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: R.fontSize(context, 15),
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary)),
           ),
+        ],
       ]),
     );
   }
@@ -1640,7 +1657,7 @@ class _MovementTile extends StatelessWidget {
     ].join(' · ');
     final d = m.date;
     final time = d != null && (d.hour != 0 || d.minute != 0)
-        ? '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}'
+        ? formatClock(d, context: context)
         : null;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -1685,10 +1702,14 @@ class _MovementTile extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text(
-              '${m.isIn ? '+' : '-'}${fmtNum(m.amount.abs())} ${currencyShort(m.currency)}',
-              textDirection: TextDirection.ltr,
+        ConstrainedBox(
+          constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width * .42),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          MoneyText(
+              amount: '${m.isIn ? '+' : '-'}${fmtNum(m.amount.abs())}',
+              currency: currencyShort(m.currency),
+              alignment: AlignmentDirectional.centerEnd,
               style: TextStyle(
                   fontFamily: 'Cairo',
                   fontSize: R.fontSize(context, 13.5),
@@ -1702,6 +1723,7 @@ class _MovementTile extends StatelessWidget {
                     fontSize: R.fontSize(context, 10),
                     color: AppColors.textDisabled)),
         ]),
+        ),
       ]),
     );
   }

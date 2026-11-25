@@ -24,6 +24,24 @@ class NotificationRouter {
 
   static List<String> get pendingCountForTests => List.unmodifiable(_pending);
 
+  /// Set by the app shell: makes the section of [route] the active one
+  /// before a tap opens it (a Personal debt reminder tapped while the app
+  /// was left in Business would otherwise be bounced to the Business home).
+  /// Returns once the switch is done; never throws into the router.
+  static Future<void> Function(String route)? prepareSection;
+
+  /// How many times one tap may be re-queued after a gate (account entry,
+  /// phone entry, sign-in…) bounced its navigation.
+  static const int maxBounces = 3;
+  static final Map<String, int> _bounces = {};
+
+  @visibleForTesting
+  static void resetForTests() {
+    _pending.clear();
+    _bounces.clear();
+    prepareSection = null;
+  }
+
   static void queuePending(String payload) {
     if (payload.isEmpty || _pending.contains(payload)) return;
     _pending.add(payload);
@@ -124,18 +142,62 @@ class NotificationRouter {
         // The root navigator context is above the route's state scope.
         loc = GoRouter.of(ctx).routeInformationProvider.value.uri.path;
       }
-      return loc == RouteNames.splash ||
-          // Account entry decides the home screen right after: navigating
-          // now would be overridden, so the tap waits for it.
-          loc == '/account-entry' ||
-          loc == RouteNames.login ||
-          loc == RouteNames.reentry ||
-          loc == RouteNames.chooseUsage ||
-          loc.isEmpty ||
-          loc == '/';
+      return isGate(loc);
     } catch (_) {
       return false;
     }
+  }
+
+  /// Locations that decide the next screen themselves: a tap navigated
+  /// while one of them is showing would be overridden, so it waits.
+  static bool isGate(String loc) =>
+      loc == RouteNames.splash ||
+      // Account entry decides the home screen right after: navigating
+      // now would be overridden, so the tap waits for it.
+      loc == '/account-entry' ||
+      loc == RouteNames.login ||
+      loc == RouteNames.reentry ||
+      loc == RouteNames.chooseUsage ||
+      loc == RouteNames.phoneEntry ||
+      loc.isEmpty ||
+      loc == '/';
+
+  /// The router's guards are async: a tap delivered a moment before the
+  /// session/entitlements are settled can be redirected to account entry,
+  /// which then opens the home screen — and the tap would be lost. When
+  /// the navigation that follows ends on a gate instead of [route], the tap
+  /// is queued again and delivered after the gate (bounded by [maxBounces]).
+  /// No timers: the router's own change notification is observed once.
+  static void _confirmDelivery(BuildContext ctx, String payload, String route) {
+    final GoRouter router;
+    try {
+      router = GoRouter.of(ctx);
+    } catch (_) {
+      return;
+    }
+    final target = Uri.tryParse(route)?.path ?? route;
+    final delegate = router.routerDelegate;
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    late final VoidCallback listener;
+    listener = () {
+      delegate.removeListener(listener);
+      try {
+        if (DateTime.now().isAfter(deadline)) return;
+        final loc = delegate.currentConfiguration.uri.path;
+        if (loc == target || !isGate(loc)) {
+          _bounces.remove(payload);
+          return;
+        }
+        final n = (_bounces[payload] ?? 0) + 1;
+        if (n > maxBounces) {
+          _bounces.remove(payload);
+          return;
+        }
+        _bounces[payload] = n;
+        queuePending(payload);
+      } catch (_) {}
+    };
+    delegate.addListener(listener);
   }
 
   /// Resolves [payload] and navigates. Returns true when a navigation
@@ -167,7 +229,27 @@ class NotificationRouter {
           onSubscriptionRoute?.call(route);
         } catch (_) {}
       }
-      ctx.go(route);
+      final prepare = prepareSection;
+      if (prepare == null) {
+        _confirmDelivery(ctx, payload, route);
+        ctx.go(route);
+        return true;
+      }
+      // Switch to the route's section first, then open the exact screen.
+      Future<void>(() => prepare(route))
+          .timeout(const Duration(seconds: 5))
+          .catchError((_) {})
+          .whenComplete(() {
+        final live = rootNavigatorKey.currentContext;
+        if (live == null || !live.mounted) {
+          queuePending(payload);
+          return;
+        }
+        try {
+          _confirmDelivery(live, payload, route);
+          live.go(route);
+        } catch (_) {}
+      });
       return true;
     } catch (_) {
       return false;

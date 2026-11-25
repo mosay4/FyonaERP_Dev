@@ -24,6 +24,9 @@ import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.Settings
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.util.Log
 import java.io.File
 import java.io.OutputStream
@@ -294,6 +297,7 @@ class MainActivity : FlutterFragmentActivity() {
         private const val CHANNEL = "com.fyona.erp/alarm_native"
         private const val BACKUP_CHANNEL = "com.fyona.erp/backup_storage"
         private const val PRINT_CHANNEL = "fyona/printing"
+        private const val SPEECH_CHANNEL = "com.fyona.erp/speech"
         private const val PREFS_NAME = "FlutterSharedPreferences"
         private const val PREFS_KEY = "flutter.debt_reminders_v2"
         private const val FYONA_FOLDER = "FYONA ERP"
@@ -312,6 +316,11 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingAlarmKind: String? = null
     private var pendingAlarmRefId: String? = null
     private var pendingAlarmRoute: String? = null
+    // Recreated activity (rotation, process restore) replays its launch
+    // intent: the tap it carries was already routed — the last routed tap
+    // is kept in the saved state and that same tap is not routed again.
+    private var lastTapSig: String? = null
+    private var restoredTapSig: String? = null
 
     // Pending MethodChannel result for the runtime POST_NOTIFICATIONS ask.
     private var pendingNotifPermissionResult: MethodChannel.Result? = null
@@ -402,6 +411,8 @@ class MainActivity : FlutterFragmentActivity() {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        restoredTapSig = savedInstanceState?.getString("fyona_last_tap")
+        lastTapSig = restoredTapSig
         super.onCreate(savedInstanceState)
         // Cold-start tap bridge: capture notification extras even if the
         // Flutter engine (configureFlutterEngine) attaches later.
@@ -447,6 +458,24 @@ class MainActivity : FlutterFragmentActivity() {
 
         // Handle alarm launch intent if app was started via full-screen alarm
         handleAlarmIntent(intent)
+
+        // ── Sara voice: the phone's speech recognizer (text, no upload) ──
+        val speech = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SPEECH_CHANNEL)
+        speechChannel = speech
+        speech.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> speechStart(call.argument<String>("lang") ?: "ar-SA", result)
+                "stop" -> {
+                    try { speechRecognizer?.stopListening() } catch (_: Exception) {}
+                    result.success(true)
+                }
+                "cancel" -> {
+                    speechRelease()
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
 
         // ── Business printing: Bluetooth ESC/POS transport ──
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PRINT_CHANNEL)
@@ -672,9 +701,16 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        lastTapSig?.let { outState.putString("fyona_last_tap", it) }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // A new tap — even of the same reminder — is always routed.
+        restoredTapSig = null
         handleAlarmIntent(intent)
         // Notify Flutter of taps while the app is alive. Debt keeps the
         // legacy callback; recurring uses the generic one (both are also
@@ -702,6 +738,9 @@ class MainActivity : FlutterFragmentActivity() {
 
     private fun handleAlarmIntent(intent: Intent?) {
         if (intent == null) return
+        // Reopened from Recents: Android replays the original launch intent
+        // (the old tap) — it is not a new tap.
+        if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
         val fromAlarm = intent.getBooleanExtra("from_alarm", false)
         if (fromAlarm) {
             // Ensure window can show over lock screen
@@ -720,6 +759,9 @@ class MainActivity : FlutterFragmentActivity() {
             ?: intent.getStringExtra("debtId") ?: ""
         val route = intent.getStringExtra("fyona_notif_route") ?: ""
         if (!kind.isNullOrEmpty() && refId.isNotEmpty()) {
+            val sig = "$kind|$refId|$route"
+            if (sig == restoredTapSig) return
+            lastTapSig = sig
             pendingAlarmKind = kind
             pendingAlarmRefId = refId
             pendingAlarmRoute = route
@@ -2026,6 +2068,81 @@ class MainActivity : FlutterFragmentActivity() {
         try { btSocket?.close() } catch (_: Exception) {}
         btOut = null
         btSocket = null
+    }
+
+    // ── Sara voice ──────────────────────────────────────────────────────
+    // Streams partial results while the user speaks; EXTRA_PREFER_OFFLINE
+    // keeps recognition on the device when the language pack is there.
+    // Events go to Dart as onSpeech {type, value}: ready | partial | final |
+    // level | end | error. Everything runs on the main thread.
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var speechChannel: MethodChannel? = null
+
+    private fun speechEvent(type: String, value: Any?) {
+        try {
+            speechChannel?.invokeMethod("onSpeech", mapOf("type" to type, "value" to value))
+        } catch (_: Exception) {}
+    }
+
+    private fun speechRelease() {
+        try { speechRecognizer?.cancel() } catch (_: Exception) {}
+        try { speechRecognizer?.destroy() } catch (_: Exception) {}
+        speechRecognizer = null
+    }
+
+    private fun speechStart(lang: String, result: MethodChannel.Result) {
+        speechRelease()
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            result.success(false)
+            return
+        }
+        try {
+            val recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+            speechRecognizer = recognizer
+            recognizer.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) { speechEvent("ready", null) }
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) { speechEvent("level", rmsdB.toDouble()) }
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() { speechEvent("end", null) }
+                override fun onError(error: Int) {
+                    speechEvent("error", error)
+                    speechRelease()
+                }
+                override fun onResults(results: Bundle?) {
+                    val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: ""
+                    speechEvent("final", text)
+                    speechRelease()
+                }
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: ""
+                    if (text.isNotEmpty()) speechEvent("partial", text)
+                }
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, lang)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+                // A short pause to think must not cut the request.
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
+            }
+            recognizer.startListening(intent)
+            result.success(true)
+        } catch (_: Exception) {
+            speechRelease()
+            result.success(false)
+        }
+    }
+
+    override fun onDestroy() {
+        speechRelease()
+        super.onDestroy()
     }
 }
 

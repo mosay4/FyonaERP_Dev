@@ -287,6 +287,9 @@ class FalconAnalyzeRequest(BaseModel):
     # report_currency). The server analyses them; it holds no stock data.
     device_items: Optional[list] = None
     device_category: Optional[str] = None
+    # Or the phone's own deterministic summary of those rows (compact; the
+    # same rules as the server's device dataset).
+    device_summary: Optional[dict] = None
 
 
 class FalconChatRequest(BaseModel):

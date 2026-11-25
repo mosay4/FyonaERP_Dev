@@ -31,6 +31,13 @@ const List<HelpEntry> kHelpCommon = [
     en: 'Closes without saving anything you changed.',
   ),
   HelpEntry(
+    id: 'c.fxRateUseAuto',
+    keys: ['fxRateUseAuto'],
+    icon: Icons.currency_exchange_rounded,
+    ar: 'يلغي سعر الصرف اللي كتبته يدوي ويرجّع السعر التلقائي للعملية.',
+    en: 'Drops the rate you typed and goes back to the automatic exchange rate.',
+  ),
+  HelpEntry(
     id: 'c.close',
     keys: ['close', 'saleClose'],
     icon: Icons.close_rounded,

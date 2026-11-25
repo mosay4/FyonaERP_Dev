@@ -6,6 +6,7 @@ import '../../../../../core/utils/currency_formatter.dart';
 import 'personal_report_data.dart';
 import 'personal_report_sections.dart';
 import 'personal_report_widgets.dart';
+import '../../../../../core/utils/time_format.dart';
 
 /// The Personal report PDF: the same [PersonalReportData] the screen shows
 /// (same currency, period and conversions), laid out with the shared report
@@ -386,7 +387,7 @@ class PersonalReportPdf {
           });
     final now = DateTime.now();
     final issued =
-        '${day(now)} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+        '${day(now)} ${formatClock(now)}';
     final title = kind == 'overview'
         ? t('prepPdfTitle')
         : '${t('prepPdfTitle')} — ${t(meta.title)}';

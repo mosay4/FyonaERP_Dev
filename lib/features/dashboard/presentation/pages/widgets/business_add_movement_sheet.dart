@@ -24,6 +24,7 @@ import '../../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../../core_business/data/local_directory/directory_scope.dart';
 import '../../../../core_business/data/local_ledger/business_money.dart';
 import '../../../../core_business/presentation/providers/business_ledger_session.dart';
+import '../../../../../shared/widgets/money_text.dart';
 
 /// Business add-movement sheet — the EXACT same design/flow as the personal
 /// section's add income/expense sheet (source toggle cash/bank, bank picker,
@@ -889,14 +890,11 @@ class _BusinessAddMovementSheetState
                   ),
                   subtitle: !ref.read(employeeCanProvider('banks.balances'))
                       ? null
-                      : Text(
-                          '${fmtNum(a.balance)} ${currencyShort(c)}',
-                          style: TextStyle(
+                      : MoneyText(amount: fmtNum(a.balance), currency: currencyShort(c), style: TextStyle(
                             fontFamily: 'Cairo',
                             fontSize: 11,
                             color: AppColors.textSecondary,
-                          ),
-                        ),
+                          )),
                   trailing: isSel
                       ? TwoToneIcon(
                           data: TwoToneIcons.check,
@@ -1040,14 +1038,11 @@ class _BusinessAddMovementSheetState
                 ),
                 subtitle: !ref.read(employeeCanProvider('banks.balances'))
                     ? null
-                    : Text(
-                        '${fmtNum(balances[c] ?? 0)} ${currencyShort(c)}',
-                        style: TextStyle(
+                    : MoneyText(amount: fmtNum(balances[c] ?? 0), currency: currencyShort(c), style: TextStyle(
                           fontFamily: 'Cairo',
                           fontSize: 11,
                           color: AppColors.textSecondary,
-                        ),
-                      ),
+                        )),
                 trailing: _selCurrency == c
                     ? TwoToneIcon(
                         data: TwoToneIcons.check,

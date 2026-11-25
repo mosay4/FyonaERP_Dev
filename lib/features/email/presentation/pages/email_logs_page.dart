@@ -1,7 +1,6 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/responsive/r_api.dart';
@@ -12,6 +11,7 @@ import '../../../../shared/widgets/two_tone_icon.dart';
 import '../../../../shared/widgets/two_tone_icons.dart';
 import '../../../../core/localization/app_localizations.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../../../core/utils/time_format.dart';
 
 class EmailLogsPage extends ConsumerStatefulWidget {
   const EmailLogsPage({super.key});
@@ -72,7 +72,7 @@ class _EmailLogsPageState extends ConsumerState<EmailLogsPage> {
     final statusLabel = log.status == 'sent' ? AppLocalizations.of(context).translate('emailSent')
         : log.status == 'failed' ? AppLocalizations.of(context).translate('failed')
         : AppLocalizations.of(context).translate('emailBeingSent');
-    final dateStr = log.sentAt != null ? DateFormat('yyyy/MM/dd HH:mm').format(log.sentAt!) : '';
+    final dateStr = log.sentAt != null ? formatDateTimeDisplay(log.sentAt!, context: context) : '';
 
     return Container(
       margin: EdgeInsets.only(bottom: R.spacing(context)),

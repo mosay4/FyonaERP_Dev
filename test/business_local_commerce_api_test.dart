@@ -435,6 +435,29 @@ void main() {
         isNull);
     await api.setUnitImage(id, '${unit['id']}', null);
     expect(unitOf(await api.productUnits(id))['image'], isNull);
+    expect((await api.productUnits(id))['product_image'], isNull);
+  });
+
+  test('unit pickers receive the product photo for units without their own',
+      () async {
+    final access = scope();
+    await prepare(access);
+    final api = LocalInventoryApi(client, bridge(access));
+    const photo = '$businessInventoryImagePrefix'
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    final product = await api.createProduct({
+      'name': 'Photo product',
+      'unit': 'قطعة',
+      'price': 2,
+      'image': photo,
+    });
+    final id = '${product['id']}';
+    await api.createUnit(id, {'name': 'كرتون', 'factor': 24});
+    final data = await api.productUnits(id);
+    expect(data['product_image'], photo);
+    for (final u in (data['units'] as List).cast<Map>()) {
+      expect(u['image'], isNull, reason: 'no own photo: the picker falls back');
+    }
   });
 
   test('duplicate codes and impossible units are refused', () async {

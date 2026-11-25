@@ -4,7 +4,9 @@ import 'package:hugeicons/hugeicons.dart';
 
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../services/debt_reminder_service.dart';
 import '../../services/smart_insights/sara_smart_settings.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// Personal › Profile › Preferences: "Sara's smart notifications" switch.
 ///
@@ -25,9 +27,7 @@ class SaraSmartNotificationsTile extends ConsumerWidget {
     try {
       return MaterialLocalizations.of(context).formatTimeOfDay(t);
     } catch (_) {
-      final hh = t.hour.toString().padLeft(2, '0');
-      final mm = t.minute.toString().padLeft(2, '0');
-      return '$hh:$mm';
+      return formatTimeOfDay(t);
     }
   }
 
@@ -49,6 +49,9 @@ class SaraSmartNotificationsTile extends ConsumerWidget {
     await ref
         .read(saraSmartSettingsProvider.notifier)
         .setMinutes(picked.hour * 60 + picked.minute);
+    // Exact time, app closed: Android 12+ needs the exact-alarm grant (an
+    // inexact alarm may arrive many minutes late). Asked only when missing.
+    await DebtReminderService.requestExactAlarmPermissionIfNeeded();
   }
 
   @override

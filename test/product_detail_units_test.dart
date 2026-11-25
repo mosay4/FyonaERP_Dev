@@ -6,6 +6,7 @@ import 'package:fyona_flutter/features/inventory/presentation/pages/product_deta
 import 'package:fyona_flutter/features/inventory/presentation/providers/inventory_providers.dart';
 import 'package:fyona_flutter/features/inventory/presentation/providers/warehouse_settings.dart';
 import 'package:fyona_flutter/shared/providers/current_user_provider.dart';
+import 'package:fyona_flutter/shared/widgets/money_text.dart';
 
 class _Ws extends WarehouseSettingsNotifier {
   _Ws(WarehouseSettings s) {
@@ -14,6 +15,10 @@ class _Ws extends WarehouseSettingsNotifier {
   @override
   Future<void> load() async {}
 }
+
+/// A price is ONE [MoneyText]: the number plus its (smaller) currency tag.
+Finder _money(String amount, String currency) => find.byWidgetPredicate(
+    (w) => w is MoneyText && w.amount == amount && w.currency == currency);
 
 void main() {
   final product = <String, dynamic>{
@@ -178,11 +183,11 @@ void main() {
     await pump(tester, extra: true);
     expect(find.text('أسعار البيع'), findsNothing);
     // Base unit: its own sale and purchase price with the currency.
-    expect(find.text('30 دولار أمريكي'), findsOneWidget);
-    expect(find.text('10 دولار أمريكي'), findsOneWidget);
+    expect(_money('30', 'دولار أمريكي'), findsOneWidget);
+    expect(_money('10', 'دولار أمريكي'), findsOneWidget);
     // Extra unit «باكيت»: its own prices, in the product currency.
-    expect(find.text('200 دولار أمريكي'), findsOneWidget);
-    expect(find.text('80 دولار أمريكي'), findsOneWidget);
+    expect(_money('200', 'دولار أمريكي'), findsOneWidget);
+    expect(_money('80', 'دولار أمريكي'), findsOneWidget);
     expect(find.text('سعر البيع'), findsNWidgets(2));
   });
 }

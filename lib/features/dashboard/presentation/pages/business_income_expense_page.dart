@@ -20,6 +20,7 @@ import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/data/local_directory/directory_scope.dart';
 import '../../../core_business/presentation/providers/business_ledger_session.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// Business → «المصروف/المدخول»:
 ///   • Shows ONLY the manually created operations from «إضافة دخل» /
@@ -579,7 +580,7 @@ class _BusinessIncomeExpensePageState
         title: l10n.translate(isIn ? 'deposit' : 'withdrawal'),
         amount: amount,
         currencySymbol: currency.isEmpty ? '' : currencySymbol(currency),
-        dateTime: dt != null ? DateFormat('yyyy/MM/dd HH:mm').format(dt) : '-',
+        dateTime: dt != null ? formatDateTimeDisplay(dt) : '-',
         referenceNumber: reference.isNotEmpty
             ? reference
             : '#${t['source_id']}',

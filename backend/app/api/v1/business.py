@@ -932,7 +932,11 @@ async def falcon_analyze(
 
     try:
         ref = str(data.ref_id) if data.ref_id else None
-        device = (falcon_service.device_dataset(data.device_items, data.report_currency,
+        device = (falcon_service.device_summary_dataset(
+                      data.device_summary, data.report_currency, data.scope,
+                      data.device_category)
+                  if data.device_summary is not None else
+                  falcon_service.device_dataset(data.device_items, data.report_currency,
                                                 data.scope, ref, data.device_category)
                   if data.device_items is not None else None)
         return ok(await falcon_service.analyze(

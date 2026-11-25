@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../shared/widgets/money_text.dart';
 import '../../../core_business/presentation/widgets/business_number_field.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -1050,12 +1051,15 @@ class _ProductDetailView extends ConsumerWidget {
           Row(children: [
             Icon(icon, size: 13, color: color),
             const SizedBox(width: 4),
-            Text(label,
-                style: TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: R.fontSize(context, 10.5),
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textSecondary)),
+            Flexible(
+              child: Text(label,
+                  maxLines: 2,
+                  style: TextStyle(
+                      fontFamily: 'Cairo',
+                      fontSize: R.fontSize(context, 10.5),
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textSecondary)),
+            ),
           ]),
           const SizedBox(height: 2),
           if (prices.isEmpty)
@@ -1066,9 +1070,9 @@ class _ProductDetailView extends ConsumerWidget {
                     color: AppColors.textSecondary))
           else
             for (final price in prices)
-              Text('${fmtNum(price.$1)} ${currencySymbol(price.$2)}'.trim(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              MoneyText(
+                  amount: fmtNum(price.$1),
+                  currency: currencySymbol(price.$2),
                   style: TextStyle(
                       fontFamily: 'Cairo',
                       fontSize: R.fontSize(context, strong ? 15 : 13),

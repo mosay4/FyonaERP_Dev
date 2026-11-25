@@ -1,6 +1,5 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:ui' as ui;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -15,6 +14,8 @@ import '../providers/receipt_design_models.dart';
 import 'widgets/home_account_card.dart';
 import 'widgets/home_promo_banner.dart';
 import 'widgets/home_services_grid.dart';
+import 'widgets/net_worth_frame.dart';
+import '../../../../shared/widgets/money_text.dart';
 import '../../../../shared/widgets/subscription_gate.dart';
 import '../../../../shared/widgets/app_icon_badge.dart';
 import '../../../../features/auth/presentation/providers/auth_provider.dart';
@@ -29,6 +30,7 @@ import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 import '../../domain/services/personal_country_cash.dart';
 import '../../di/personal_providers.dart' show personalFinanceServiceProvider;
 import '../../../../shared/providers/current_user_provider.dart';
+import '../../../../core/utils/time_format.dart';
 
 class PersonalDashboardPage extends ConsumerStatefulWidget {
   const PersonalDashboardPage({super.key});
@@ -264,27 +266,20 @@ class _PersonalDashboardPageState extends ConsumerState<PersonalDashboardPage>
                         const SizedBox(height: 12),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: AnimatedSize(
-                            duration: const Duration(milliseconds: 340),
-                            curve: Curves.easeInOutCubic,
-                            alignment: Alignment.topCenter,
-                            child: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 240),
-                              switchInCurve: Curves.easeOut,
-                              switchOutCurve: Curves.easeIn,
-                              child: _showNetWorth
-                                  ? _NetWorthCard(
-                                      key: const ValueKey('netWorthCard'),
-                                      netWorth: st.netWorth,
-                                      payable: notifier.totalPayable,
-                                      receivable: notifier.totalReceivable,
-                                      currency: st.walletCurrency,
-                                      onToggle: () => setState(() => _showNetWorth = false),
-                                    )
-                                  : _CollapsedNetWorthPill(
-                                      key: const ValueKey('netWorthPill'),
-                                      onToggle: () => setState(() => _showNetWorth = true),
-                                    ),
+                          // The collapse arrow is pinned at the card's
+                          // top-left corner and never moves between states.
+                          child: NetWorthFrame(
+                            expanded: _showNetWorth,
+                            onToggle: () => setState(() => _showNetWorth = !_showNetWorth),
+                            expandedChild: _NetWorthCard(
+                              key: const ValueKey('netWorthCard'),
+                              netWorth: st.netWorth,
+                              payable: notifier.totalPayable,
+                              receivable: notifier.totalReceivable,
+                              currency: st.walletCurrency,
+                            ),
+                            collapsedChild: const _CollapsedNetWorthPill(
+                              key: ValueKey('netWorthPill'),
                             ),
                           ),
                         ),
@@ -329,7 +324,6 @@ class _NetWorthCard extends ConsumerWidget {
   final double payable;
   final double receivable;
   final String currency;
-  final VoidCallback onToggle;
 
   const _NetWorthCard({
     super.key,
@@ -337,7 +331,6 @@ class _NetWorthCard extends ConsumerWidget {
     required this.payable,
     required this.receivable,
     required this.currency,
-    required this.onToggle,
   });
 
   void _showCurrencyPicker(BuildContext context, WidgetRef ref) {
@@ -379,7 +372,6 @@ class _NetWorthCard extends ConsumerWidget {
     final sym = currencySymbol(currency);
     final positive = netWorth >= 0;
     final l10n = AppLocalizations.of(context);
-    final isRtl = Directionality.of(context) == ui.TextDirection.rtl;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -390,7 +382,11 @@ class _NetWorthCard extends ConsumerWidget {
         border: Border.all(color: AppColors.border),
       ),
       child: Column(children: [
-        Row(children: [
+        // The physical-left gutter stays free for the pinned collapse arrow
+        // (see [NetWorthFrame]); the title reflows instead of being cut.
+        Padding(
+          padding: const EdgeInsets.only(left: kNetWorthArrowGutter - 16),
+          child: Row(children: [
           AppIconBadge(
             icon: TwoToneIcons.netWorth.outline,
             size: 36,
@@ -400,9 +396,25 @@ class _NetWorthCard extends ConsumerWidget {
             accentColor: AppColors.primary,
           ),
           const SizedBox(width: 10),
-          Expanded(child: Text(l10n.translate('personalNetWorth'), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 14), fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
-          Flexible(fit: FlexFit.loose, child: Text(l10n.translate('personalYourCapital'), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), color: AppColors.textTertiary))),
-            const SizedBox(width: 4),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(l10n.translate('personalNetWorth'), maxLines: 1, softWrap: false, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 14), fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                ),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(l10n.translate('personalYourCapital'), maxLines: 1, softWrap: false, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), color: AppColors.textTertiary)),
+                ),
+              ],
+            ),
+          ),
+            const SizedBox(width: 6),
             GestureDetector(
               onTap: () => _showCurrencyPicker(context, ref),
               child: Container(
@@ -419,33 +431,20 @@ class _NetWorthCard extends ConsumerWidget {
                 ]),
               ),
             ),
-            const SizedBox(width: 4),
-            _NetWorthToggleArrow(show: true, onTap: onToggle, size: 24),
           ]),
+        ),
           const SizedBox(height: 12),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text.rich(
-              TextSpan(
-                text: fmtNum(netWorth),
-                children: [
-                  if (sym.isNotEmpty)
-                    TextSpan(
-                      text: '  $sym',
-                      style: TextStyle(
-                        fontSize: R.fontSize(context, 14),
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                ],
-              ),
-              style: TextStyle(
-                fontFamily: 'Cairo',
-                fontSize: R.fontSize(context, 26),
-                fontWeight: FontWeight.w800,
-                color: positive ? AppColors.success : AppColors.danger,
-              ),
+          MoneyText(
+            amount: fmtNum(netWorth),
+            currency: sym,
+            alignment: Alignment.center,
+            currencyScale: .54,
+            currencyStyle: TextStyle(color: AppColors.textSecondary),
+            style: TextStyle(
+              fontFamily: 'Cairo',
+              fontSize: R.fontSize(context, 26),
+              fontWeight: FontWeight.w800,
+              color: positive ? AppColors.success : AppColors.danger,
             ),
           ),
           const SizedBox(height: 12),
@@ -459,64 +458,36 @@ class _NetWorthCard extends ConsumerWidget {
   }
 }
 
-class _NetWorthToggleArrow extends StatelessWidget {
-  final bool show;
-  final VoidCallback onTap;
-  final double size;
-  const _NetWorthToggleArrow({required this.show, required this.onTap, this.size = 36});
-
-  @override
-  Widget build(BuildContext context) {
-    final isRtl = Directionality.of(context) == ui.TextDirection.rtl;
-    final baseIcon = isRtl ? Icons.chevron_left : Icons.chevron_right;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: AppColors.primary.withAlpha(24),
-          shape: BoxShape.circle,
-          border: Border.all(color: AppColors.primary.withAlpha(60)),
-        ),
-        child: AnimatedRotation(
-          turns: show ? 0.5 : 0.0,
-          duration: const Duration(milliseconds: 340),
-          curve: Curves.easeInOutCubic,
-          child: Icon(baseIcon, size: size * 0.62, color: AppColors.primary),
-        ),
-      ),
-    );
-  }
-}
-
 class _CollapsedNetWorthPill extends StatelessWidget {
-  final VoidCallback onToggle;
-  const _CollapsedNetWorthPill({super.key, required this.onToggle});
+  const _CollapsedNetWorthPill({super.key});
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    // Same height as the pinned arrow + its insets, with the physical-left
+    // gutter kept free so the arrow sits exactly where it does on the card.
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      constraints: const BoxConstraints(
+          minHeight: kNetWorthArrowSize + 2 * kNetWorthArrowInset),
+      alignment: AlignmentDirectional.centerStart,
+      padding: const EdgeInsets.only(
+          left: kNetWorthArrowGutter, right: 14, top: 6, bottom: 6),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
       ),
-      child: Row(children: [
-        Expanded(
-          child: Text(
-            l10n.translate('personalNetWorth'),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-          ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: AlignmentDirectional.centerStart,
+        child: Text(
+          l10n.translate('personalNetWorth'),
+          maxLines: 1,
+          softWrap: false,
+          style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), fontWeight: FontWeight.w700, color: AppColors.textPrimary),
         ),
-        const SizedBox(width: 10),
-        _NetWorthToggleArrow(show: false, onTap: onToggle, size: 32),
-      ]),
+      ),
     );
   }
 }
@@ -543,7 +514,7 @@ class _NetWorthStat extends StatelessWidget {
           Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 9), color: AppColors.textSecondary))),
         ]),
         const SizedBox(height: 3),
-        FittedBox(fit: BoxFit.scaleDown, child: Text(value, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
+        MoneyText.parse(value, alignment: Alignment.center, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
       ]),
     );
   }
@@ -792,7 +763,7 @@ class _TransactionTile extends ConsumerWidget {
         title: isIncome ? l10n.translate('deposit') : l10n.translate('withdrawal'),
         amount: t.amount,
         currencySymbol: currencySymbol(t.currency),
-        dateTime: t.date != null ? DateFormat('yyyy/MM/dd HH:mm').format(t.date!) : '-',
+        dateTime: t.date != null ? formatDateTimeDisplay(t.date!) : '-',
         referenceNumber: '#TX-${t.id}',
         senderName: isIncome ? (t.description ?? '-') : null,
         receiverName: !isIncome ? (t.description ?? '-') : null,

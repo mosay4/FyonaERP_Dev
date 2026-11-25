@@ -8,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/bank_detail/bank_detail_data.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// Translation callback: `tr('key', {'param': 'value'})`.
 typedef BankPdfTr = String Function(String key, [Map<String, String>? params]);
@@ -111,7 +112,7 @@ class BankDetailReportPdf {
     final rtl = isAr;
     final now = DateTime.now();
     final issued =
-        '${_date(now)}  ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+        '${_date(now)}  ${formatClock(now, locale: lang)}';
     final title = tr(switch (req.content) {
       BankReportContent.full => 'bdvPdfTitleFull',
       BankReportContent.summary => 'bdvPdfTitleSummary',

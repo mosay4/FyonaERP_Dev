@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../shared/widgets/two_tone_icon.dart';
@@ -17,6 +16,7 @@ import '../../../../core/utils/amount_input_formatter.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/app_icon_badge.dart';
 import '../../../../shared/widgets/receipt/receipt.dart';
+import '../../../../shared/widgets/exchange_rate_override.dart';
 import 'package:fyona_flutter/core/services/currency/currency_engine.dart';
 import '../../data/models/personal_models.dart';
 import '../../domain/services/personal_finance_service.dart';
@@ -32,6 +32,8 @@ import 'package:fyona_flutter/features/auth/presentation/widgets/app_pin_sheet.d
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 import '../widgets/personal_account_choice.dart';
+import '../../../../core/utils/time_format.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 const _accountTypes = {
   'checking': 'accountTypeChecking',
@@ -327,7 +329,7 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
       title: l10n.translate('bankStatementCertificate'),
       amount: acc.balance,
       currencySymbol: currencySymbol(acc.currency),
-      dateTime: DateFormat('yyyy/MM/dd HH:mm').format(DateTime.now()),
+      dateTime: formatDateTimeDisplay(DateTime.now()),
       senderName: acc.bankName,
       senderAccount: l10n.translate(typeLabels[acc.accountType] ?? 'accountTypeChecking'),
       details: [
@@ -362,7 +364,10 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
     double rate = 1.0;
     if (fromAcc.currency != toAcc.currency) {
       final engine = ref.read(currencyEngineProvider);
-      final foundRate = engine.getRate(fromAcc.currency, toAcc.currency);
+      // A manual rate typed via the pencil wins over the automatic one.
+      final foundRate = effectiveExchangeRate(
+          engine.getRate(fromAcc.currency, toAcc.currency),
+          _manualFx.rateFor(fromAcc.currency, toAcc.currency));
       if (foundRate == null || foundRate <= 0) {
         showSnackbar(context, message: l10n.translate('noExchangeRate', params: {'from': fromAcc.currency, 'to': toAcc.currency}));
         return;
@@ -380,6 +385,7 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
         _transferFromId = null;
         _transferToId = null;
         _transferAmount = 0;
+        _manualFx.clear();
       });
     }
     _transferring = false;
@@ -602,6 +608,8 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
 
   double? _convertedAmount;
   double? _currentRate;
+  double? _autoRate;
+  final _manualFx = ManualRateOverride();
 
   void _calculateConvertedAmount(List<PersonalBankAccount> accounts) {
     if (_transferFromId == null || _transferToId == null || _transferAmount <= 0) {
@@ -615,7 +623,9 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
       return;
     }
     final engine = ref.read(currencyEngineProvider);
-    final rate = engine.getRate(fromAcc.currency, toAcc.currency);
+    _autoRate = engine.getRate(fromAcc.currency, toAcc.currency);
+    final rate = effectiveExchangeRate(
+        _autoRate, _manualFx.rateFor(fromAcc.currency, toAcc.currency));
     if (rate != null && rate > 0) {
       final r = rate;
       setState(() { _convertedAmount = _transferAmount * r; _currentRate = r; });
@@ -635,15 +645,18 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
         padding: EdgeInsets.all(12),
         decoration: BoxDecoration(color: AppColors.primary.withAlpha(10), borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.primary.withAlpha(30))),
         child: Column(children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text(l10n.translate('exchangeRate'), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), color: AppColors.textSecondary)),
-            Text('1 ${fromAcc.currency} = ${fmtNum(_currentRate!)} ${toAcc.currency}', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), fontWeight: FontWeight.w700, color: AppColors.primary)),
-          ]),
+          if (fromAcc.currency == toAcc.currency)
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text(l10n.translate('exchangeRate'), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), color: AppColors.textSecondary)),
+              Text('1 ${fromAcc.currency} = ${fmtNum(_currentRate!)} ${toAcc.currency}', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), fontWeight: FontWeight.w700, color: AppColors.primary)),
+            ])
+          else
+            _rateLine(fromAcc, toAcc, accounts),
           SizedBox(height: 6),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text('${fmtNum(_transferAmount)} $sym1', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            MoneyText(amount: fmtNum(_transferAmount), currency: sym1, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
             Icon(Icons.arrow_forward, size: 16, color: AppColors.primary),
-            Text('${fmtNum(_convertedAmount!)} $sym2', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), fontWeight: FontWeight.w700, color: AppColors.success)),
+            MoneyText(amount: fmtNum(_convertedAmount!), currency: sym2, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), fontWeight: FontWeight.w700, color: AppColors.success)),
           ]),
         ]),
       );
@@ -651,13 +664,33 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
     return Container(
       padding: EdgeInsets.all(12),
       decoration: BoxDecoration(color: AppColors.warning.withAlpha(15), borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.warning.withAlpha(30))),
-      child: Row(children: [
-        Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.warning),
-        SizedBox(width: 8),
-        Expanded(child: Text(l10n.translate('noExchangeRate', params: {'from': fromAcc.currency, 'to': toAcc.currency}), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), color: AppColors.warning))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.warning),
+          SizedBox(width: 8),
+          Expanded(child: Text(l10n.translate('noExchangeRate', params: {'from': fromAcc.currency, 'to': toAcc.currency}), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), color: AppColors.warning))),
+        ]),
+        // No known rate: the pencil still lets the user type one.
+        if (fromAcc.currency != toAcc.currency) ...[
+          SizedBox(height: 6),
+          _rateLine(fromAcc, toAcc, accounts),
+        ],
       ]),
     );
   }
+
+  Widget _rateLine(PersonalBankAccount fromAcc, PersonalBankAccount toAcc,
+          List<PersonalBankAccount> accounts) =>
+      ExchangeRateOverrideLine(
+        fromCurrency: fromAcc.currency,
+        toCurrency: toAcc.currency,
+        autoRate: _autoRate,
+        manualRate: _manualFx.rateFor(fromAcc.currency, toAcc.currency),
+        onManualRateChanged: (r) {
+          _manualFx.set(fromAcc.currency, toAcc.currency, r);
+          _calculateConvertedAmount(accounts);
+        },
+      );
 
   Widget _buildAccountDropdown(String label, List<PersonalBankAccount> accounts, String? value, ValueChanged<String?> onChanged) {
     final l10n = AppLocalizations.of(context);

@@ -10,6 +10,9 @@ extension BusinessProductStatistics on BusinessLedger {
     String? from,
     String? to,
     String? displayCurrency,
+    // The Falcon reads totals for every product: the movement list (the
+    // costliest part) is for the statistics screen only.
+    bool movements = true,
   }) {
     final branch = _branch(access, BusinessLedgerAction.readInventory);
     final showCost = access._actions.contains(
@@ -147,15 +150,17 @@ extension BusinessProductStatistics on BusinessLedger {
         'purchases_count': purchaseIds.length,
         'cogs': showCost ? costs.display : null,
         'profit': showProfit ? profits.display : null,
-        'movements': await _productMovements(
-          txn,
-          branch,
-          product,
-          showCost: showCost,
-          limit: 200,
-          from: since,
-          until: until,
-        ),
+        'movements': movements
+            ? await _productMovements(
+                txn,
+                branch,
+                product,
+                showCost: showCost,
+                limit: 200,
+                from: since,
+                until: until,
+              )
+            : const [],
       };
     });
   }

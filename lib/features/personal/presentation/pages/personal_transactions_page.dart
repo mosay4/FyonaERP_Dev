@@ -20,6 +20,7 @@ import '../../../../shared/widgets/receipt/receipt_data.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../../../core/utils/time_format.dart';
 
 String _catLabel(String category, AppLocalizations l10n) {
   final key = personalCategoryKey(category);
@@ -786,7 +787,7 @@ class _TransactionCard extends ConsumerWidget {
         title: isIncome ? l10n.translate('deposit') : l10n.translate('withdrawal'),
         amount: t.amount,
         currencySymbol: currencySymbol(t.currency),
-        dateTime: t.date != null ? DateFormat('yyyy/MM/dd HH:mm').format(t.date!) : '-',
+        dateTime: t.date != null ? formatDateTimeDisplay(t.date!) : '-',
         referenceNumber: '#TX-${t.id}',
         senderName: isIncome ? (t.description ?? '-') : null,
         receiverName: !isIncome ? (t.description ?? '-') : null,

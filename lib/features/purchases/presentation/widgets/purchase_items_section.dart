@@ -814,9 +814,11 @@ class _ItemRow extends ConsumerWidget {
               subtitle: _purchaseUnitSubtitle(
                   e, baseUnit: baseUnit, currency: invCur),
               icon: Icons.straighten_outlined,
-              leading: BusinessUnitImage.has(e['image'])
-                  ? BusinessUnitImage(image: '${e['image']}')
-                  : null,
+              // The unit's own photo, else the product's (as on its page).
+              leading: businessUnitDisplayImage(e, units: u) == null
+                  ? null
+                  : BusinessUnitImage(
+                      image: businessUnitDisplayImage(e, units: u)),
             ),
         ],
       );

@@ -20,6 +20,7 @@ import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/presentation/providers/business_ledger_session.dart';
 import '../../../core_business/presentation/providers/local_commerce_navigation.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// Business → «المعاملات»: a unified, newest-first timeline over the REAL
 /// movements that already exist in the system (invoices, returns,
@@ -536,7 +537,7 @@ class _TxTile extends StatelessWidget {
         String two(int n) => n.toString().padLeft(2, '0');
         when =
             '${d.year}/${two(d.month)}/${two(d.day)}  '
-            '${two(d.hour)}:${two(d.minute)}';
+            '${formatClock(d, context: context)}';
       }
     }
 

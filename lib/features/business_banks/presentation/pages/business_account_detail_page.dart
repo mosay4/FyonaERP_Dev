@@ -19,6 +19,8 @@ import '../../../core_business/presentation/providers/business_ledger_session.da
 import '../../../employees/presentation/providers/employee_providers.dart';
 import '../bank_transaction_visual.dart';
 import '../../../personal/presentation/providers/receipt_design_provider.dart';
+import '../../../../core/utils/time_format.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 /// Business account detail — mirrors the personal account-detail screen
 /// exactly (header, currency chips, date filter, quick deposit/withdraw,
@@ -196,8 +198,7 @@ class _BusinessAccountDetailPageState
               ? (t['amount'] as num).toDouble()
               : double.tryParse(t['amount']?.toString() ?? '') ?? 0,
           currencySymbol: currencySymbol((t['currency'] ?? '').toString()),
-          dateTime: DateFormat('yyyy/MM/dd HH:mm')
-              .format(DateTime.tryParse(t['date']?.toString() ?? '') ??
+          dateTime: formatDateTimeDisplay(DateTime.tryParse(t['date']?.toString() ?? '') ??
                   DateTime.now()),
           details: [
             if ((t['description'] ?? '').toString().isNotEmpty)
@@ -392,9 +393,7 @@ class _BusinessAccountDetailPageState
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: AlignmentDirectional.centerEnd,
-              child: Text('${fmtNum(balance)} $sym',
-                  maxLines: 1,
-                  style: TextStyle(
+              child: MoneyText(amount: fmtNum(balance), currency: sym, style: TextStyle(
                     fontFamily: 'Cairo',
                     fontSize: R.fontSize(context, 17),
                     fontWeight: FontWeight.w700,

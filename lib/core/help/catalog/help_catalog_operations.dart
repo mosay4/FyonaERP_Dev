@@ -1661,8 +1661,8 @@ const List<HelpEntry> kHelpOperations = [
     id: 'o.rep.reconRow',
     keys: ['repReconciled'],
     icon: Icons.fact_check_rounded,
-    ar: 'جرد سويته؛ اضغط يوديك لصفحة الفحص والجرد.',
-    en: 'A stock count you did; tap to go to Check & Count.',
+    ar: 'جرد سويته؛ اضغط يوديك لصفحة المطابقة.',
+    en: 'A stock count you did; tap to go to Reconciliation.',
   ),
   HelpEntry(
     id: 'o.rep.viewDetails',

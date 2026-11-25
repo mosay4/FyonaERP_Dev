@@ -5,6 +5,7 @@ import '../../../../../../core/utils/currency_formatter.dart';
 import '../../../../../../features/personal/data/models/financial_tree_models.dart';
 import 'app_tree_theme.dart';
 import 'tree_shared_widgets.dart';
+import '../../../../../../shared/widgets/money_text.dart';
 
 /// Premium compact node card for the financial tree canvas.
 class TreeNodeCard extends StatelessWidget {
@@ -114,19 +115,14 @@ class TreeNodeCard extends StatelessWidget {
               ],
             ),
             const Spacer(),
-            Text(
-              '${fmtNum(node.amount)} ${currencySymbol(node.currency)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
+            MoneyText(amount: fmtNum(node.amount), currency: currencySymbol(node.currency), style: TextStyle(
                 fontFamily: 'Cairo',
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
                 color: node.type == FinancialTreeNodeType.expense || node.type == FinancialTreeNodeType.debt
                     ? AppColors.danger
                     : AppColors.textPrimary,
-              ),
-            ),
+              )),
             if (paid > 0) ...[
               const SizedBox(height: 4),
               ClipRRect(

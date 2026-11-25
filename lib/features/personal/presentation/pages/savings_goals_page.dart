@@ -23,6 +23,8 @@ import '../../../../core/localization/app_localizations.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
 import '../widgets/personal_account_choice.dart';
+import 'package:fyona_flutter/shared/widgets/exchange_rate_override.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 
 
@@ -53,6 +55,27 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
   String? _goalBudgetId;
   bool _contributing = false;
   String? _contribOpId;
+  /// Manual exchange rate typed via the pencil (wins over the saved one).
+  final _manualFx = ManualRateOverride();
+
+  /// Source currency the contribution will be paid from — mirrors the
+  /// account resolution in [_contribute] (null when not resolvable yet).
+  String? _contribSourceCurrency(PersonalFinanceState st) {
+    final isCash = _bankId == null || _bankId == '-1' || _bankId!.isEmpty;
+    if (!isCash) {
+      final acc = st.bankAccounts.where((a) => a.id == _bankId).firstOrNull;
+      if (acc == null) return null;
+      return _selCurrencyForGoal ?? acc.currency;
+    }
+    final cashAccs =
+        st.bankAccounts.where((a) => a.accountType == 'cash').toList();
+    if (_selCurrencyForGoal != null) {
+      return cashAccs.any((a) => a.currency == _selCurrencyForGoal)
+          ? _selCurrencyForGoal
+          : null;
+    }
+    return cashAccs.length == 1 ? cashAccs.first.currency : null;
+  }
 
   @override
   void initState() {
@@ -195,7 +218,9 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
       // rate is unavailable we still record the contribution in the source
       // currency value (goal amount = paid amount) so the user is never
       // blocked offline; a correct converted amount is synced later.
-      final rate = _findRate(srcCurrency, g.currency, st.exchangeRates);
+      final rate = effectiveExchangeRate(
+          _findRate(srcCurrency, g.currency, st.exchangeRates),
+          _manualFx.rateFor(srcCurrency, g.currency));
       amountToGoal = (rate != null && rate > 0) ? amt * rate : amt;
       if (srcBalance < amt) {
         _snack(l10n.translate('insufficientBalanceRequired', params: {'amount': fmtNum(amt), 'currency': srcCurrency, 'account': accName})); return;
@@ -230,6 +255,7 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
       _bankId = null;
       _selCurrencyForGoal = null;
       _contribOpId = null;
+      _manualFx.clear();
       setState(() => _contributeId = null);
     } catch (e) {
       _snack(e.toString());
@@ -570,9 +596,9 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
             ]),
             SizedBox(height: 10),
             Row(children: [
-              Flexible(fit: FlexFit.loose, child: FittedBox(fit: BoxFit.scaleDown, alignment: AlignmentDirectional.centerEnd, child: Text('${fmtNum(g.currentAmount)} ${currencySymbol(g.currency)}', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), fontWeight: FontWeight.w700, color: AppColors.textPrimary)))),
+              Flexible(fit: FlexFit.loose, child: FittedBox(fit: BoxFit.scaleDown, alignment: AlignmentDirectional.centerEnd, child: MoneyText(amount: fmtNum(g.currentAmount), currency: currencySymbol(g.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), fontWeight: FontWeight.w700, color: AppColors.textPrimary)))),
               Text(' / ', style: TextStyle(fontSize: R.fontSize(context, 13), color: AppColors.textDisabled)),
-              Flexible(fit: FlexFit.loose, child: FittedBox(fit: BoxFit.scaleDown, alignment: AlignmentDirectional.centerEnd, child: Text('${fmtNum(g.targetAmount)} ${currencySymbol(g.currency)}', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 12), color: AppColors.textSecondary)))),
+              Flexible(fit: FlexFit.loose, child: FittedBox(fit: BoxFit.scaleDown, alignment: AlignmentDirectional.centerEnd, child: MoneyText(amount: fmtNum(g.targetAmount), currency: currencySymbol(g.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 12), color: AppColors.textSecondary)))),
               Spacer(),
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -702,10 +728,30 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
       ],
       SizedBox(height: 12),
       _FormField(controller: _amountCtrl, label: l10n.translate('amountLabel'), icon: TwoToneIcons.money, keyboardType: TextInputType.number, isAmount: true),
+      if (_contribSourceCurrency(st) case final src? when src != g.currency) ...[
+        SizedBox(height: 10),
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _amountCtrl,
+          builder: (_, value, _) {
+            final typed = double.tryParse(value.text.replaceAll(',', '')) ?? 0;
+            return ExchangeRateOverrideLine(
+              fromCurrency: src,
+              toCurrency: g.currency,
+              autoRate: _findRate(src, g.currency, st.exchangeRates),
+              manualRate: _manualFx.rateFor(src, g.currency),
+              amount: typed > 0 ? typed : null,
+              onManualRateChanged: (r) => setState(() {
+                _manualFx.set(src, g.currency, r);
+                _contribOpId = null; // new rate → new operation
+              }),
+            );
+          },
+        ),
+      ],
       SizedBox(height: 12),
       Row(children: [
         Expanded(child: GestureDetector(
-          onTap: () => setState(() { _contributeId = null; _selCurrencyForGoal = null; _contribOpId = null; }),
+          onTap: () => setState(() { _contributeId = null; _selCurrencyForGoal = null; _contribOpId = null; _manualFx.clear(); }),
           child: Container(
             padding: EdgeInsets.symmetric(vertical: 12),
             decoration: BoxDecoration(color: AppColors.surfaceVariant, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border, width: 0.5)),

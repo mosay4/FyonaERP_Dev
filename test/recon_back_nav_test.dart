@@ -56,7 +56,7 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 150),
         EnginePhase.sendSemanticsUpdate, const Duration(seconds: 6));
     // From the home: open the bank section (only ONE card «بنك الاختبار»).
-    await tester.tap(find.text('فحص أرصدة البنوك والكاش'));
+    await tester.tap(find.text('مطابقة الحسابات البنكية والكاش'));
     await tester.pumpAndSettle(const Duration(milliseconds: 150),
         EnginePhase.sendSemanticsUpdate, const Duration(seconds: 6));
     // Was the accounts page even reached?
@@ -64,12 +64,12 @@ void main() {
     final homeMounted = tester.any(find.text('كيف شغلك؟'));
     final spinner = tester.any(find.byType(CircularProgressIndicator));
     final hasCard = tester.any(find.text('بنك الاختبار'));
-    final startBtn = tester.any(find.text('بدء الفحص'));
+    final startBtn = tester.any(find.text('بدء المطابقة'));
     expect(startBtn, true,
         reason: 'accounts=$accountsMounted home=$homeMounted '
             'spinner=$spinner card=$hasCard startBtn=$startBtn');
-    // Press «بدء الفحص» → the currency-selection page.
-    await tester.tap(find.text('بدء الفحص'));
+    // Press «بدء المطابقة» → the currency-selection page.
+    await tester.tap(find.text('بدء المطابقة'));
     await tester.pumpAndSettle(const Duration(milliseconds: 150),
         EnginePhase.sendSemanticsUpdate, const Duration(seconds: 6));
     expect(find.text('أي عملات تبغى تطابق؟'), findsOneWidget,
@@ -78,7 +78,7 @@ void main() {
     await tester.tap(find.byIcon(Icons.arrow_back_ios_new));
     await tester.pumpAndSettle(const Duration(milliseconds: 150),
         EnginePhase.sendSemanticsUpdate, const Duration(seconds: 6));
-    expect(find.text('بدء الفحص'), findsOneWidget,
+    expect(find.text('بدء المطابقة'), findsOneWidget,
         reason: 'back did NOT return to the accounts list');
     expect(find.text('أي عملات تبغى تطابق؟'), findsNothing);
   });
@@ -94,10 +94,10 @@ void main() {
     ));
     await tester.pumpAndSettle(const Duration(milliseconds: 150),
         EnginePhase.sendSemanticsUpdate, const Duration(seconds: 6));
-    await tester.tap(find.text('فحص أرصدة البنوك والكاش'));
+    await tester.tap(find.text('مطابقة الحسابات البنكية والكاش'));
     await tester.pumpAndSettle(const Duration(milliseconds: 150),
         EnginePhase.sendSemanticsUpdate, const Duration(seconds: 6));
-    await tester.tap(find.text('بدء الفحص'));
+    await tester.tap(find.text('بدء المطابقة'));
     await tester.pumpAndSettle(const Duration(milliseconds: 150),
         EnginePhase.sendSemanticsUpdate, const Duration(seconds: 6));
     // Tick the first currency then Next.

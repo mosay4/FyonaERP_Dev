@@ -338,8 +338,14 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
         if (!didPop && _openCategory != null) _backToCategories();
       },
       child: Container(
+      // With the keyboard up the sheet may use the full height below the
+      // status bar, so the search field, the list and the save button all
+      // fit above the keyboard even on small phones.
       constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.9),
+          maxHeight: bottom > 0
+              ? MediaQuery.of(context).size.height -
+                  MediaQuery.of(context).padding.top
+              : MediaQuery.of(context).size.height * 0.9),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -403,7 +409,10 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
               ),
             ),
           const SizedBox(height: 6),
-          SizedBox(
+          // The list gives way (keyboard, small phones, category pills) so
+          // the save button below is ALWAYS fully on screen.
+          Flexible(
+            child: SizedBox(
             height: MediaQuery.of(context).size.height * 0.5,
             child: _showingCategoryGrid
                 ? _categoryGrid(l10n)
@@ -456,6 +465,7 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
                            );
                         },
                       ),
+            ),
           ),
           _selectionBar(l10n),
         ],
@@ -618,9 +628,12 @@ class _MultiPickerSheetState extends State<_MultiPickerSheet> {
 
   Widget _selectionBar(AppLocalizations l10n) {
     final count = _selected.length;
+    // The home-indicator inset only matters while the keyboard is down (the
+    // keyboard already covers it), so the button is never pushed off-screen.
+    final mq = MediaQuery.of(context);
+    final safeBottom = mq.viewInsets.bottom > 0 ? 0.0 : mq.padding.bottom;
     return Container(
-      padding: EdgeInsets.fromLTRB(
-          16, 10, 16, 12 + MediaQuery.of(context).padding.bottom),
+      padding: EdgeInsets.fromLTRB(16, 10, 16, 12 + safeBottom),
       decoration: BoxDecoration(
         color: AppColors.surface,
         border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),

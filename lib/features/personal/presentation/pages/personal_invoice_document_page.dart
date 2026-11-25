@@ -13,6 +13,7 @@ import '../../../invoices/presentation/pdf/invoice_pdf.dart';
 import '../../../invoices/presentation/widgets/invoice_preview_card.dart';
 import '../../../../shared/widgets/styled_snack.dart';
 import '../../data/merchant_api.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// «عرض الفاتورة الأصلية» — renders the merchant's EXACT A4 invoice (their
 /// colours, logo, signature, stamp, footer and shop name) using the same
@@ -557,6 +558,6 @@ class _PersonalInvoiceDocumentPageState
     if (d == null) return '';
     final l = d.toLocal();
     String two(int v) => v.toString().padLeft(2, '0');
-    return '${l.year}-${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
+    return '${l.year}-${two(l.month)}-${two(l.day)} ${formatClock(l)}';
   }
 }

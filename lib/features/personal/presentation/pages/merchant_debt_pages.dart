@@ -26,6 +26,7 @@ import '../../data/merchant_api.dart';
 import '../providers/merchant_unread_provider.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// Personal-side commercial-debt screens per the «Debt References» PDFs:
 /// merchant overview (total + currency switcher + individual/sections tabs),
@@ -2366,7 +2367,7 @@ class _DebtOperationDetailPageState
     if (d == null) return '';
     final l = d.toLocal();
     String two(int v) => v.toString().padLeft(2, '0');
-    return '${l.year}-${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
+    return '${l.year}-${two(l.month)}-${two(l.day)} ${formatClock(l)}';
   }
 
   Widget _sumCol(String label, dynamic amount, String currency,

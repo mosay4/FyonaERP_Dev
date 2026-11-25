@@ -190,6 +190,14 @@ class InventoryApi {
     );
   }
 
+  /// The Falcon's key numbers computed on this phone, shown at once while
+  /// the analysis runs. `null` when the figures live on the server.
+  Future<Map<String, dynamic>?> falconPreview(
+    String scope,
+    String? refId, {
+    String? reportCurrency,
+  }) async => null;
+
   Future<Map<String, dynamic>> falconAnalyze(
     String scope,
     String? refId, {

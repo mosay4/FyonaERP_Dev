@@ -1,4 +1,5 @@
-"""Personal Sara: a reply that promises a screen button always carries it.
+"""Sara (Personal and Business): a reply that promises a screen button always
+carries it.
 
 The model sometimes answers «الزر تحت جاهز — اضغط عليه» without calling
 open_app_screen: the history it sees is text only, so on a repeated request
@@ -60,6 +61,80 @@ _KEYWORDS = [
     ("transaction", ("المحفظة", "Wallet", "/personal/transactions")),
 ]
 
+def _b(ar, en, route):
+    return (ar, en, route)
+
+
+_BANKS = _b("البنوك", "Banks", "/banks")
+_INVENTORY = _b("المخزون", "Inventory", "/inventory")
+_EMPLOYEES = _b("الموظفون", "Employees", "/employees")
+_INCOME_EXPENSE = _b("الإيرادات والمصروفات", "Income & Expenses", "/business/income-expense")
+_RECON = _b("المطابقة", "Reconciliation", "/reconciliation")
+_RECON_INV = _b("مطابقة المخزون", "Inventory count", "/reconciliation/inventory")
+_BRANCHES = _b("الفروع", "Branches", "/branches")
+_INVOICES = _b("الفواتير", "Invoices", "/invoices")
+_CUSTOMERS = _b("العملاء", "Customers", "/customers")
+_SUPPLIERS = _b("الموردون", "Suppliers", "/suppliers")
+_DEBTS = _b("الديون", "Debts", "/debts")
+_REPORTS = _b("التقارير", "Reports", "/reports")
+_CATEGORIES = _b("تصنيفات المنتجات", "Product categories", "/inventory/categories")
+_DASHBOARD = _b("لوحة التحكم", "Dashboard", "/dashboard")
+
+# Business screens (same rules as _KEYWORDS). The cash box lives in the banks
+# & treasury screen; products are the inventory screen. Mirrors
+# _businessKeywords in lib/features/ai/domain/agent/sara_link_fallback.dart.
+_BUSINESS_KEYWORDS = [
+    ("كشف حساب", _BANKS),
+    ("تحويلات الفروع", _b("تحويلات الفروع", "Branch transfers", "/branches/transfers")),
+    ("branch transfer", _b("تحويلات الفروع", "Branch transfers", "/branches/transfers")),
+    ("ديون العملاء", _b("ديون العملاء", "Customer debts", "/debts/customers")),
+    ("customer debts", _b("ديون العملاء", "Customer debts", "/debts/customers")),
+    ("ديون الموردين", _b("ديون الموردين", "Supplier debts", "/debts/suppliers")),
+    ("supplier debts", _b("ديون الموردين", "Supplier debts", "/debts/suppliers")),
+    ("مطابقه المخزون", _RECON_INV),
+    ("مطابقه البنوك", _b("مطابقة البنوك", "Bank reconciliation", "/reconciliation/bank")),
+    ("stock count", _RECON_INV),
+    ("النسخ الاحتياطي", _b("النسخ الاحتياطي", "Backup", "/business/backup")),
+    ("نسخه احتياطيه", _b("النسخ الاحتياطي", "Backup", "/business/backup")),
+    ("backup", _b("النسخ الاحتياطي", "Backup", "/business/backup")),
+    ("لوحه التحكم", _DASHBOARD),
+    ("الملف الشخصي", _b("الملف الشخصي", "Profile", "/profile")),
+    ("مطابقه", _RECON), ("مطابقات", _RECON), ("reconcil", _RECON),
+    ("جرد", _RECON_INV),
+    ("فروع", _BRANCHES), ("فرع", _BRANCHES), ("branch", _BRANCHES),
+    ("موظفين", _EMPLOYEES), ("موظف", _EMPLOYEES), ("رواتب", _EMPLOYEES), ("راتب", _EMPLOYEES),
+    ("employee", _EMPLOYEES), ("staff", _EMPLOYEES), ("payroll", _EMPLOYEES), ("salar", _EMPLOYEES),
+    ("ايرادات", _INCOME_EXPENSE), ("مصروفات", _INCOME_EXPENSE), ("مصاريف", _INCOME_EXPENSE),
+    ("مصروف", _INCOME_EXPENSE), ("expense", _INCOME_EXPENSE), ("income", _INCOME_EXPENSE),
+    ("فواتير", _INVOICES), ("فاتوره", _INVOICES), ("invoice", _INVOICES),
+    ("مرتجعات", _b("المرتجعات", "Returns", "/returns")), ("مرتجع", _b("المرتجعات", "Returns", "/returns")),
+    ("returns", _b("المرتجعات", "Returns", "/returns")),
+    ("مبيعات", _b("المبيعات", "Sales", "/sales")), ("sale", _b("المبيعات", "Sales", "/sales")),
+    ("تصنيفات", _CATEGORIES), ("تصنيف", _CATEGORIES), ("categor", _CATEGORIES),
+    ("منتجات", _INVENTORY), ("منتج", _INVENTORY), ("بضاعه", _INVENTORY), ("بضائع", _INVENTORY),
+    ("مخزون", _INVENTORY), ("مخزن", _INVENTORY), ("product", _INVENTORY), ("inventory", _INVENTORY),
+    ("stock", _INVENTORY),
+    ("عملاء", _CUSTOMERS), ("عميل", _CUSTOMERS), ("زبائن", _CUSTOMERS), ("زبون", _CUSTOMERS),
+    ("customer", _CUSTOMERS), ("client", _CUSTOMERS),
+    ("موردين", _SUPPLIERS), ("موردون", _SUPPLIERS), ("مورد", _SUPPLIERS),
+    ("supplier", _SUPPLIERS), ("vendor", _SUPPLIERS),
+    ("ديون", _DEBTS), ("دين", _DEBTS), ("مديونيه", _DEBTS), ("debt", _DEBTS),
+    ("تقارير", _REPORTS), ("تقرير", _REPORTS), ("report", _REPORTS),
+    ("بنوك", _BANKS), ("بنك", _BANKS), ("بنكي", _BANKS), ("صندوق", _BANKS), ("خزينه", _BANKS),
+    ("خزنه", _BANKS), ("كاش", _BANKS), ("نقد", _BANKS), ("نقدي", _BANKS), ("نقديه", _BANKS),
+    ("bank", _BANKS), ("cash", _BANKS), ("treasury", _BANKS),
+    ("اعدادات", _b("الإعدادات", "Settings", "/settings")), ("settings", _b("الإعدادات", "Settings", "/settings")),
+    ("اشتراك", _b("الباقات", "Subscription", "/subscription")),
+    ("subscription", _b("الباقات", "Subscription", "/subscription")),
+    ("اشعارات", _b("الإشعارات", "Notifications", "/notifications")),
+    ("notification", _b("الإشعارات", "Notifications", "/notifications")),
+    ("profile", _b("الملف الشخصي", "Profile", "/profile")),
+    ("رئيسيه", _DASHBOARD), ("dashboard", _DASHBOARD), ("home", _DASHBOARD),
+]
+
+# Every route the Business fallback may attach (open_app_screen allows them).
+BUSINESS_FALLBACK_ROUTES = frozenset(target[2] for _, target in _BUSINESS_KEYWORDS)
+
 _ASK_CUES = (
     "افتح", "فتح", "وديني", "ودني", "خذني", "انتقل", "صفحه", "شاشه", "زر", "زرار",
     "رابط", "لينك", "ارسل لي", "رسل لي", "رسلي", "ارسلي", "ابعث", "ابعتلي", "دزلي",
@@ -97,14 +172,14 @@ def reply_promises_button(text: str) -> bool:
     return any(c in t for c in _REPLY_CUES)
 
 
-def screen_from_text(text: str) -> Optional[tuple]:
-    """(name_ar, name_en, route) of the first Personal screen [text] names."""
+def screen_from_text(text: str, section: str = "personal") -> Optional[tuple]:
+    """(name_ar, name_en, route) of the first screen of [section] [text] names."""
     t = _norm(text)
     if not t.strip():
         return None
     words = [w for w in _SPLIT.split(t) if w]
     best_at, best = None, None
-    for kw, target in _KEYWORDS:
+    for kw, target in (_BUSINESS_KEYWORDS if section == "business" else _KEYWORDS):
         kw = _norm(kw)
         at = -1
         if " " in kw:
@@ -121,7 +196,8 @@ def screen_from_text(text: str) -> Optional[tuple]:
     return best
 
 
-def missing_open_action(query: str, answer: str, actions: list) -> Optional[dict]:
+def missing_open_action(query: str, answer: str, actions: list,
+                        section: str = "personal") -> Optional[dict]:
     """The open_screen params to attach, or None when nothing is missing.
 
     [actions] are AgentAction objects or dicts with an ``action`` key.
@@ -133,7 +209,7 @@ def missing_open_action(query: str, answer: str, actions: list) -> Optional[dict
         return None
     if not (asks_for_screen(query) or reply_promises_button(answer)):
         return None
-    target = screen_from_text(query) or screen_from_text(answer)
+    target = screen_from_text(query, section) or screen_from_text(answer, section)
     if not target:
         return None
     name_ar, name_en, route = target

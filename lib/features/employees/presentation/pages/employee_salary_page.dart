@@ -18,6 +18,7 @@ import '../../data/employee_device_finance.dart';
 import '../widgets/employee_avatar.dart';
 import '../widgets/salary_receipt.dart';
 import 'employee_payment_page.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 class EmployeeSalaryPage extends ConsumerStatefulWidget {
   const EmployeeSalaryPage({
@@ -208,10 +209,7 @@ class _EmployeeSalaryPageState extends ConsumerState<EmployeeSalaryPage> {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                subtitle: Text(
-                  '${fmtNum(a.balance)} ${currencySymbol(a.currency)}',
-                  style: const TextStyle(fontFamily: 'Cairo', fontSize: 11),
-                ),
+                subtitle: MoneyText(amount: fmtNum(a.balance), currency: currencySymbol(a.currency), style: const TextStyle(fontFamily: 'Cairo', fontSize: 11)),
                 onTap: () => Navigator.pop(ctx, a),
               ),
           ],

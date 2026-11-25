@@ -51,6 +51,9 @@ class _FalconPageState extends ConsumerState<FalconPage>
     '${ref.read(currentUserProvider)?.organizationId}|${BranchScope.branchId}|${BranchScope.allMode}';
   bool _refreshing = false;
 
+  /// The last analysis failed: a retry is offered where the report shows.
+  bool _failed = false;
+
   /// Frame-driven 4s intro clock (never a Timer: no pending-timer leaks,
   /// advances with pumped frames, cheap on GPU).
   late final AnimationController _introCtrl = AnimationController(
@@ -328,19 +331,46 @@ class _FalconPageState extends ConsumerState<FalconPage>
 
   Future<void> _analyze({bool keepOld = false}) async {
     final requestScope = BranchScope.token;
+    final api = ref.read(inventoryApiProvider);
+    final currency = _reportCurrency;
     if (keepOld) {
-      setState(() => _refreshing = true);
+      setState(() {
+        _refreshing = true;
+        _failed = false;
+      });
     } else {
-      setState(() => _loading = true);
+      setState(() {
+        _loading = true;
+        _failed = false;
+      });
+      // Partial result first: the key numbers computed on this phone show
+      // at once while the narrative is written (device-ledger sources).
+      try {
+        final preview = await api.falconPreview(widget.scope, widget.refId,
+            reportCurrency: currency);
+        if (mounted &&
+            preview != null &&
+            requestScope == BranchScope.token &&
+            currency == _reportCurrency &&
+            _report.isEmpty) {
+          setState(() {
+            _report = {'status': 'watch', 'stats': preview, 'partial': true};
+            _dataVersion++;
+            _loading = false;
+            _refreshing = true;
+          });
+        }
+      } catch (_) {
+        // The analysis below reads the figures again and reports its error.
+      }
     }
     try {
-      final r = await ref
-          .read(inventoryApiProvider)
-          .falconAnalyze(widget.scope, widget.refId,
-              reportCurrency: _reportCurrency);
+      final r = await api.falconAnalyze(widget.scope, widget.refId,
+          reportCurrency: currency);
       // An empty answer never wipes a report already on screen.
       if (mounted &&
           requestScope == BranchScope.token &&
+          currency == _reportCurrency &&
           (r.isNotEmpty || !keepOld)) {
         setState(() {
           _report = r;
@@ -348,9 +378,14 @@ class _FalconPageState extends ConsumerState<FalconPage>
         });
       }
     } catch (_) {
-      if (mounted && !keepOld) {
-        showFyonaSnack(context, 'تعذّر تشغيل التحليل، حاول مجددًا',
-            success: false);
+      if (mounted && currency == _reportCurrency) {
+        // A partial report stays visible; the retry is offered in place.
+        setState(() => _failed = true);
+        if (!keepOld) {
+          showFyonaSnack(context,
+              AppLocalizations.of(context).translate('falconAnalyzeFailed'),
+              success: false);
+        }
       }
     } finally {
       if (mounted) {
@@ -1044,7 +1079,10 @@ class _FalconPageState extends ConsumerState<FalconPage>
         const SizedBox(height: 180),
       ] else if (_loading && _report.isEmpty) ...[
         const FalconLoader(),
+      ] else if (_failed && _report.isEmpty) ...[
+        _retryCard(context, l10n),
       ] else ...[
+        if (_failed && !_refreshing) _retryRow(context, l10n),
         if (_refreshing)
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
@@ -1699,6 +1737,55 @@ class _FalconPageState extends ConsumerState<FalconPage>
   /// Tiny helper so the bubble can use l10n without threading it around.
   String l10nKey(String key) =>
       AppLocalizations.of(context).translate(key);
+
+  Widget _retryButton(AppLocalizations l10n) => FilledButton.icon(
+        key: const ValueKey('falcon-retry'),
+        onPressed: () => _analyze(keepOld: _report.isNotEmpty),
+        icon: const Icon(Icons.refresh_rounded, size: 18),
+        label: Text(l10n.translate('falconRetry'),
+            style: const TextStyle(fontFamily: 'Cairo')),
+      );
+
+  Widget _retryCard(BuildContext context, AppLocalizations l10n) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(children: [
+        const FalconMark(44),
+        const SizedBox(height: 10),
+        Text(l10n.translate('falconAnalyzeFailed'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontFamily: 'Cairo',
+                fontSize: 13,
+                color: AppColors.textSecondary)),
+        const SizedBox(height: 12),
+        _retryButton(l10n),
+      ]),
+    );
+  }
+
+  Widget _retryRow(BuildContext context, AppLocalizations l10n) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(children: [
+        Icon(Icons.error_outline, size: 16, color: AppColors.warning),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(l10n.translate('falconAnalyzeFailed'),
+              style: TextStyle(
+                  fontFamily: 'Cairo',
+                  fontSize: 12,
+                  color: AppColors.textSecondary)),
+        ),
+        _retryButton(l10n),
+      ]),
+    );
+  }
 
   Widget _emptyState(BuildContext context, AppLocalizations l10n) {
     return Container(

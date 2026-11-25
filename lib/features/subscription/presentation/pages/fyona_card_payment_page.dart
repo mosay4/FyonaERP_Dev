@@ -22,6 +22,7 @@ import 'package:fyona_flutter/features/subscription/presentation/widgets/stripe_
 import 'package:fyona_flutter/features/subscription/di/subscription_providers.dart';
 import 'package:fyona_flutter/features/subscription/presentation/providers/subscription_providers.dart';
 import 'package:fyona_flutter/features/auth/presentation/providers/auth_provider.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 /// Feature flag for the native FYONA card screen.
 ///
@@ -539,14 +540,11 @@ StripePaymentIntent? createdIntent;
               ],
             ),
           ),
-          Text(
-            '${fmtNum(widget.displayAmount)} ${currencySymbol(widget.displayCurrency)}',
-            style: TextStyle(
+          MoneyText(amount: fmtNum(widget.displayAmount), currency: currencySymbol(widget.displayCurrency), style: TextStyle(
                 fontFamily: 'Cairo',
                 fontSize: R.fontSize(context, 17),
                 fontWeight: FontWeight.w900,
-                color: accent),
-          ),
+                color: accent)),
         ],
       ),
     );

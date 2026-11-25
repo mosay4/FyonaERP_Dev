@@ -51,9 +51,11 @@ class _SaleItemsSectionState extends ConsumerState<SaleItemsSection> {
     final notifier = ref.read(saleDraftProvider.notifier);
     final pid = p['id'].toString();
     List<dynamic> units = [];
+    String? productImage = businessUnitDisplayImage(null, product: p);
     try {
       final u = await ref.read(salesApiProvider).productUnits(pid);
       units = (u['units'] as List?)?.whereType<Map>().toList() ?? const [];
+      productImage = businessUnitDisplayImage(null, units: u, product: p);
     } catch (_) {}
     if (!mounted) return;
     if (units.length > 1) {
@@ -70,7 +72,8 @@ class _SaleItemsSectionState extends ConsumerState<SaleItemsSection> {
         builder: (_) => _UnitPickerSheet(
             units: units.map((e) => Map<String, dynamic>.from(e)).toList(),
             baseUnit: baseUnit,
-            currency: ref.read(saleDraftProvider).currency),
+            currency: ref.read(saleDraftProvider).currency,
+            productImage: productImage),
       );
       if (picked == null || !mounted) return;
       final factor = (picked['factor'] as num?)?.toDouble() ?? 1.0;
@@ -806,8 +809,14 @@ class _UnitPickerSheet extends StatelessWidget {
   final List<Map<String, dynamic>> units;
   final String baseUnit;
   final String currency;
+
+  /// The product's photo, shown for units without one of their own.
+  final String? productImage;
   const _UnitPickerSheet(
-      {required this.units, required this.baseUnit, required this.currency});
+      {required this.units,
+      required this.baseUnit,
+      required this.currency,
+      this.productImage});
 
   /// Plain-language unit line: «1 باكيت = 8 قطع • 60 USD». Base unit shows
   /// just its price (no redundant «1 قطعة = 1 قطعة»).
@@ -825,19 +834,21 @@ class _UnitPickerSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    // A Material (not a coloured box) so the rows' ink shows.
+    return Material(
+      color: AppColors.surface,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      child: Padding(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           for (final u in units)
             ListTile(
               // The unit's own photo (a carton) when it has one.
-              leading: BusinessUnitImage(image: u['image']?.toString()),
+              leading: BusinessUnitImage(
+                  image: businessUnitDisplayImage(u,
+                      product: {'image': productImage})),
               title: Text((u['name'] ?? '').toString(),
                   style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w600)),
               subtitle: Text(
@@ -846,6 +857,7 @@ class _UnitPickerSheet extends StatelessWidget {
               onTap: () => Navigator.pop(context, u),
             ),
         ],
+      ),
       ),
     );
   }
@@ -1043,7 +1055,8 @@ class _LineRow extends ConsumerWidget {
         builder: (_) => _UnitPickerSheet(
             units: units.map((e) => Map<String, dynamic>.from(e)).toList(),
             baseUnit: baseUnit,
-            currency: invCur),
+            currency: invCur,
+            productImage: businessUnitDisplayImage(null, units: u)),
       );
       if (picked == null || !context.mounted) return;
       final price = picked['sale_price'] != null

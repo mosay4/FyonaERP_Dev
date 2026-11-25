@@ -120,7 +120,7 @@ void main() {
     await pump(tester, empty: true);
     expect(find.text('هذا التصنيف لا يحتوي على أي منتج'), findsOneWidget);
     final run = tester.widget<FilledButton>(
-        find.ancestor(of: find.text('تنفيذ الفحص'), matching: find.byType(FilledButton)));
+        find.ancestor(of: find.text('تنفيذ المطابقة'), matching: find.byType(FilledButton)));
     expect(run.onPressed, isNull);
   });
 }

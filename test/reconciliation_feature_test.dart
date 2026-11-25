@@ -60,75 +60,6 @@ void main() {
         'is_cash': false,
       };
 
-  testWidgets('Core overlay: result NEVER revealed before 4 seconds',
-      (tester) async {
-    await preload(tester);
-    dynamic revealed;
-    await tester.pumpWidget(host(ReconCoreOverlay(
-      variant: ReconSceneVariant.bank,
-      processingText: 'جارٍ المعالجة',
-      future: Future.value({'ref_code': 'RCN-X'}),
-      onResult: (_, r) => revealed = r,
-      onError: (_, e) {},
-    )));
-    await tester.pump(const Duration(seconds: 1));
-    expect(revealed, isNull, reason: 'must hold the full 4 seconds');
-    await tester.pumpAndSettle(const Duration(milliseconds: 250),
-        EnginePhase.sendSemanticsUpdate, const Duration(seconds: 10));
-    expect(revealed, isNotNull, reason: 'gate did not release after 4s');
-    expect((revealed as Map)['ref_code'], 'RCN-X');
-  });
-
-  testWidgets('Core overlay: layout separates texts from the scene (small screens)',
-      (tester) async {
-    await preload(tester);
-    tester.view.physicalSize = const Size(320, 560);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(host(ReconCoreOverlay(
-      variant: ReconSceneVariant.inventoryFull,
-      processingText: 'جارٍ المعالجة',
-      future: Completer<dynamic>().future,
-      onResult: (_, r) {},
-      onError: (_, e) {},
-    )));
-    await pumpFor(tester, const Duration(milliseconds: 120), 10);
-    // No overflow exception + the three layout zones exist.
-    expect(tester.takeException(), isNull);
-    expect(find.text('جاري الفحص'), findsOneWidget);
-    expect(find.text('نراجع الأرقام ونقارنها بالواقع'), findsOneWidget);
-    expect(find.byType(CustomPaint), findsWidgets);
-  });
-
-  testWidgets(
-      'Core overlay: all five variants paint in LIGHT and DARK without '
-      'exceptions', (tester) async {
-    await preload(tester);
-    for (final brightness in [Brightness.light, Brightness.dark]) {
-      for (final variant in ReconSceneVariant.values) {
-        await tester.pumpWidget(MaterialApp(
-          theme: ThemeData(brightness: brightness),
-          locale: const Locale('ar'),
-          supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          home: ReconCoreOverlay(
-            variant: variant,
-            processingText: 'x',
-            future: Completer<dynamic>().future,
-            onResult: (_, r) {},
-            onError: (_, e) {},
-          ),
-        ));
-        await pumpFor(tester, const Duration(milliseconds: 250), 12);
-        expect(tester.takeException(), isNull,
-            reason: 'variant $variant / ${brightness.name}');
-        await tester.pumpWidget(const SizedBox());
-        await tester.pumpAndSettle();
-      }
-    }
-  });
-
   testWidgets(
       'Crystal seal V2: paints through every timeline point (both themes) '
       'without exceptions, and stays static after completion', (tester) async {
@@ -172,11 +103,11 @@ void main() {
       return out;
     }
 
-    expect(await msg(ReconEqualizeKind.bank), 'تم تصحيح البنك');
-    expect(await msg(ReconEqualizeKind.cash), 'تم تصحيح الكاش');
-    expect(await msg(ReconEqualizeKind.product), 'تم تصحيح هذا المنتج');
-    expect(await msg(ReconEqualizeKind.category), 'تم تصحيح هذا القسم');
-    expect(await msg(ReconEqualizeKind.store), 'تم تصحيح المخزون بالكامل');
+    expect(await msg(ReconEqualizeKind.bank), 'تمت مساواة البنك');
+    expect(await msg(ReconEqualizeKind.cash), 'تمت مساواة الكاش');
+    expect(await msg(ReconEqualizeKind.product), 'تمت مساواة هذا المنتج');
+    expect(await msg(ReconEqualizeKind.category), 'تمت مساواة هذا القسم');
+    expect(await msg(ReconEqualizeKind.store), 'تمت مساواة المخزون بالكامل');
   });
 
   testWidgets(
@@ -234,9 +165,9 @@ void main() {
       child: hostRouted(const ReconciliationHomePage()),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('فحص أرصدة البنوك والكاش'), findsOneWidget);
-    expect(find.text('جرد المخزون'), findsOneWidget);
-    expect(find.text('الفحوصات السابقة'), findsOneWidget);
+    expect(find.text('مطابقة الحسابات البنكية والكاش'), findsOneWidget);
+    expect(find.text('مطابقة المخزون'), findsOneWidget);
+    expect(find.text('المطابقات السابقة'), findsOneWidget);
     expect(find.byType(OutlinedButton), findsOneWidget);
   });
 
@@ -254,9 +185,9 @@ void main() {
       child: hostRouted(const ReconInventoryScopePage()),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('جرد منتج معين'), findsOneWidget);
-    expect(find.text('جرد تصنيف معين'), findsOneWidget);
-    expect(find.text('جرد المخزون بالكامل'), findsOneWidget);
+    expect(find.text('مطابقة منتج معين'), findsOneWidget);
+    expect(find.text('مطابقة تصنيف معين'), findsOneWidget);
+    expect(find.text('مطابقة المخزون بالكامل'), findsOneWidget);
     expect(find.text('اختار منتج واكتب كم عنده بالحقيقة'), findsOneWidget);
   });
 

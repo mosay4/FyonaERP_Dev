@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -10,7 +11,8 @@ import 'package:fyona_flutter/features/reconciliation/presentation/pages/recon_i
 import 'package:fyona_flutter/features/reconciliation/presentation/widgets/recon_motion.dart';
 import 'package:fyona_flutter/features/reconciliation/presentation/widgets/recon_scenes.dart';
 
-/// Reconciliation motions: the opening scenes (financial / inventory), the
+/// Reconciliation motions: the matching scenes (financial / inventory) that
+/// play after «بدء المطابقة», the
 /// settle («balanced») mark and their sound assets.
 void main() {
   const sceneKey = ValueKey('recon-opening-scene');
@@ -28,116 +30,160 @@ void main() {
         home: child,
       );
 
-  testWidgets('opening scene plays, then reveals the SAME page state '
+  /// Opens the matching scene from a button and records its outcome.
+  Widget launcher(
+    Future<Object?> Function() future,
+    void Function(ReconMatchOutcome<Object?>) done, {
+    ReconOpenScene scene = ReconOpenScene.financial,
+  }) => Builder(
+    builder: (context) => TextButton(
+      onPressed: () async => done(
+        await runReconMatching<Object?>(
+          context,
+          scene: scene,
+          future: future(),
+        ),
+      ),
+      child: const Text('START'),
+    ),
+  );
+
+  testWidgets('matching scene plays after start, then closes with the result '
       '(both scenes, both themes)', (tester) async {
     await preload(tester);
     for (final brightness in Brightness.values) {
       for (final scene in ReconOpenScene.values) {
-        _Probe.mounts = 0;
+        ReconMatchOutcome<Object?>? outcome;
         await tester.pumpWidget(
           host(
-            ReconOpeningGate(scene: scene, child: const _Probe()),
+            launcher(() async => 'RESULT', (o) => outcome = o, scene: scene),
             brightness: brightness,
           ),
         );
         await tester.pump(); // localizations
-        expect(find.byKey(sceneKey), findsOneWidget);
+        expect(find.byKey(sceneKey), findsNothing, reason: 'not before start');
+        await tester.tap(find.text('START'));
+        await tester.pump();
         await tester.pump(const Duration(milliseconds: 700));
         expect(find.byKey(sceneKey), findsOneWidget);
         expect(tester.takeException(), isNull);
+        expect(outcome, isNull, reason: 'results wait for the motion');
         await tester.pumpAndSettle();
         expect(find.byKey(sceneKey), findsNothing, reason: '$scene');
-        expect(find.text('PAGE'), findsOneWidget);
-        expect(_Probe.mounts, 1, reason: 'page must not remount on reveal');
+        expect(outcome?.ok, isTrue);
+        expect(outcome?.result, 'RESULT');
         await tester.pumpWidget(const SizedBox());
       }
     }
   });
 
-  testWidgets('scene is short (< 2 s total) and holds while not ready',
+  testWidgets('scene is short (< 2 s) and holds while the check runs',
       (tester) async {
     await preload(tester);
-    Widget gate(bool ready) => host(
-      ReconOpeningGate(
-        scene: ReconOpenScene.financial,
-        ready: ready,
-        child: const Text('PAGE'),
-      ),
+    ReconMatchOutcome<Object?>? outcome;
+    await tester.pumpWidget(
+      host(launcher(() async => 1, (o) => outcome = o)),
     );
-    await tester.pumpWidget(gate(true));
-    await tester.pump(); // localizations
-    expect(find.byKey(sceneKey), findsOneWidget);
-    for (var i = 0; i < 20; i++) {
+    await tester.pump();
+    await tester.tap(find.text('START'));
+    for (var i = 0; i < 18; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    expect(find.byKey(sceneKey), findsNothing, reason: 'gone within 2 s');
+    expect(outcome?.result, 1, reason: 'results open within 1.8 s');
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.byKey(sceneKey), findsNothing, reason: 'faded out');
 
+    final pending = Completer<Object?>();
+    outcome = null;
     await tester.pumpWidget(const SizedBox());
-    await tester.pumpWidget(gate(false));
+    await tester.pumpWidget(
+      host(launcher(() => pending.future, (o) => outcome = o)),
+    );
+    await tester.pump();
+    await tester.tap(find.text('START'));
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 150));
     }
     expect(find.byKey(sceneKey), findsOneWidget);
     final l10n = AppLocalizations.of(tester.element(find.byKey(sceneKey)));
     expect(find.text(l10n.translate('reconProcessing')), findsOneWidget);
-    await tester.pumpWidget(gate(true));
+    expect(outcome, isNull);
+    pending.complete({'ref_code': 'RCN-X'});
     await tester.pumpAndSettle();
     expect(find.byKey(sceneKey), findsNothing);
-    expect(find.text('PAGE'), findsOneWidget);
+    expect((outcome?.result as Map?)?['ref_code'], 'RCN-X');
   });
 
-  testWidgets('back during the motion leaves the page', (tester) async {
+  testWidgets('a failed check closes the scene at once with the error',
+      (tester) async {
     await preload(tester);
+    ReconMatchOutcome<Object?>? outcome;
+    final pending = Completer<Object?>();
+    await tester.pumpWidget(
+      host(launcher(() => pending.future, (o) => outcome = o)),
+    );
+    await tester.pump();
+    await tester.tap(find.text('START'));
+    await tester.pump(const Duration(milliseconds: 1400));
+    pending.completeError(StateError('boom'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byKey(sceneKey), findsNothing);
+    expect(outcome?.ok, isFalse);
+    expect(outcome?.error, isA<StateError>());
+  });
+
+  testWidgets('back during the motion leaves it', (tester) async {
+    await preload(tester);
+    ReconMatchOutcome<Object?>? outcome;
     await tester.pumpWidget(
       host(
-        Builder(
-          builder: (context) => TextButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const ReconOpeningGate(
-                  scene: ReconOpenScene.inventory,
-                  child: Text('PAGE'),
-                ),
-              ),
-            ),
-            child: const Text('OPEN'),
-          ),
+        launcher(
+          () => Completer<Object?>().future,
+          (o) => outcome = o,
+          scene: ReconOpenScene.inventory,
         ),
       ),
     );
     await tester.pump(); // localizations
-    await tester.tap(find.text('OPEN'));
+    await tester.tap(find.text('START'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byKey(sceneKey), findsOneWidget);
     await tester.tap(find.byIcon(Icons.arrow_back_ios_new));
     await tester.pumpAndSettle();
     expect(find.byKey(sceneKey), findsNothing);
-    expect(find.text('PAGE'), findsNothing);
-    expect(find.text('OPEN'), findsOneWidget);
+    expect(find.text('START'), findsOneWidget);
+    expect(outcome?.left, isTrue);
   });
 
-  testWidgets('reduced motion: the page shows at once', (tester) async {
+  testWidgets('reduced motion: still scene, closes when the check ends',
+      (tester) async {
     await preload(tester);
+    ReconMatchOutcome<Object?>? outcome;
+    final pending = Completer<Object?>();
     await tester.pumpWidget(
       MediaQuery(
         data: const MediaQueryData(disableAnimations: true),
-        child: host(
-          const ReconOpeningGate(
-            scene: ReconOpenScene.financial,
-            child: Text('PAGE'),
-          ),
-        ),
+        child: host(launcher(() => pending.future, (o) => outcome = o)),
       ),
     );
     await tester.pump(); // localizations
+    await tester.tap(find.text('START'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(sceneKey), findsOneWidget);
+    pending.complete('R');
+    await tester.pump();
+    await tester.pumpAndSettle();
     expect(find.byKey(sceneKey), findsNothing);
-    expect(find.text('PAGE'), findsOneWidget);
-    await tester.pump(const Duration(milliseconds: 16));
-    expect(find.byKey(sceneKey), findsNothing);
+    expect(outcome?.result, 'R');
   });
 
-  testWidgets('inventory scope page opens through its scene', (tester) async {
+  testWidgets('inventory scope page opens straight away (no motion before '
+      'start)', (tester) async {
     await preload(tester);
     await tester.pumpWidget(
       ProviderScope(
@@ -152,12 +198,8 @@ void main() {
       ),
     );
     await tester.pump(); // localizations
-    expect(find.byKey(sceneKey), findsOneWidget);
-    final l10n = AppLocalizations.of(tester.element(find.byKey(sceneKey)));
-    expect(find.text(l10n.translate('reconOpenInvLine')), findsOneWidget);
-    await tester.pumpAndSettle();
     expect(find.byKey(sceneKey), findsNothing);
-    expect(find.text(l10n.translate('reconInvProduct')), findsOneWidget);
+    expect(find.text('مطابقة منتج معين'), findsOneWidget);
   });
 
   testWidgets('settle mark completes in < 1 s and settles (both themes)',

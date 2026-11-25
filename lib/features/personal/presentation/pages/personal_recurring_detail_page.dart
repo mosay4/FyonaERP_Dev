@@ -14,6 +14,7 @@ import '../providers/receipt_design_provider.dart';
 import '../../../../shared/widgets/receipt/receipt_modal.dart';
 import '../../../../shared/widgets/receipt/receipt_data.dart';
 import '../widgets/personal_account_choice.dart';
+import '../../../../core/utils/time_format.dart';
 
 class PersonalRecurringDetailPage extends ConsumerStatefulWidget {
   final RecurringTransaction? transaction;
@@ -315,7 +316,7 @@ class _PersonalRecurringDetailPageState extends ConsumerState<PersonalRecurringD
           _DetailRow(label: AppLocalizations.of(context).translate('recurringStartLabel'), value: _rt.nextDate != null ? DateFormat('dd/MM/yyyy').format(_rt.nextDate!) : '--',
               icon: Icons.play_circle_outline_rounded),
           if (_rt.lastExecutedAt != null)
-            _DetailRow(label: AppLocalizations.of(context).translate('recurringLastExecuted'), value: DateFormat('dd/MM/yyyy HH:mm').format(_rt.lastExecutedAt!),
+            _DetailRow(label: AppLocalizations.of(context).translate('recurringLastExecuted'), value: formatDateTimeDisplay(_rt.lastExecutedAt!, datePattern: 'dd/MM/yyyy', context: context),
                 icon: Icons.check_circle_outline_rounded, valueColor: const Color(0xFF66BB6A)),
           if (_rt.approximateStartDay != null)
             _DetailRow(label: AppLocalizations.of(context).translate('recurringApproxStartDay'), value: '${_rt.approximateStartDay}'),
@@ -532,7 +533,7 @@ class _PersonalRecurringDetailPageState extends ConsumerState<PersonalRecurringD
         title: _rt.name.isNotEmpty ? _rt.name : _rt.category,
         amount: _rt.amount,
         currencySymbol: currencySymbol(cur),
-        dateTime: DateFormat('yyyy/MM/dd HH:mm').format(DateTime.now()),
+        dateTime: formatDateTimeDisplay(DateTime.now()),
         referenceNumber: '#RC-${_rt.id}',
         senderName: isIncome ? _rt.category : accDisplay,
         receiverName: isIncome ? accDisplay : _rt.category,

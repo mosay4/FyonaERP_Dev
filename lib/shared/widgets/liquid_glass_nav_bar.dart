@@ -122,24 +122,11 @@ class _LiquidGlassNavBarState extends State<LiquidGlassNavBar>
     final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     if (reduceMotion && _drift.isAnimating) _drift.value = 1;
 
-    // The bar's own backdrop: the page tone, fading in from transparent so
-    // there is no hard edge above the bar.
-    final base = AppColors.background;
+    // No backdrop of its own: only the bar's rounded capsule is drawn, so no
+    // rectangular box/edges ever show behind it (light and dark themes).
     return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            base.withAlpha(0),
-            base,
-            dark
-                ? Color.alphaBlend(accent.withAlpha(18), base)
-                : Color.alphaBlend(accent.withAlpha(8), base),
-          ],
-          stops: const [0, 0.35, 1],
-        ),
-      ),
+      key: const ValueKey('liquidGlassNavBackdrop'),
+      color: Colors.transparent,
       padding: EdgeInsets.fromLTRB(16, 10, 16, math.max(bottomPad, 10) + 2),
       child: SizedBox(
         height: 68,

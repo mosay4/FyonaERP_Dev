@@ -121,6 +121,7 @@ flutter:
     - assets/audio/financial_debts.ogg
     - assets/audio/financial_executive.ogg
     - assets/audio/financial_precision.ogg
+    - assets/audio/financial_balance.ogg
     - assets/audio/report_overview_tiles.wav
     - assets/audio/report_overview_ring.wav
     - assets/audio/report_overview_settle.wav

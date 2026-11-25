@@ -8,6 +8,7 @@ import '../../../../core/utils/currency_formatter.dart' as cf;
 import '../../data/invoice_design_models.dart';
 import '../../data/invoice_doc.dart';
 import '../../data/invoice_labels.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// Live preview of an invoice in the Business design language, matching the
 /// PDF templates. Consumes the SAME [InvoiceDoc] as the PDF builders so the
@@ -459,7 +460,7 @@ class InvoicePreviewCard extends StatelessWidget {
         divider(),
         row('التاريخ', _date(doc)),
         row('الوقت',
-            '${doc.date?.hour.toString().padLeft(2, '0') ?? ''}:${doc.date?.minute.toString().padLeft(2, '0') ?? ''}'),
+            doc.date == null ? ':' : formatClock(doc.date!, locale: 'ar')),
         if (doc.branch.isNotEmpty) row('الفرع', doc.branch),
         if (doc.cashier.isNotEmpty)
           row(const InvoiceLabels(true).cashierFor(doc.cashierRole), doc.cashier),

@@ -17,6 +17,7 @@ import '../../../core_business/presentation/providers/local_commerce_navigation.
 import '../../../employees/presentation/providers/employee_providers.dart';
 import '../../../reconciliation/data/reconciliation_api.dart';
 import '../../data/business_finance_api.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// تفاصيل المعاملة — all the important data of ONE real movement + a
 /// «عرض الفاتورة» button when the movement is linked to an actual
@@ -172,7 +173,7 @@ class _BusinessTransactionDetailsPageState
         String two(int n) => n.toString().padLeft(2, '0');
         when =
             '${d.year}/${two(d.month)}/${two(d.day)} — '
-            '${two(d.hour)}:${two(d.minute)}';
+            '${formatClock(d, context: context)}';
       }
     }
 

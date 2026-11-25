@@ -42,6 +42,9 @@ class SaraSmartScheduler {
 
   static const String storeKey = 'sara_smart_reminders_v1';
   static const String lastFiredKey = 'sara_smart_last_fired_day';
+  /// Instant (ms) of the latest digest that fired — a time change made
+  /// after it may schedule that same day again (see SaraDailyPlanner.plan).
+  static const String lastFiredAtKey = 'sara_smart_last_fired_ms';
   static const String cooldownKey = 'sara_smart_cooldown_v1';
   static const String instantCountKey = 'sara_smart_instant_count_v1';
   static const String kind = 'sara';
@@ -87,6 +90,7 @@ class SaraSmartScheduler {
     try {
       final prefs = await SharedPreferences.getInstance();
       var last = prefs.getString(lastFiredKey);
+      var lastAt = prefs.getInt(lastFiredAtKey);
       final ms = (now ?? DateTime.now()).millisecondsSinceEpoch;
       final all = _decode(await PersonalReminderStore.read(storeKey));
       for (final e in all.values) {
@@ -94,13 +98,67 @@ class SaraSmartScheduler {
         final day = e['day']?.toString() ?? '';
         if (millis > 0 && millis <= ms && day.length == 8) {
           if (last == null || day.compareTo(last) > 0) last = day;
+          if (lastAt == null || millis > lastAt) lastAt = millis;
         }
       }
       if (last != null) await prefs.setString(lastFiredKey, last);
+      if (lastAt != null) await prefs.setInt(lastFiredAtKey, lastAt);
       return last;
     } catch (_) {
       return null;
     }
+  }
+
+  /// When the latest digest fired (ms), harvested like [lastFiredDay].
+  static Future<int?> lastFiredAt({DateTime? now}) async {
+    try {
+      await lastFiredDay(now: now);
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getInt(lastFiredAtKey);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The user picked a new daily time: moves every stored digest to it
+  /// right away (the full re-plan follows), so the new time holds even if
+  /// the app is closed a second later. Today's digest moves too — also
+  /// when it already fired today, as long as the new time is still ahead
+  /// (same request code per day: never two pending alarms for one day).
+  /// A digest whose new time has passed is cancelled. Never throws.
+  static Future<void> retime(int minutesOfDay, {DateTime? now}) async {
+    try {
+      final at = now ?? DateTime.now();
+      await lastFiredDay(now: at); // remember what fired before moving it
+      final all = _decode(await PersonalReminderStore.read(storeKey));
+      if (all.isEmpty) return;
+      final h = (minutesOfDay ~/ 60).clamp(0, 23);
+      final m = (minutesOfDay % 60).clamp(0, 59);
+      final limit = at.add(const Duration(seconds: 30));
+      final out = <String, Map<String, dynamic>>{};
+      for (final entry in all.entries) {
+        final e = entry.value;
+        final day = SaraDailyPlanner.parseDayKey(e['day']?.toString() ?? '');
+        final millis = (e['millis'] as num?)?.toInt() ?? 0;
+        final rc = (e['requestCode'] as num?)?.toInt() ?? 0;
+        final fired = millis > 0 && millis <= at.millisecondsSinceEpoch;
+        if (day == null || rc == 0) {
+          out[entry.key] = e;
+          continue;
+        }
+        final fireAt = DateTime(day.year, day.month, day.day, h, m);
+        if (fireAt.isAfter(limit)) {
+          final moved = {...e, 'millis': fireAt.millisecondsSinceEpoch};
+          out[entry.key] = moved;
+          await _schedule(moved, fireAt);
+        } else if (fired) {
+          out[entry.key] = e; // already delivered: kept as the fired record
+        } else {
+          await _cancel(rc); // its new time has passed
+        }
+      }
+      await PersonalReminderStore.write(storeKey, jsonEncode(out));
+    } catch (_) {}
   }
 
   static Future<Map<String, SaraCooldownEntry>> loadCooldown() async {

@@ -14,7 +14,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart' hide TextDirection;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../core/utils/currency_formatter.dart';
 import 'package:image_picker/image_picker.dart';
@@ -51,6 +50,7 @@ import '../../features/ai/domain/agent/tts_preparation.dart';
 import '../../features/ai/domain/agent/tool_registry.dart';
 import '../../features/ai/domain/agent/sara_screen_catalog.dart';
 import '../../features/ai/domain/agent/sara_link_fallback.dart';
+import '../../features/ai/domain/services/sara_speech.dart';
 import '../../features/ai/domain/agent/chat_persistence.dart';
 import '../../features/ai/domain/agent/sara_display.dart';
 import '../../features/ai/presentation/widgets/sara_premium.dart';
@@ -65,6 +65,7 @@ import '../../features/ai/domain/services/ai_service.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import '../../features/branches/data/branch_pictures.dart';
 import '../../features/ai/presentation/widgets/sara_offline_notice.dart';
+import '../../core/utils/time_format.dart';
 
 /// ── Sara adaptive palette ──────────────────────────────────────────
 /// "Graphite & crimson": a deep graphite studio in dark, a warm paper
@@ -275,6 +276,11 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
   String? _pendingFileName;
   XFile? _pendingImage;
   bool _isRecording = false;
+  // Voice through the phone's recognizer (text to Sara, no upload); null
+  // while the recorded-audio path is used. A recognizer failure switches
+  // this conversation to the upload path.
+  SaraSpeechSession? _speech;
+  bool _speechUnavailable = false;
   int _recordingDuration = 0;
   String? _audioPath;
   Timer? _recordingTimer;
@@ -377,6 +383,9 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
     _audioRecorder.dispose();
+    final speech = _speech;
+    _speech = null;
+    if (speech != null) unawaited(speech.cancel().whenComplete(speech.dispose));
     _audioPlayer.dispose();
     _recordingTimer?.cancel();
     _waveformTimer?.cancel();
@@ -1250,8 +1259,11 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
       }
       _history.add({'role': 'user', 'content': spoken ?? query});
       _history.add({'role': 'assistant', 'content': response.text});
-      setState(() => _addAssistantMessage(_cleanMarkdown(response.text), actions: response.actions,
-          routeLink: SaraActionDispatcher.resolveRouteFromActions(response.actions), visualGeneration: effectGeneration));
+      final replyText = _cleanMarkdown(response.text);
+      // «اضغط الزر لفتح البنوك» always comes with that button.
+      final replyActions = _withScreenLink(spoken ?? query, replyText, response.actions);
+      setState(() => _addAssistantMessage(replyText, actions: replyActions,
+          routeLink: SaraActionDispatcher.resolveRouteFromActions(replyActions), visualGeneration: effectGeneration));
       await _saveMessages();
       for (final pending in response.pendingTools) {
         if (pending['tool'] != 'business_operation' || BranchScope.readOnly) continue;
@@ -1879,12 +1891,12 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     });
   }
 
-  /// Personal: a reply that promises a screen button (or answers a request
-  /// for one) always carries it — derived from the words when the model
-  /// forgot the open-screen action (see sara_link_fallback.dart).
+  /// Personal and Business: a reply that promises a screen button (or
+  /// answers a request for one) always carries it — derived from the words
+  /// when the model forgot the open-screen action (see sara_link_fallback.dart).
   List<SaraAction> _withScreenLink(String userQuery, String reply, List<SaraAction> actions) {
-    if (widget.accountType == 'business') return actions;
-    return saraEnsureScreenAction(userQuery: userQuery, reply: reply, actions: actions, arabic: _chatLang() != 'en');
+    return saraEnsureScreenAction(userQuery: userQuery, reply: reply, actions: actions,
+        arabic: _chatLang() != 'en', business: widget.accountType == 'business');
   }
 
   void _addAssistantMessage(String text, {String? routeLink, List<SaraAction> actions = const [], int? visualGeneration}) {
@@ -2730,10 +2742,79 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     final hasPermission = await _audioRecorder.hasPermission();
     if (!hasPermission) { _inputTransitionCtrl.reverse(); return; }
     _composerFocus.unfocus();
+    if (!_speechUnavailable && SaraSpeechSession.supported && await _startSpeech()) return;
+    await _startAudioRecording();
+  }
+
+  /// On-device / platform recognition: the transcript streams into the
+  /// recording bar and the TEXT goes to Sara as soon as speech ends — no
+  /// upload, no server speech-to-text (seconds faster than the upload).
+  Future<bool> _startSpeech() async {
+    final session = SaraSpeechSession.platform();
+    if (!await session.start(_chatLang())) {
+      session.dispose();
+      _speechUnavailable = true;
+      return false;
+    }
+    if (!mounted) {
+      unawaited(session.cancel());
+      return true;
+    }
+    _speech = session;
+    session.level.addListener(() {
+      if (mounted && _speech == session) setState(() => _waveformValue = session.level.value);
+    });
+    session.partial.addListener(() {
+      if (mounted && _speech == session) setState(() {});
+    });
+    _recordingDuration = 0;
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (mounted) setState(() => _recordingDuration++);
+    });
+    setState(() => _isRecording = true);
+    unawaited(session.result.then((r) => _onSpeechResult(session, r)));
+    return true;
+  }
+
+  Future<void> _onSpeechResult(SaraSpeechSession session, SaraSpeechResult r) async {
+    if (_speech != session) return;
+    _speech = null;
+    _recordingTimer?.cancel();
+    session.dispose();
+    if (!mounted) return;
+    switch (r.end) {
+      case SaraSpeechEnd.text:
+        _inputTransitionCtrl.reverse();
+        setState(() => _isRecording = false);
+        _inputCtrl.text = r.text;
+        _send();
+      case SaraSpeechEnd.useRecording:
+        // The recognizer could not start listening: record and upload
+        // instead (the mic stays open, the user keeps talking).
+        _speechUnavailable = true;
+        setState(() => _isRecording = false);
+        await _startAudioRecording();
+      case SaraSpeechEnd.nothingHeard:
+        _inputTransitionCtrl.reverse();
+        // Next try records the audio and lets the server recognize it.
+        _speechUnavailable = true;
+        setState(() => _isRecording = false);
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+          content: Text(_isEn()
+              ? "I didn't catch that — tap the mic and try again."
+              : 'ما وصلني الكلام بوضوح — اضغط المايك وجرّب مرة ثانية.'),
+        ));
+    }
+  }
+
+  Future<void> _startAudioRecording() async {
     // Permanent folder — temporary dir gets wiped (this is why replays broke).
     final dir = await _permanentAudioDir();
     final path = '${dir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
-    await _audioRecorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
+    // 16 kHz mono speech at 32 kbps: what speech-to-text uses anyway, and
+    // ~4x smaller than the 44.1 kHz stereo default — a faster upload.
+    await _audioRecorder.start(const RecordConfig(encoder: AudioEncoder.aacLc,
+        sampleRate: 16000, numChannels: 1, bitRate: 32000), path: path);
     _recordingDuration = 0;
     _recordingTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (mounted) setState(() => _recordingDuration++);
@@ -2745,6 +2826,12 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
   }
 
   Future<void> _stopRecording() async {
+    final speech = _speech;
+    if (speech != null) {
+      // The recognizer finalizes what it heard; _onSpeechResult sends it.
+      await speech.stop();
+      return;
+    }
     _recordingTimer?.cancel();
     _waveformTimer?.cancel();
     final path = await _audioRecorder.stop();
@@ -3343,7 +3430,14 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
           Text('$mins:$secs',
             style: TextStyle(fontFamily: 'Cairo', fontSize: 14, fontWeight: FontWeight.w600, color: _saraText(context))),
           const SizedBox(width: 10),
-          Expanded(child: _buildLiveWaveform()),
+          // Recognized words stream here while the user speaks.
+          Expanded(child: (_speech?.partial.value ?? '').isNotEmpty
+              ? Text(_speech!.partial.value,
+                  key: const ValueKey('sara_speech_partial'),
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  textDirection: _isEn() ? ui.TextDirection.ltr : ui.TextDirection.rtl,
+                  style: TextStyle(fontFamily: 'Cairo', fontSize: 13, color: _saraText(context)))
+              : _buildLiveWaveform()),
           const SizedBox(width: 8),
           GestureDetector(
             onTap: _stopRecording,
@@ -3775,7 +3869,7 @@ class _UserBubble extends StatelessWidget {
                   Text(text, textDirection: isRtl ? ui.TextDirection.rtl : null,
                       style: const TextStyle(fontFamily: 'Cairo', fontSize: 14.5, color: Colors.white, height: 1.45)),
                   const SizedBox(height: 2),
-                  Text(DateFormat('HH:mm').format(time), style: _saraStamp(context, onInk: true)),
+                  Text(formatClock(time, context: context), style: _saraStamp(context, onInk: true)),
                 ],
               ),
             ),
@@ -3870,7 +3964,7 @@ class _ImageBubble extends StatelessWidget {
                   child: Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
                     if (text.isNotEmpty)
                       Text(text, style: const TextStyle(fontFamily: 'Cairo', fontSize: 13.5, color: Colors.white, height: 1.4)),
-                    Text(DateFormat('HH:mm').format(time), style: _saraStamp(context, onInk: true)),
+                    Text(formatClock(time, context: context), style: _saraStamp(context, onInk: true)),
                   ]),
                 ),
               ],
@@ -3992,7 +4086,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
                       ),
                     ],
                   ),
-                  Text(DateFormat('HH:mm').format(widget.time), style: _saraStamp(context, onInk: true)),
+                  Text(formatClock(widget.time, context: context), style: _saraStamp(context, onInk: true)),
                 ],
               ),
             ),
@@ -4153,7 +4247,7 @@ class _AssistantAudioBubbleState extends State<_AssistantAudioBubble> {
                   ),
                 ],
               ),
-              Text(DateFormat('HH:mm').format(widget.time), style: _saraStamp(context)),
+              Text(formatClock(widget.time, context: context), style: _saraStamp(context)),
             ],
           ),
         ),
@@ -4559,7 +4653,7 @@ class _AssistantBubble extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         textDirection: ui.TextDirection.ltr,
                         children: [
-                          Text(DateFormat('HH:mm').format(time), style: _saraStamp(context)),
+                          Text(formatClock(time, context: context), style: _saraStamp(context)),
                           const SizedBox(width: 6),
                           Semantics(
                             button: true,

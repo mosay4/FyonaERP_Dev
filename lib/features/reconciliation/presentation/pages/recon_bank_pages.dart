@@ -95,11 +95,7 @@ class _ReconAccountsPageState extends ConsumerState<ReconAccountsPage> {
         !(_source.isDeviceLedger || current.isDeviceLedger) ||
         (identical(current, _source) &&
             ref.watch(localBankReconciliationAllowedProvider));
-    // Opening motion (ledger balance) while the accounts load underneath.
-    return ReconOpeningGate(
-      scene: ReconOpenScene.financial,
-      ready: !allowed || !_loading,
-      child: Scaffold(
+    return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
@@ -159,7 +155,6 @@ class _ReconAccountsPageState extends ConsumerState<ReconAccountsPage> {
                 ],
               ),
       ),
-    ),
     );
   }
 }
@@ -671,51 +666,32 @@ class _ReconBankRunPageState extends ConsumerState<ReconBankRunPage> {
       entries: entries,
       idempotencyKey: ReconciliationApi.newOperationId(),
     );
-    void openResult(dynamic result) => context.push(
-      RouteNames.reconciliationBankResult,
-      extra: {
-        'record': Map<String, dynamic>.from(result as Map),
-        if (api.isDeviceLedger) 'source': api,
-      },
+    // The financial matching motion plays now (after «بدء المطابقة»), while
+    // the check runs; the results open when it closes.
+    final outcome = await runReconMatching(
+      context,
+      scene: ReconOpenScene.financial,
+      future: future,
     );
-    if (api.isDeviceLedger) {
-      try {
-        final record = await future;
-        if (mounted &&
-            identical(api, ref.read(reconciliationApiProvider)) &&
-            api.canReadDeviceBank) {
-          openResult(record);
-        }
-      } catch (e) {
-        if (mounted) showReconError(context, e);
-      } finally {
-        if (mounted) setState(() => _busy = false);
-      }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (outcome.left) return;
+    final error = outcome.error;
+    if (error != null) {
+      showReconError(context, error);
+      return;
+    }
+    if (!identical(api, ref.read(reconciliationApiProvider)) ||
+        (api.isDeviceLedger && !api.canReadDeviceBank)) {
       return;
     }
     unawaited(
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ReconCoreOverlay(
-            variant: ReconSceneVariant.bank,
-            processingText: l10n.translate('reconProcessing'),
-            future: future,
-            onResult: (_, result) {
-              if (!mounted) return;
-              setState(() => _busy = false);
-              context.pop(); // close the cinematic
-              if (identical(api, ref.read(reconciliationApiProvider)))
-                openResult(result);
-            },
-            onError: (_, e) {
-              if (mounted) {
-                setState(() => _busy = false);
-                context.pop();
-                showReconError(context, e);
-              }
-            },
-          ),
-        ),
+      context.push(
+        RouteNames.reconciliationBankResult,
+        extra: {
+          'record': Map<String, dynamic>.from(outcome.result as Map),
+          if (api.isDeviceLedger) 'source': api,
+        },
       ),
     );
   }

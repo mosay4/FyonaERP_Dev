@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import '../../data/models/personal_models.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../shared/widgets/currency_selector.dart';
@@ -19,6 +18,8 @@ import '../../domain/services/personal_finance_service.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'personal_account_choice.dart';
 import '../../../../shared/widgets/account_type_bar.dart' show accountTypeLabel;
+import '../../../../core/utils/time_format.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 const _incomeCategories = ['مرتب', 'بيع', 'هدية', 'إيجار', 'استثمار', 'عمولة', 'عمل حر', 'مكافأة', 'أخرى'];
 const _expenseCategories = ['طعام', 'مواصلات', 'اتصالات', 'صحة', 'تعليم', 'ترفيه', 'إيجار', 'فواتير', 'أخرى'];
@@ -318,7 +319,7 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
         title: l10n.translate('txWithdrawFromBudget'),
         amount: amt,
         currencySymbol: currencySymbol(currency),
-        dateTime: DateFormat('yyyy/MM/dd HH:mm').format(DateTime.now()),
+        dateTime: formatDateTimeDisplay(DateTime.now()),
         senderName: accountDisplay,
         receiverName: budget.name,
         details: [
@@ -778,8 +779,7 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
                               PersonalAccountTypeTag(accounts: accs, account: a),
                             ],
                           ),
-                          subtitle: Text('${fmtNum(a.balance)} ${currencyShort(a.currency)}',
-                              style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textSecondary)),
+                          subtitle: MoneyText(amount: fmtNum(a.balance), currency: currencyShort(a.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textSecondary)),
                           trailing: selId == a.id
                               ? TwoToneIcon(data: TwoToneIcons.check, size: 20, outlineColor: AppColors.primary)
                               : null,
@@ -890,8 +890,7 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
                         leading: _currencyLeading(c),
                         title: Text(currencyLabel(c),
                             style: TextStyle(fontFamily: 'Cairo', color: AppColors.textPrimary)),
-                        subtitle: Text('${fmtNum(balances[c] ?? 0)} ${currencyShort(c)}',
-                            style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textSecondary)),
+                        subtitle: MoneyText(amount: fmtNum(balances[c] ?? 0), currency: currencyShort(c), style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textSecondary)),
                         trailing: _selCurrency == c
                             ? TwoToneIcon(data: TwoToneIcons.check, size: 20, outlineColor: AppColors.primary)
                             : null,

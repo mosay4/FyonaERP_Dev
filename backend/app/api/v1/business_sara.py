@@ -25,8 +25,33 @@ from app.domain.services.branch_service import decode_scope_token
 from app.domain.services.sara_model import client, options
 from app.domain.services.sara_subscriptions import load_context, subscription_reply, cross_section_reply, policy
 from app.domain.services.sara_presentation import currency_catalog, currency_name, present, conversation_policy, preview_fields
+from app.domain.services.sara_screen_links import BUSINESS_FALLBACK_ROUTES, missing_open_action
 
 router = APIRouter(prefix='/business-sara', tags=['Business Sara'])
+
+# The history Sara sees is text only (earlier buttons are invisible to her):
+# every request for a screen must emit open_app_screen again, and no reply may
+# promise a button it did not create.
+BUSINESS_BUTTON_RULE = {
+    'ar': ('\nقاعدة الأزرار: كلما طلب المستخدم فتح شاشة أو قسم أو تفاصيل سجل أو زر/رابط له (حتى لو أرسلته من قبل) '
+           'استدعي open_app_screen في هذا الرد نفسه بالاسم والمسار من شاشات التطبيق. لا تكتبي «اضغط الزر» أو «الزر تحت» '
+           'إلا إذا استدعيت open_app_screen في هذا الرد.'),
+    'en': ('\nButton rule: every time the user asks to open a screen, section or record detail, or for a button/link to it '
+           '(even if you sent one earlier) call open_app_screen in THIS reply with the name and route from the app screens. '
+           'Never write "tap the button" or "the button below" unless you called open_app_screen in this reply.'),
+}
+
+
+def with_screen_button(actions, asked, reply, language):
+    """A reply that promises a screen button (or answers a request for one)
+    always carries it — derived from the words when the model skipped
+    open_app_screen («افتح البنوك» → /banks)."""
+    missing = missing_open_action(asked, reply, actions, section='business')
+    if not missing:
+        return actions
+    name = missing['screen_en'] if language == 'en' else missing['screen']
+    return [{'action': 'open_screen', 'params': {'screen': name, 'route': missing['route']},
+             'label': f"{'Open' if language == 'en' else 'فتح'} {name}"}, *actions]
 
 
 async def owner(request: Request, org=Depends(get_current_org_id),
@@ -233,7 +258,11 @@ async def answer(data, request, identity, db, *, device=False, resume=None):
     )
     routes = {x.get('route') for x in data.screen_catalog or [] if isinstance(x, dict)
               and str(x.get('route', '')).startswith('/') and not str(x.get('route')).startswith('/personal')}
+    # Core Business screens are always openable, even from an older app
+    # build whose catalog does not list them yet.
+    routes |= BUSINESS_FALLBACK_ROUTES
     prompt += '\nشاشات التطبيق: ' + json.dumps(sorted(routes), ensure_ascii=False)
+    prompt += BUSINESS_BUTTON_RULE[language]
     prompt += ('\nلفتح سجل بعينه أضيفي معرفه الحقيقي (بعد قراءته): منتج /inventory/product?id=<id>، '
                'تعديل منتج (الحد الأدنى، الباركود، السعر...) /inventory/product/edit?id=<id>، '
                'حركة منتج /inventory/product/movements?id=<id>، تصنيف /inventory/category?id=<id>. '
@@ -273,6 +302,10 @@ async def answer(data, request, identity, db, *, device=False, resume=None):
         messages += [h for h in (data.history or [])[-10:] if h.get('role') in ('user', 'assistant')]
         messages.append({'role': 'user', 'content': data.query})
     actions = list(resume.get('actions', [])) if resume else []
+    # What the user asked in this turn (in /continue it is in the resumed
+    # conversation) — the screen-button safety net reads it.
+    asked = data.query or next((str(m.get('content') or '') for m in reversed(messages)
+                                if m.get('role') == 'user'), '')
     confirmation_retry = False
     reconciliation_retry = False
     forced_tool = None
@@ -313,7 +346,9 @@ async def answer(data, request, identity, db, *, device=False, resume=None):
             if wants_action and claims_ready and confirmation_retry:
                 return {'text': ('The operation has not been prepared yet. Please specify any missing details.' if language == 'en' else 'لم يتم تجهيز عملية قابلة للتنفيذ بعد. وضّح البيانات الناقصة لنراجعها.'),
                         'actions': actions, 'pending_tools': []}
-            return {'text': present(message.content or ('What would you like to do?' if language == 'en' else 'حدد طلبك وسأساعدك.'), language), 'actions': actions, 'pending_tools': []}
+            reply = message.content or ('What would you like to do?' if language == 'en' else 'حدد طلبك وسأساعدك.')
+            return {'text': present(reply, language),
+                    'actions': with_screen_button(actions, asked, reply, language), 'pending_tools': []}
         messages.append({'role': 'assistant', 'content': message.content,
             'tool_calls': [t.model_dump() for t in message.tool_calls],
             **({'reasoning_content': message.reasoning_content} if getattr(message, 'reasoning_content', None) else {})})

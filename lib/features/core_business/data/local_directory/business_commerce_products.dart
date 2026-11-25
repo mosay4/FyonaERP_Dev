@@ -679,7 +679,17 @@ extension BusinessCommerceProducts on BusinessLedger {
     );
     return _directory._transaction((txn) async {
       final units = await _commerceUnitMap(txn, branch, productId);
+      final product = (await txn.query(
+        _commerceProducts,
+        columns: ['image'],
+        where: 'branch_id = ? AND id = ? AND deleted_us IS NULL',
+        whereArgs: [branch, productId],
+        limit: 1,
+      )).singleOrNull;
       return {
+        // Unit pickers show it for units without their own photo, like the
+        // product page does (device-local bytes, never a URL).
+        'product_image': _deviceInventoryImage(product?['image']),
         'units': [
           for (final unit in units.values)
             {

@@ -8,6 +8,7 @@ import 'receipt_engine/models.dart';
 import 'receipt_engine/renderer.dart';
 import 'receipt_engine/styles.dart';
 import 'utils/currency_formatter.dart';
+import 'utils/time_format.dart';
 
 /// One grouped table of a report PDF (title + headers + rows). The template
 /// repeats the title + header row on every page chunk, wraps long text, and
@@ -589,7 +590,7 @@ class PdfEngine {
     final now = DateTime.now();
     String two(int v) => v.toString().padLeft(2, '0');
     final issued =
-        '${now.year}-${two(now.month)}-${two(now.day)}  ${two(now.hour)}:${two(now.minute)}';
+        '${now.year}-${two(now.month)}-${two(now.day)}  ${formatClock(now)}';
     final parts = (subtitleParts != null && subtitleParts.isNotEmpty)
         ? subtitleParts
         : (subtitle ?? '')

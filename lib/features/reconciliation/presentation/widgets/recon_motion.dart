@@ -2,50 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../shared/widgets/financial_cinema.dart';
 import 'recon_scenes.dart';
-
-enum ReconSceneVariant {
-  bank,
-  cash,
-  inventoryProduct,
-  inventoryCategory,
-  inventoryFull,
-}
 
 enum ReconEqualizeKind { bank, cash, product, category, store }
 
 enum ReconSuccessAction { again, exit }
-
-class ReconCoreOverlay extends StatelessWidget {
-  const ReconCoreOverlay({
-    super.key,
-    required this.variant,
-    required this.processingText,
-    required this.future,
-    required this.onResult,
-    required this.onError,
-    this.duration = const Duration(milliseconds: 2700),
-  });
-  final ReconSceneVariant variant;
-  final String processingText;
-  final Future<dynamic> future;
-  final void Function(BuildContext, dynamic) onResult;
-  final void Function(BuildContext, Object) onError;
-  final Duration duration;
-
-  @override
-  Widget build(BuildContext context) => FinancialOperationScene(
-    scene: FinancialScene.precision,
-    title: AppLocalizations.of(context).translate('reconScanningTitle'),
-    statusText: AppLocalizations.of(context).translate('reconScanningStatus'),
-    processingText: processingText,
-    future: future,
-    onResult: onResult,
-    onError: onError,
-    duration: duration,
-  );
-}
 
 class CrystalBalanceSeal extends StatelessWidget {
   const CrystalBalanceSeal({super.key, this.size = 200});

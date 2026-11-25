@@ -2,7 +2,7 @@ import '../../../../core/router/route_names.dart';
 import '../../../../shared/widgets/sara_action_dispatcher.dart';
 import 'sara_screen_catalog.dart';
 
-/// Safety net for Sara's screen buttons (Personal section).
+/// Safety net for Sara's screen buttons (Personal and Business sections).
 ///
 /// The model sometimes answers «الزر تحت جاهز — اضغط عليه» without calling
 /// open_app_screen (it imitates an earlier reply whose button it no longer
@@ -13,12 +13,14 @@ import 'sara_screen_catalog.dart';
 /// from Sara's — and the chip is attached.
 ///
 /// Returns [actions] unchanged when a navigation action is already there or
-/// nothing in the text names a Personal screen.
+/// nothing in the text names a screen of the section ([business] picks the
+/// Business table: «افتح البنوك» → /banks, never /personal/banks).
 List<SaraAction> saraEnsureScreenAction({
   required String userQuery,
   required String reply,
   required List<SaraAction> actions,
   required bool arabic,
+  bool business = false,
 }) {
   final hasNav = actions.any((a) =>
       a.type == SaraActionType.openScreen || a.type == SaraActionType.openEntity ||
@@ -27,8 +29,8 @@ List<SaraAction> saraEnsureScreenAction({
   if (!saraAsksForScreen(userQuery) && !saraReplyPromisesButton(reply)) {
     return actions;
   }
-  final route = saraScreenRouteFromText(userQuery, arabic: arabic) ??
-      saraScreenRouteFromText(reply, arabic: arabic);
+  final route = saraScreenRouteFromText(userQuery, arabic: arabic, business: business) ??
+      saraScreenRouteFromText(reply, arabic: arabic, business: business);
   if (route == null) return actions;
   final title = _titleFor(route, arabic: arabic);
   return [
@@ -130,17 +132,120 @@ const List<MapEntry<String, String>> _keywords = [
   MapEntry('home', RouteNames.personalDashboard),
 ];
 
-/// The Personal screen [text] names, or null. Keyword table first (covers
-/// dialect words), then the live screen catalog's Personal titles (longest
-/// title found in the text wins, so screens added later are covered too).
-String? saraScreenRouteFromText(String text, {required bool arabic}) {
+/// Business screens by the words owners use for them. The cash box lives in
+/// the banks & treasury screen; products are the inventory screen.
+const List<MapEntry<String, String>> _businessKeywords = [
+  MapEntry('كشف حساب', RouteNames.banks),
+  MapEntry('تحويلات الفروع', '/branches/transfers'),
+  MapEntry('branch transfer', '/branches/transfers'),
+  MapEntry('ديون العملاء', '/debts/customers'),
+  MapEntry('customer debts', '/debts/customers'),
+  MapEntry('ديون الموردين', '/debts/suppliers'),
+  MapEntry('supplier debts', '/debts/suppliers'),
+  MapEntry('مطابقه المخزون', RouteNames.reconciliationInventory),
+  MapEntry('مطابقه البنوك', RouteNames.reconciliationBank),
+  MapEntry('stock count', RouteNames.reconciliationInventory),
+  MapEntry('النسخ الاحتياطي', '/business/backup'),
+  MapEntry('نسخه احتياطيه', '/business/backup'),
+  MapEntry('backup', '/business/backup'),
+  MapEntry('لوحه التحكم', RouteNames.dashboard),
+  MapEntry('الملف الشخصي', RouteNames.profile),
+  MapEntry('مطابقه', RouteNames.reconciliation),
+  MapEntry('مطابقات', RouteNames.reconciliation),
+  MapEntry('reconcil', RouteNames.reconciliation),
+  MapEntry('جرد', RouteNames.reconciliationInventory),
+  MapEntry('فروع', '/branches'),
+  MapEntry('فرع', '/branches'),
+  MapEntry('branch', '/branches'),
+  MapEntry('موظفين', '/employees'),
+  MapEntry('موظف', '/employees'),
+  MapEntry('رواتب', '/employees'),
+  MapEntry('راتب', '/employees'),
+  MapEntry('employee', '/employees'),
+  MapEntry('staff', '/employees'),
+  MapEntry('payroll', '/employees'),
+  MapEntry('salar', '/employees'),
+  MapEntry('ايرادات', RouteNames.businessIncomeExpense),
+  MapEntry('مصروفات', RouteNames.businessIncomeExpense),
+  MapEntry('مصاريف', RouteNames.businessIncomeExpense),
+  MapEntry('مصروف', RouteNames.businessIncomeExpense),
+  MapEntry('expense', RouteNames.businessIncomeExpense),
+  MapEntry('income', RouteNames.businessIncomeExpense),
+  MapEntry('فواتير', RouteNames.invoices),
+  MapEntry('فاتوره', RouteNames.invoices),
+  MapEntry('invoice', RouteNames.invoices),
+  MapEntry('مرتجعات', RouteNames.returns),
+  MapEntry('مرتجع', RouteNames.returns),
+  MapEntry('returns', RouteNames.returns),
+  MapEntry('مبيعات', RouteNames.sales),
+  MapEntry('sale', RouteNames.sales),
+  MapEntry('تصنيفات', RouteNames.inventoryCategories),
+  MapEntry('تصنيف', RouteNames.inventoryCategories),
+  MapEntry('categor', RouteNames.inventoryCategories),
+  MapEntry('منتجات', RouteNames.inventory),
+  MapEntry('منتج', RouteNames.inventory),
+  MapEntry('بضاعه', RouteNames.inventory),
+  MapEntry('بضائع', RouteNames.inventory),
+  MapEntry('مخزون', RouteNames.inventory),
+  MapEntry('مخزن', RouteNames.inventory),
+  MapEntry('product', RouteNames.inventory),
+  MapEntry('inventory', RouteNames.inventory),
+  MapEntry('stock', RouteNames.inventory),
+  MapEntry('عملاء', RouteNames.customers),
+  MapEntry('عميل', RouteNames.customers),
+  MapEntry('زبائن', RouteNames.customers),
+  MapEntry('زبون', RouteNames.customers),
+  MapEntry('customer', RouteNames.customers),
+  MapEntry('client', RouteNames.customers),
+  MapEntry('موردين', RouteNames.suppliers),
+  MapEntry('موردون', RouteNames.suppliers),
+  MapEntry('مورد', RouteNames.suppliers),
+  MapEntry('supplier', RouteNames.suppliers),
+  MapEntry('vendor', RouteNames.suppliers),
+  MapEntry('ديون', RouteNames.debts),
+  MapEntry('دين', RouteNames.debts),
+  MapEntry('مديونيه', RouteNames.debts),
+  MapEntry('debt', RouteNames.debts),
+  MapEntry('تقارير', RouteNames.reports),
+  MapEntry('تقرير', RouteNames.reports),
+  MapEntry('report', RouteNames.reports),
+  MapEntry('بنوك', RouteNames.banks),
+  MapEntry('بنك', RouteNames.banks),
+  MapEntry('بنكي', RouteNames.banks),
+  MapEntry('صندوق', RouteNames.banks),
+  MapEntry('خزينه', RouteNames.banks),
+  MapEntry('خزنه', RouteNames.banks),
+  MapEntry('كاش', RouteNames.banks),
+  MapEntry('نقد', RouteNames.banks),
+  MapEntry('نقدي', RouteNames.banks),
+  MapEntry('نقديه', RouteNames.banks),
+  MapEntry('bank', RouteNames.banks),
+  MapEntry('cash', RouteNames.banks),
+  MapEntry('treasury', RouteNames.banks),
+  MapEntry('اعدادات', RouteNames.settings),
+  MapEntry('settings', RouteNames.settings),
+  MapEntry('اشتراك', RouteNames.subscription),
+  MapEntry('subscription', RouteNames.subscription),
+  MapEntry('اشعارات', RouteNames.notifications),
+  MapEntry('notification', RouteNames.notifications),
+  MapEntry('profile', RouteNames.profile),
+  MapEntry('رئيسيه', RouteNames.dashboard),
+  MapEntry('dashboard', RouteNames.dashboard),
+  MapEntry('home', RouteNames.dashboard),
+];
+
+/// The screen [text] names in the section, or null. Keyword table first
+/// (covers dialect words), then the live screen catalog's titles of the
+/// section (longest title found in the text wins, so screens added later are
+/// covered too).
+String? saraScreenRouteFromText(String text, {required bool arabic, bool business = false}) {
   final t = _norm(text);
   if (t.trim().isEmpty) return null;
   // Earliest mention wins («افتح الديون… وبعدها البنوك» → الديون).
   final words = t.split(RegExp(r'''[\s,،.؟?!:؛\-_/«»"'()\[\]]+''')).where((w) => w.isNotEmpty).toList();
   int? bestAt;
   String? best;
-  for (final e in _keywords) {
+  for (final e in (business ? _businessKeywords : _keywords)) {
     final kw = _norm(e.key);
     int at = -1;
     if (kw.contains(' ')) {
@@ -166,7 +271,8 @@ String? saraScreenRouteFromText(String text, {required bool arabic}) {
   for (final entry in SaraScreenCatalog.entries(arabic: arabic)) {
     final route = entry['route'] ?? '';
     final title = _norm((entry['title'] ?? '').trim());
-    if (!route.startsWith('/personal') || route.contains('?') || route.endsWith('/')) continue;
+    if (route.startsWith('/personal') != !business || route.contains('?') || route.endsWith('/')) continue;
+    if (_notScreens.contains(route)) continue;
     if (title.length < 3 || !t.contains(title)) continue;
     if (title.length > longest) {
       longest = title.length;
@@ -175,6 +281,12 @@ String? saraScreenRouteFromText(String text, {required bool arabic}) {
   }
   return catalogRoute;
 }
+
+/// Sign-in / start-up routes are never offered as a section button.
+const Set<String> _notScreens = {
+  '/splash', '/login', '/register', '/verify-email', '/forgot-password', '/change-password',
+  '/choose-usage', '/onboarding', '/maintenance', '/reentry', '/mfa/setup', '/mfa/verify',
+};
 
 /// A word and its forms without Arabic clitic prefixes.
 Iterable<String> _wordForms(String w) sync* {

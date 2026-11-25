@@ -22,6 +22,8 @@ import '../../../../shared/widgets/receipt/receipt.dart';
 import '../providers/receipt_design_provider.dart';
 import 'goal_report_pdf.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../../../core/utils/time_format.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 /// Shared goal artwork (see [GoalIcons]) so the list and detail pages match.
 const _iconChoices = GoalIcons.choices;
@@ -152,7 +154,7 @@ class _SavingsGoalDetailPageState extends ConsumerState<SavingsGoalDetailPage> {
               fit: BoxFit.scaleDown,
               alignment: AlignmentDirectional.centerStart,
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Text('${fmtNum(goal.currentAmount)} ${currencySymbol(goal.currency)}', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 14), fontWeight: FontWeight.w700, color: Colors.white)),
+                MoneyText(amount: fmtNum(goal.currentAmount), currency: currencySymbol(goal.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 14), fontWeight: FontWeight.w700, color: Colors.white)),
                 Text(' / ${fmtNum(goal.targetAmount)} ${currencySymbol(goal.currency)}', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 12), color: Colors.white.withAlpha(150))),
               ]),
             ),
@@ -204,7 +206,7 @@ class _SavingsGoalDetailPageState extends ConsumerState<SavingsGoalDetailPage> {
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: AlignmentDirectional.centerStart,
-                  child: Text('${fmtNum(goal.currentAmount)} ${currencySymbol(goal.currency)}', maxLines: 1, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 18), fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  child: MoneyText(amount: fmtNum(goal.currentAmount), currency: currencySymbol(goal.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 18), fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                 ),
               ),
               Spacer(),
@@ -217,7 +219,7 @@ class _SavingsGoalDetailPageState extends ConsumerState<SavingsGoalDetailPage> {
                 valueColor: AlwaysStoppedAnimation(AppColors.primary)),
             ),
             SizedBox(height: 8),
-            Text('${fmtNum(goal.targetAmount)} ${currencySymbol(goal.currency)}', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 12), color: AppColors.textSecondary)),
+            MoneyText(amount: fmtNum(goal.targetAmount), currency: currencySymbol(goal.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 12), color: AppColors.textSecondary)),
           ]),
         ),
         SizedBox(height: 16),
@@ -277,7 +279,7 @@ class _SavingsGoalDetailPageState extends ConsumerState<SavingsGoalDetailPage> {
       title: l10n.translate('goalReportTitle', params: {'name': goal.name}),
       amount: goal.currentAmount,
       currencySymbol: currencySymbol(goal.currency),
-      dateTime: DateFormat('yyyy/MM/dd HH:mm').format(DateTime.now()),
+      dateTime: formatDateTimeDisplay(DateTime.now()),
       details: [
         ReceiptDetail(label: l10n.translate('goalLabel'), value: '${fmtNum(goal.targetAmount)} ${currencySymbol(goal.currency)}'),
         ReceiptDetail(label: l10n.translate('goalProgress'), value: '$progress%'),

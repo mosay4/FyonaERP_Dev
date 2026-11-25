@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/router/route_names.dart';
+import '../../../../shared/services/notification_router.dart';
 import '../../../../core/services/section_scope.dart';
 import '../../../../core/services/connectivity_service.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
@@ -34,6 +35,13 @@ class _AccountEntryPageState extends ConsumerState<AccountEntryPage> {
   void _go(String location) {
     BrandEntryHandoff.arm();
     context.go(location);
+    // A notification tap waited while account entry decided the home
+    // screen: deliver it now, over that home screen.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      try {
+        NotificationRouter.flushPending();
+      } catch (_) {}
+    });
   }
 
   Future<void> _enter() async {

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -17,6 +16,7 @@ import '../providers/personal_providers.dart';
 import '../providers/receipt_design_provider.dart';
 import '../../../../core/services/currency/currency_engine.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import '../../../../core/utils/time_format.dart';
 
 class FinanceOverviewPage extends ConsumerStatefulWidget {
   const FinanceOverviewPage({super.key});
@@ -60,7 +60,7 @@ class _FinanceOverviewPageState extends ConsumerState<FinanceOverviewPage> {
       title: l10n.translate('comprehensiveFinancialOverview'),
       amount: closingBalance,
        currencySymbol: currencySymbol(walletCurrency),
-       dateTime: DateFormat('yyyy/MM/dd HH:mm').format(DateTime.now()),
+       dateTime: formatDateTimeDisplay(DateTime.now()),
        details: [
          ReceiptDetail(label: l10n.translate('openingBalance'), value: '${fmtNum(openingBalance)} ${currencySymbol(walletCurrency)}'),
          ReceiptDetail(label: l10n.translate('totalIncome'), value: '${fmtNum(totalIn)} ${currencySymbol(walletCurrency)}'),

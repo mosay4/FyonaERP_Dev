@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:fl_chart/fl_chart.dart';
 
 import 'package:flutter/material.dart';
+import '../../../../shared/widgets/money_text.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/responsive/r_api.dart';
@@ -729,45 +730,19 @@ class ReportAmount extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // The currency name is a quiet tag beside the number — never as loud
-    // as the amount itself (stays small on big hero numbers too).
-    final compact = style.copyWith(
-      fontSize: ((style.fontSize ?? 14) * .42).clamp(9.5, 12.0).toDouble(),
-      fontWeight: FontWeight.w600,
-      color: (style.color ?? AppColors.textPrimary).withAlpha(200),
-      height: 1.2,
-    );
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: alignment,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            number,
-            maxLines: 1,
-            softWrap: false,
-            overflow: TextOverflow.visible,
-            style: style,
-          ),
-          if (currency.trim().isNotEmpty) ...[
-            const SizedBox(width: 4),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-              decoration: BoxDecoration(
-                color: (style.color ?? AppColors.primary).withAlpha(12),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                currency,
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.visible,
-                style: compact,
-              ),
-            ),
-          ],
-        ],
+    // as the amount itself (stays small on big hero numbers too). Shared
+    // with the whole app through [MoneyText].
+    final fs = style.fontSize ?? 14;
+    return MoneyText(
+      amount: number,
+      currency: currency,
+      style: style,
+      tagged: true,
+      currencyScale: ((fs * .42).clamp(9.5, 12.0)) / fs,
+      currencyStyle: TextStyle(
+        color: (style.color ?? AppColors.textPrimary).withAlpha(200),
       ),
+      alignment: alignment,
     );
   }
 }

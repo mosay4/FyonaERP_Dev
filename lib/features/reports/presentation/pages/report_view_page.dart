@@ -28,6 +28,7 @@ import '../../../../core/services/currency/currency_engine.dart';
 import '../widgets/report_integrity_card.dart';
 import '../widgets/report_scenes.dart';
 import '../widgets/report_widgets.dart';
+import '../../../../core/utils/time_format.dart';
 
 /// The five report DETAIL pages, rebuilt to match the «Report Identity» PDFs
 /// exactly: white cards on the light canvas, burgundy accents, big honest
@@ -892,7 +893,7 @@ class _ReportViewPageState extends ConsumerState<ReportViewPage> {
       final genAt = DateTime.now();
       final genDate =
           '${genAt.year.toString().padLeft(4, '0')}-${genAt.month.toString().padLeft(2, '0')}-${genAt.day.toString().padLeft(2, '0')} '
-          '${genAt.hour.toString().padLeft(2, '0')}:${genAt.minute.toString().padLeft(2, '0')}';
+          '${formatClock(genAt)}';
       final bytes = await PdfEngine.generateReportPdf(
         title: allBranches
             ? '${l10n.translate(_titleKey)} — ${l10n.translate('branchAllShort')}'

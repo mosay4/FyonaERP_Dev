@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/localization/app_localizations.dart';
@@ -17,6 +16,7 @@ import '../providers/receipt_design_provider.dart';
 import 'package:fyona_flutter/core/responsive/r_api.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import '../widgets/personal_account_choice.dart';
+import '../../../../core/utils/time_format.dart';
 
 class PersonalTransferPage extends ConsumerStatefulWidget {
   const PersonalTransferPage({super.key});
@@ -276,7 +276,7 @@ class _PersonalTransferPageState extends ConsumerState<PersonalTransferPage> {
       title: l10n.translate('transfer'),
       amount: sentAmount,
       currencySymbol: currencySymbol(fromCurrency),
-      dateTime: DateFormat('yyyy/MM/dd HH:mm').format(DateTime.now()),
+      dateTime: formatDateTimeDisplay(DateTime.now()),
       senderName: fromDisplay,
       receiverName: toDisplay,
       details: [

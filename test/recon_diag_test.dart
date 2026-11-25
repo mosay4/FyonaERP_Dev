@@ -50,7 +50,11 @@ void main() {
         EnginePhase.sendSemanticsUpdate, const Duration(seconds: 6));
     await tester.enterText(find.byType(TextField).first, '900');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('ابدأ الفحص'));
+    await tester.tap(find.text('ابدأ المطابقة'));
+    // The financial matching motion plays only now, after «ابدأ المطابقة».
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('recon-opening-scene')), findsOneWidget);
     await pumpFor(tester, const Duration(milliseconds: 250), 20);
     await tester.pump();
     await tester.pump();

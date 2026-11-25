@@ -171,6 +171,13 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_mdns.start_advertisement(8001))
     except Exception:
         pass
+    # Speech model for Sara's voice fallback path, loaded in the background.
+    try:
+        from app.domain.services import sara_transcription as _stt
+
+        asyncio.create_task(_stt.preload())
+    except Exception:
+        pass
     # Warn if running with DEBUG in production
     if settings.DEBUG:
         logger.warning("running_in_debug_mode")

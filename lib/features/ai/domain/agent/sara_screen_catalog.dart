@@ -96,6 +96,78 @@ class SaraScreenCatalog {
   }
 
   static const List<Map<String, String>> _extrasAr = [
+    // Business screens the help catalog does not describe yet: Sara must
+    // be able to open them (business_sara only allows catalog routes).
+    {
+      'route': '/invoices',
+      'title': 'الفواتير',
+      'summary': 'كل فواتير البيع والشراء في الفرع ومتابعة حالتها.',
+    },
+    {
+      'route': '/returns',
+      'title': 'المرتجعات',
+      'summary': 'مرتجعات البيع والشراء على الفواتير.',
+    },
+    {
+      'route': '/business/income-expense',
+      'title': 'الإيرادات والمصروفات',
+      'summary': 'تسجيل إيرادات ومصروفات النشاط ومتابعتها.',
+    },
+    {
+      'route': '/business/transactions',
+      'title': 'الحركات المالية',
+      'summary': 'كل حركات الفرع المالية في مكان واحد.',
+    },
+    {
+      'route': '/inventory/categories',
+      'title': 'تصنيفات المنتجات',
+      'summary': 'تصنيفات المخزون وصورها ومنتجاتها.',
+    },
+    {
+      'route': '/debts/customers',
+      'title': 'ديون العملاء',
+      'summary': 'ما لك على العملاء وتحصيله.',
+    },
+    {
+      'route': '/debts/suppliers',
+      'title': 'ديون الموردين',
+      'summary': 'ما عليك للموردين وسداده.',
+    },
+    {
+      'route': '/branches',
+      'title': 'الفروع',
+      'summary': 'فروع النشاط وأعضاؤها وصلاحياتهم.',
+    },
+    {
+      'route': '/branches/transfers',
+      'title': 'تحويلات الفروع',
+      'summary': 'تحويل البضاعة والمال بين الفروع.',
+    },
+    {
+      'route': '/reconciliation',
+      'title': 'المطابقة',
+      'summary': 'مطابقة أرصدة البنوك والصندوق والمخزون مع الفعلي.',
+    },
+    {
+      'route': '/reconciliation/bank',
+      'title': 'مطابقة البنوك',
+      'summary': 'مقارنة الرصيد الفعلي للبنوك والصندوق برصيد النظام.',
+    },
+    {
+      'route': '/reconciliation/inventory',
+      'title': 'مطابقة المخزون',
+      'summary': 'جرد المخزون ومقارنته بكميات النظام.',
+    },
+    {
+      'route': '/reconciliation/archive',
+      'title': 'أرشيف المطابقات',
+      'summary': 'المطابقات السابقة ونتائجها.',
+    },
+    {
+      'route': '/business/backup',
+      'title': 'النسخ الاحتياطي للأعمال',
+      'summary': 'نسخة احتياطية مشفرة لبيانات الفرع.',
+    },
     {
       'route': '/personal/debts?debtId=',
       'title': 'تفاصيل دين',
@@ -164,6 +236,76 @@ class SaraScreenCatalog {
   ];
 
   static const List<Map<String, String>> _extrasEn = [
+    {
+      'route': '/invoices',
+      'title': 'Invoices',
+      'summary': 'All sale and purchase invoices of the branch and their status.',
+    },
+    {
+      'route': '/returns',
+      'title': 'Returns',
+      'summary': 'Sale and purchase returns on invoices.',
+    },
+    {
+      'route': '/business/income-expense',
+      'title': 'Income & Expenses',
+      'summary': 'Record and follow the business income and expenses.',
+    },
+    {
+      'route': '/business/transactions',
+      'title': 'Transactions',
+      'summary': 'Every money movement of the branch in one place.',
+    },
+    {
+      'route': '/inventory/categories',
+      'title': 'Product categories',
+      'summary': 'Inventory categories with their photos and products.',
+    },
+    {
+      'route': '/debts/customers',
+      'title': 'Customer debts',
+      'summary': 'What customers owe you and its collection.',
+    },
+    {
+      'route': '/debts/suppliers',
+      'title': 'Supplier debts',
+      'summary': 'What you owe suppliers and its payment.',
+    },
+    {
+      'route': '/branches',
+      'title': 'Branches',
+      'summary': 'Business branches, their members and permissions.',
+    },
+    {
+      'route': '/branches/transfers',
+      'title': 'Branch transfers',
+      'summary': 'Move goods and money between branches.',
+    },
+    {
+      'route': '/reconciliation',
+      'title': 'Reconciliation',
+      'summary': 'Match bank, cash and inventory balances with the actual ones.',
+    },
+    {
+      'route': '/reconciliation/bank',
+      'title': 'Bank reconciliation',
+      'summary': 'Compare actual bank and cash balances with the system.',
+    },
+    {
+      'route': '/reconciliation/inventory',
+      'title': 'Inventory count',
+      'summary': 'Count the stock and compare it with the system quantities.',
+    },
+    {
+      'route': '/reconciliation/archive',
+      'title': 'Reconciliation archive',
+      'summary': 'Past reconciliations and their results.',
+    },
+    {
+      'route': '/business/backup',
+      'title': 'Business backup',
+      'summary': 'An encrypted backup of the branch data.',
+    },
     {
       'route': '/personal/debts?debtId=',
       'title': 'Debt details',

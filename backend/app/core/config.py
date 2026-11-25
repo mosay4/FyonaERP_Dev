@@ -89,6 +89,9 @@ class Settings(BaseSettings):
     SARA_BASE_URL: str = "https://api.deepseek.com"
     SARA_MODEL: str = "deepseek-flash"
     SARA_STT_MODEL: str = "small"
+    # Load the speech model at startup (first voice upload is not slowed by
+    # the model load). Off in environments without faster-whisper.
+    SARA_STT_PRELOAD: bool = True
 
     # ── SMTP / Email ──
     SMTP_HOST: Optional[str] = None

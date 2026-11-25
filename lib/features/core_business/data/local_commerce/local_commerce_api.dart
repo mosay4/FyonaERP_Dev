@@ -12,6 +12,7 @@ import '../../../employees/data/employee_permissions.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
 import '../../../../shared/providers/current_user_provider.dart';
 import '../../../inventory/data/business_inventory_image.dart';
+import '../../../inventory/data/falcon_device_runner.dart';
 import '../../../inventory/data/inventory_api.dart';
 import '../../../invoices/data/invoices_api.dart';
 import '../../../purchases/data/purchase_api.dart';
@@ -110,7 +111,8 @@ final class LocalCommerceBridge {
       final id = '${p['id']}';
       Map<String, dynamic> stats;
       try {
-        stats = await productStats(id, displayCurrency: target);
+        stats = await productStats(id, displayCurrency: target,
+            movements: false);
       } catch (_) {
         stats = const {};
       }
@@ -1079,7 +1081,8 @@ final class LocalCommerceBridge {
   }
 
   Future<Map<String, dynamic>> productStats(
-    String id, {String? from, String? to, String? displayCurrency}
+    String id, {String? from, String? to, String? displayCurrency,
+    bool movements = true}
   ) async {
     final cost = _can('inventory_cost.read');
     final profit = _can('inventory_profit.read');
@@ -1096,7 +1099,8 @@ final class LocalCommerceBridge {
       },
       permissions,
       (ledger, grant) => ledger.commerceProductStats(grant, id,
-          from: from, to: to, displayCurrency: displayCurrency),
+          from: from, to: to, displayCurrency: displayCurrency,
+          movements: movements),
     );
     _require(permissions);
     return result;
@@ -1463,34 +1467,29 @@ final class LocalInventoryApi extends InventoryApi {
   /// this phone; the server keeps no stock data).
   final ApiClient _network;
 
-  Future<Map<String, dynamic>> _falcon(String path, Map<String, dynamic> body,
-      String scope, String? refId, String? reportCurrency) async {
-    final currency = (reportCurrency ?? 'USD').toUpperCase();
-    final figures = await _bridge.falconFigures(scope, refId, currency);
-    final r = await _network.post(path, data: {
-      ...body,
-      'scope': scope,
-      if (refId != null) 'ref_id': refId,
-      'report_currency': currency,
-      'device_items': figures.items,
-      if (figures.category != null) 'device_category': figures.category,
-    });
-    final data = r.data;
-    final inner = data is Map && data['data'] is Map ? data['data'] : data;
-    return inner is Map ? Map<String, dynamic>.from(inner) : <String, dynamic>{};
-  }
+  /// Figures and summary on this phone; only the compact summary is sent.
+  late final FalconDeviceRunner _falcon = FalconDeviceRunner(
+    network: _network,
+    owner: _bridge,
+    read: _bridge.falconFigures,
+  );
+
+  @override
+  Future<Map<String, dynamic>?> falconPreview(String scope, String? refId,
+          {String? reportCurrency}) =>
+      _falcon.preview(scope, refId, reportCurrency: reportCurrency);
 
   @override
   Future<Map<String, dynamic>> falconAnalyze(String scope, String? refId,
           {String? reportCurrency}) =>
-      _falcon('/inventory/falcon/analyze', const {}, scope, refId, reportCurrency);
+      _falcon.analyze(scope, refId, reportCurrency: reportCurrency);
 
   @override
   Future<Map<String, dynamic>> falconChat(String scope, String? refId,
           String question, List<Map<String, dynamic>> history,
           {String? reportCurrency}) =>
-      _falcon('/inventory/falcon/chat', {'question': question, 'history': history},
-          scope, refId, reportCurrency);
+      _falcon.chat(scope, refId, question, history,
+          reportCurrency: reportCurrency);
   final LocalCommerceBridge _bridge;
 
   @override

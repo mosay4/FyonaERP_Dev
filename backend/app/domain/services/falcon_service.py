@@ -303,6 +303,103 @@ def device_dataset(items: list, report_currency: Optional[str], scope: str,
     return data, "المخزون"
 
 
+# A phone may send its own deterministic summary (the same rules as
+# device_dataset, computed on the device) instead of every product row: the
+# request stays small however big the catalogue is. Everything is re-shaped
+# through these whitelists; nothing else from the phone is trusted.
+_SUMMARY_NUMBERS = (
+    "inventory_value", "total_sales", "total_profit", "total_cogs", "products_count",
+    "stagnant_value_share", "sales_total", "purchases_total", "cogs", "profit",
+    "sales_quantity", "stock", "min_stock", "sell_price", "cost_price",
+    "suggested_order_qty",
+)
+_SUMMARY_NAME_LISTS = {"low_stock": 20, "out_of_stock": 20}
+_SUMMARY_ROW_LISTS = {"top_sellers": 10, "top_profit": 10, "bottom_sellers": 10,
+                      "slow_moving": 15, "weak_margin": 15, "reorder": 15}
+_SUMMARY_ROW_NUMBERS = _DEVICE_FIELDS + ("order_qty", "order_cost")
+
+
+def _num(value) -> float:
+    try:
+        v = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return round(v, 4) if v == v and abs(v) != float("inf") else 0.0
+
+
+def _summary_row(raw, rep: str) -> Optional[dict]:
+    if not isinstance(raw, dict):
+        return None
+    row = {"id": str(raw.get("id") or "")[:64], "name": str(raw.get("name") or "")[:200],
+           "unit": str(raw.get("unit") or "")[:40], "currency": rep}
+    for key in _SUMMARY_ROW_NUMBERS:
+        if key in raw:
+            row[key] = _num(raw.get(key))
+    return row
+
+
+def _summary_names(raw, limit: int) -> list:
+    return [str(n)[:200] for n in (raw if isinstance(raw, list) else [])[:limit]
+            if isinstance(n, (str, int, float))]
+
+
+def device_summary_dataset(summary, report_currency: Optional[str], scope: str,
+                           category_name: Optional[str] = None) -> tuple[dict, str]:
+    """Falcon figures from the summary a phone computed itself."""
+    rep = (report_currency or "USD").strip().upper()
+    src = summary if isinstance(summary, dict) else {}
+    data: dict = {"report_currency": rep, "unified": False,
+                  "unverified_fx": src.get("unverified_fx") is True}
+    for key in _SUMMARY_NUMBERS:
+        if key in src:
+            data[key] = _num(src.get(key))
+    data["products_count"] = int(data.get("products_count") or 0)
+    for key, limit in _SUMMARY_NAME_LISTS.items():
+        if key in src:
+            data[key] = _summary_names(src.get(key), limit)
+    for key, limit in _SUMMARY_ROW_LISTS.items():
+        if key in src:
+            rows = src.get(key) if isinstance(src.get(key), list) else []
+            data[key] = [r for r in (_summary_row(x, rep) for x in rows[:limit]) if r]
+    branches = []
+    for raw in (src.get("branch_summaries") if isinstance(src.get("branch_summaries"), list) else [])[:50]:
+        if not isinstance(raw, dict) or not isinstance(raw.get("branch_id"), str):
+            continue
+        row = {"branch_id": raw["branch_id"][:64],
+               "branch_name": str(raw.get("branch_name") or raw["branch_id"])[:120]}
+        for key in ("products_count", "stock", "total_sales", "total_profit", "total_cogs",
+                    "total_purchases", "inventory_value"):
+            row[key] = _num(raw.get(key))
+        row["products_count"] = int(row["products_count"])
+        for key in ("low_stock", "out_of_stock"):
+            row[key] = _summary_names(raw.get(key), 10)
+        top = raw.get("top_sellers") if isinstance(raw.get("top_sellers"), list) else []
+        row["top_sellers"] = [r for r in (_summary_row(x, rep) for x in top[:5]) if r]
+        branches.append(row)
+    if branches:
+        data.update(branch_ids=[b["branch_id"] for b in branches], branch_summaries=branches)
+    if scope == "product":
+        data.update(name=str(src.get("name") or "")[:200], unit=str(src.get("unit") or "")[:40],
+                    category_name=(category_name or str(src.get("category_name") or ""))[:120],
+                    currency=rep, batches=[])
+        for key in ("total_sales", "total_cogs", "total_profit", "inventory_value", "sales_total",
+                    "purchases_total", "cogs", "profit", "sales_quantity", "stock", "min_stock",
+                    "sell_price", "cost_price"):
+            data.setdefault(key, 0.0)
+        if "suggested_order_qty" in data:
+            data["suggested_order_qty"] = max(0, round(data["suggested_order_qty"]))
+        return data, "المنتج"
+    for key in ("inventory_value", "total_sales", "total_profit", "total_cogs",
+                "stagnant_value_share"):
+        data.setdefault(key, 0.0)
+    for key in (*_SUMMARY_NAME_LISTS, *_SUMMARY_ROW_LISTS):
+        data.setdefault(key, [])
+    if scope == "category":
+        data["category_name"] = (category_name or "")[:120]
+        return data, "التصنيف"
+    return data, "المخزون"
+
+
 def _device_branches(rows: list) -> dict:
     out: dict = {}
     for row in rows:
@@ -784,18 +881,40 @@ _SPECIALTY_FALLBACK = (
 )
 
 
-async def _call_ai(system: str, user: str, max_tokens: int = 900) -> Optional[str]:
+# The report's narrative must arrive well inside the phone's request window:
+# past this the deterministic report is returned (never an error).
+AI_REPORT_TIMEOUT = 20.0
+AI_CHAT_TIMEOUT = 25.0
+
+
+def _bounded(client, timeout: float):
+    """One attempt, bounded: no SDK retries stacking on a slow provider."""
+    try:
+        return client.with_options(timeout=timeout, max_retries=0)
+    except Exception:
+        return client
+
+
+async def _call_ai(system: str, user: str, max_tokens: int = 900,
+                   difficulty_text: str = "",
+                   timeout: Optional[float] = None) -> Optional[str]:
     # Model layer routes through the central AI router (DeepSeek-first,
-    # adaptive effort low/high/max by question difficulty; legacy OpenAI
-    # fallback). The falcon's logic is untouched.
+    # legacy OpenAI fallback). The effort is chosen from [difficulty_text]
+    # (the merchant's question), never from the figures dump: the dump is
+    # long and its type playbook words («أثر», «خطة»…) always triggered the
+    # 9x «max» budget, which outlasted the phone's request and ended in
+    # «تعذّر تشغيل التحليل».
+    import asyncio
+
     from app.domain.services.ai_router import build_client, route
 
-    r = route(user, tools=False, base_tokens=max_tokens)
+    timeout = timeout or AI_REPORT_TIMEOUT
+    r = route(difficulty_text, tools=False, base_tokens=max_tokens)
     if not r.api_key:
         return None
     try:
-        client = build_client(r)
-        resp = await client.chat.completions.create(
+        client = _bounded(build_client(r), timeout)
+        resp = await asyncio.wait_for(client.chat.completions.create(
             model=r.model,
             messages=[
                 {"role": "system", "content": system},
@@ -804,7 +923,7 @@ async def _call_ai(system: str, user: str, max_tokens: int = 900) -> Optional[st
             temperature=0.3,
             max_tokens=r.max_tokens,
             extra_body={"effort": r.effort},
-        )
+        ), timeout)
         return (resp.choices[0].message.content or "").strip()
     except Exception:
         return None
@@ -1360,16 +1479,19 @@ async def chat(
     try:
         from app.domain.services.ai_router import build_client, route
 
-        r = route(msgs[-1]["content"] if msgs else "", tools=False,
-                  base_tokens=500)
+        import asyncio
+
+        # Effort from the question itself (the figures dump is long and
+        # always looked «max»); one bounded attempt.
+        r = route(question or "", tools=False, base_tokens=500)
         if not r.api_key:
             return {"answer": _branch_fallback(data, lang)}
-        client = build_client(r)
-        resp = await client.chat.completions.create(
+        client = _bounded(build_client(r), AI_CHAT_TIMEOUT)
+        resp = await asyncio.wait_for(client.chat.completions.create(
             model=r.model, messages=msgs,
             temperature=0.4, max_tokens=r.max_tokens,
             extra_body={"effort": r.effort},
-        )
+        ), AI_CHAT_TIMEOUT)
         answer = plain_arabic(_as_plain((resp.choices[0].message.content or "")), lang)
         summaries = data.get('branch_summaries') or []
         if any(row['branch_name'] not in answer for row in summaries):

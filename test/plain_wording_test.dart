@@ -63,10 +63,28 @@ Map<String, dynamic> _table(String lang) =>
     jsonDecode(File('assets/l10n/app_$lang.arb').readAsStringSync())
         as Map<String, dynamic>;
 
+// The owner asked to keep the reconciliation section's original wording
+// («المطابقة», «مساواة النظام», «التسوية» / "Reconciliation", "Equalize",
+// "Settlement"), so its keys are exempt from the jargon rules.
+const _reconciliationKeys = {
+  'bizReconcile',
+  'inventoryAdjust',
+  'repLocalLegacySettlements',
+  'repReconciled',
+  'repSettleAdjust',
+  'repShowAllSettlements',
+  'repShowLessSettlements',
+};
+
+bool _isReconciliationKey(String key) =>
+    key.startsWith('recon') ||
+    _reconciliationKeys.contains(key);
+
 List<String> _offenders(String lang, List<RegExp> rules) {
   final out = <String>[];
   _table(lang).forEach((key, value) {
     if (key.startsWith('@')) return;
+    if (_isReconciliationKey(key)) return;
     final raw = value is String ? value : jsonEncode(value);
     // Placeholder names such as {debit} are code, not wording.
     final text = raw.replaceAll(RegExp(r'\{\w+\}'), '');

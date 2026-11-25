@@ -26,10 +26,16 @@ class SaraSmartSettings {
   /// Last peak hour detected by the engine (for the "Auto (…)" label).
   final int peakHour;
 
+  /// When the user last changed the time (ms since epoch), null = never.
+  /// A change made after today's digest fired lets today fire again at the
+  /// new time.
+  final int? timeChangedAtMs;
+
   const SaraSmartSettings({
     this.enabled = true,
     this.minutes,
     this.peakHour = 20,
+    this.timeChangedAtMs,
   });
 
   /// Effective daily fire time (minutes after midnight).
@@ -42,11 +48,13 @@ class SaraSmartSettings {
     int? minutes,
     bool clearMinutes = false,
     int? peakHour,
+    int? timeChangedAtMs,
   }) =>
       SaraSmartSettings(
         enabled: enabled ?? this.enabled,
         minutes: clearMinutes ? null : (minutes ?? this.minutes),
         peakHour: peakHour ?? this.peakHour,
+        timeChangedAtMs: timeChangedAtMs ?? this.timeChangedAtMs,
       );
 }
 
@@ -56,6 +64,7 @@ class SaraSmartSettingsStore {
   static String enabledKey(String uid) => 'sara_smart_notif_enabled_$uid';
   static String timeKey(String uid) => 'sara_smart_notif_time_$uid';
   static String peakKey(String uid) => 'sara_smart_notif_peak_$uid';
+  static String changedKey(String uid) => 'sara_smart_notif_time_changed_$uid';
 
   static Future<SaraSmartSettings> load(String uid) async {
     try {
@@ -65,6 +74,7 @@ class SaraSmartSettingsStore {
         enabled: p.getBool(enabledKey(uid)) ?? true,
         minutes: (t == null || t < 0 || t >= 24 * 60) ? null : t,
         peakHour: p.getInt(peakKey(uid)) ?? 20,
+        timeChangedAtMs: p.getInt(changedKey(uid)),
       );
     } catch (_) {
       return const SaraSmartSettings();
@@ -79,6 +89,9 @@ class SaraSmartSettingsStore {
         await p.remove(timeKey(uid));
       } else {
         await p.setInt(timeKey(uid), s.minutes!);
+      }
+      if (s.timeChangedAtMs != null) {
+        await p.setInt(changedKey(uid), s.timeChangedAtMs!);
       }
     } catch (_) {}
   }
@@ -113,10 +126,12 @@ class SaraSmartSettingsNotifier extends StateNotifier<SaraSmartSettings> {
   }
 
   /// [minutes] null → back to automatic (peak hour).
-  Future<void> setMinutes(int? minutes) async {
+  Future<void> setMinutes(int? minutes, {DateTime? now}) async {
+    final changedAt = (now ?? DateTime.now()).millisecondsSinceEpoch;
     state = minutes == null
-        ? state.copyWith(clearMinutes: true)
-        : state.copyWith(minutes: minutes.clamp(0, 24 * 60 - 1));
+        ? state.copyWith(clearMinutes: true, timeChangedAtMs: changedAt)
+        : state.copyWith(
+            minutes: minutes.clamp(0, 24 * 60 - 1), timeChangedAtMs: changedAt);
     await SaraSmartSettingsStore.save(uid, state);
   }
 

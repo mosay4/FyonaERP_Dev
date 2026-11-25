@@ -39,6 +39,16 @@ final saraSmartCoordinatorProvider = Provider<SaraSmartCoordinator>((ref) {
     c.onUserChanged();
   });
   ref.listen<SaraSmartSettings>(saraSmartSettingsProvider, (prev, next) {
+    final retimed = prev != null &&
+        next.enabled &&
+        next.timeChangedAtMs != prev.timeChangedAtMs;
+    if (retimed) {
+      // The chosen time holds at once — even if the app is closed right
+      // after — then the full re-plan refreshes the texts.
+      unawaited(SaraSmartScheduler.retime(next.effectiveMinutes)
+          .whenComplete(() => c.poke(delay: Duration.zero)));
+      return;
+    }
     if (prev == null ||
         prev.enabled != next.enabled ||
         prev.minutes != next.minutes) {
@@ -190,11 +200,14 @@ class SaraSmartCoordinator {
     cooldown = await _maybeInstant(input, analysis, now, cooldown);
 
     final lastFired = await SaraSmartScheduler.lastFiredDay(now: now);
+    final lastFiredAt = await SaraSmartScheduler.lastFiredAt(now: now);
     final slots = SaraDailyPlanner.plan(
       input: input,
       now: now,
       minutesOfDay: settings.minutes ?? analysis.peakHour * 60,
       lastFiredDay: lastFired,
+      lastFiredAtMs: lastFiredAt,
+      timeChangedAtMs: settings.timeChangedAtMs,
       cooldown: cooldown,
       tr: _tr,
       money: _money,

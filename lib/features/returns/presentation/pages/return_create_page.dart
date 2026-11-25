@@ -21,6 +21,7 @@ import '../../../core_business/presentation/widgets/business_operation_error.dar
 import '../../../branches/data/branch_scope.dart';
 import '../../../dashboard/presentation/providers/business_dashboard_providers.dart';
 import '../../../inventory/domain/services/invalidate_inventory_data.dart';
+import '../../../inventory/presentation/widgets/business_unit_image.dart';
 import '../../../sales/domain/sale_totals.dart' show parseMoney;
 import '../../../sales/presentation/widgets/sale_payment_section.dart'
     show openBankCurrencyPicker, AccountCurrencyPick;
@@ -806,6 +807,15 @@ class _ReturnCreatePageState extends ConsumerState<ReturnCreatePage> {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
+          // The returned unit's photo (its own, else the product's).
+          if (!isService && item['product_id'] != null) ...[
+            BusinessLineUnitImage(
+              productId: '${item['product_id']}',
+              unitId: item['unit_id']?.toString(),
+              unitName: item['unit_name']?.toString(),
+            ),
+            const SizedBox(width: 8),
+          ],
           Expanded(
             child: Text((item['description'] ?? '').toString(),
                 maxLines: 2,

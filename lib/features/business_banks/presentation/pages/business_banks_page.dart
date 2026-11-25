@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../../core_business/presentation/widgets/business_number_field.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../../../../shared/widgets/two_tone_icon.dart';
@@ -19,6 +18,7 @@ import '../../../../core/utils/amount_input_formatter.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/app_icon_badge.dart';
 import '../../../../shared/widgets/receipt/receipt.dart';
+import '../../../../shared/widgets/exchange_rate_override.dart';
 import '../../data/business_bank_models.dart';
 import '../../../branches/data/branch_api.dart';
 import '../../../branches/data/branch_scope.dart';
@@ -39,6 +39,8 @@ import '../../../core_business/data/local_ledger/business_money.dart';
 import '../../../core_business/presentation/widgets/business_operation_error.dart';
 import '../../../purchases/presentation/providers/purchase_providers.dart' show purchaseAccountsProvider;
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../../../core/utils/time_format.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 /// Whether the "delete bank completely" action is offered for [bankName].
 /// Cash can never be deleted as a whole in ANY locale spelling — users may
@@ -85,6 +87,23 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
   String? _transferToId;
   BusinessBanksNotifier? _formSource;
   double get _transferAmount => parseFormattedAmount(_transferAmountCtrl.text) ?? 0;
+  /// Manual exchange rate typed via the pencil (wins over the saved one).
+  final _manualFx = ManualRateOverride();
+
+  /// The saved quote, or the manual rate as a frozen Business quote.
+  BusinessRate? _effectiveQuote(
+    BusinessRate? auto,
+    BusinessBankAccount from,
+    BusinessBankAccount to,
+  ) {
+    final manual = _manualFx.rateFor(from.currency, to.currency);
+    if (manual == null || from.currency == to.currency) return auto;
+    try {
+      return BusinessRate(from.currency, to.currency, manual.toStringAsFixed(8));
+    } on FormatException {
+      return auto;
+    }
+  }
 
   static const _heroCurrencyKey = 'biz_banks_hero_currency';
 
@@ -488,7 +507,7 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
         title: l10n.translate('bankStatementCertificate'),
         amount: acc.balance,
         currencySymbol: currencySymbol(acc.currency),
-        dateTime: DateFormat('yyyy/MM/dd HH:mm').format(DateTime.now()),
+        dateTime: formatDateTimeDisplay(DateTime.now()),
         senderName: acc.bankName,
         senderAccount: acc.accountName.isEmpty
             ? acc.accountNumber
@@ -549,7 +568,10 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
       if (fromAcc.currency != toAcc.currency) {
         final foundRate = source.isLocal
             ? double.tryParse(quote?.decimal ?? '')
-            : source.rate(fromAcc.currency, toAcc.currency);
+            : effectiveExchangeRate(
+                source.rate(fromAcc.currency, toAcc.currency),
+                _manualFx.rateFor(fromAcc.currency, toAcc.currency),
+              );
         if (foundRate == null || foundRate <= 0) {
           if (mounted) {
             setState(() => _transferring = false);
@@ -586,6 +608,7 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
           _transferToId = null;
           _transferAmountCtrl.clear();
           _transferCommand = null;
+          _manualFx.clear();
         });
       }
     } catch (e) {
@@ -1178,9 +1201,12 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
     final source = ref.read(businessBanksProvider.notifier);
     final from = accounts.where((a) => a.id == _transferFromId).firstOrNull;
     final to = accounts.where((a) => a.id == _transferToId).firstOrNull;
-    final quote = source.isLocal && from != null && to != null
+    final autoQuote = source.isLocal && from != null && to != null
         ? source.transferQuote(from.currency, to.currency)
         : null;
+    final quote = source.isLocal && from != null && to != null
+        ? _effectiveQuote(autoQuote, from, to)
+        : autoQuote;
     return Container(
       key: _transferKey,
       padding: EdgeInsets.all(20),
@@ -1253,7 +1279,7 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
           ),
           if (from != null && to != null && _transferAmount > 0) ...[
             SizedBox(height: 12),
-            _buildConversionPreview(from, to, source, quote),
+            _buildConversionPreview(from, to, source, quote, autoQuote),
           ],
           SizedBox(height: 16),
           SizedBox(
@@ -1293,12 +1319,29 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
     BusinessBankAccount toAcc,
     BusinessBanksNotifier source,
     BusinessRate? quote,
+    BusinessRate? autoQuote,
   ) {
     final l10n = AppLocalizations.of(context);
     final sym1 = currencySymbol(fromAcc.currency);
     final sym2 = currencySymbol(toAcc.currency);
+    final autoRate = source.isLocal
+        ? double.tryParse(autoQuote?.decimal ?? '')
+        : source.rate(fromAcc.currency, toAcc.currency);
+    final manualRate = _manualFx.rateFor(fromAcc.currency, toAcc.currency);
     final rate = source.isLocal ? double.tryParse(quote?.decimal ?? '') :
-        source.rate(fromAcc.currency, toAcc.currency);
+        effectiveExchangeRate(autoRate, manualRate);
+    final cross = fromAcc.currency != toAcc.currency;
+    Widget rateLine() => ExchangeRateOverrideLine(
+      fromCurrency: fromAcc.currency,
+      toCurrency: toAcc.currency,
+      autoRate: autoRate,
+      manualRate: manualRate,
+      onManualRateChanged: (r) => setState(() {
+        _manualFx.set(fromAcc.currency, toAcc.currency, r);
+        // A new rate is a new command (the idempotency key covers the rate).
+        _transferCommand = null;
+      }),
+    );
     double? received;
     try {
       if (quote != null) {
@@ -1322,51 +1365,48 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
         ),
         child: Column(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  l10n.translate('exchangeRate'),
-                  style: TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: R.fontSize(context, 11),
-                    color: AppColors.textSecondary,
+            if (cross)
+              rateLine()
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    l10n.translate('exchangeRate'),
+                    style: TextStyle(
+                      fontFamily: 'Cairo',
+                      fontSize: R.fontSize(context, 11),
+                      color: AppColors.textSecondary,
+                    ),
                   ),
-                ),
-                Text(
-                  '1 ${fromAcc.currency} = ${fmtRate(rate)} ${toAcc.currency}',
-                  style: TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: R.fontSize(context, 11),
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.primary,
+                  Text(
+                    '1 ${fromAcc.currency} = ${fmtRate(rate)} ${toAcc.currency}',
+                    style: TextStyle(
+                      fontFamily: 'Cairo',
+                      fontSize: R.fontSize(context, 11),
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary,
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
             SizedBox(height: 6),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '${fmtNum(_transferAmount)} $sym1',
-                  style: TextStyle(
+                MoneyText(amount: fmtNum(_transferAmount), currency: sym1, style: TextStyle(
                     fontFamily: 'Cairo',
                     fontSize: R.fontSize(context, 13),
                     fontWeight: FontWeight.w600,
                     color: AppColors.textPrimary,
-                  ),
-                ),
+                  )),
                 Icon(Icons.arrow_forward, size: 16, color: AppColors.primary),
-                Text(
-                  '${fmtNum(received)} $sym2',
-                  style: TextStyle(
+                MoneyText(amount: fmtNum(received), currency: sym2, style: TextStyle(
                     fontFamily: 'Cairo',
                     fontSize: R.fontSize(context, 13),
                     fontWeight: FontWeight.w700,
                     color: AppColors.success,
-                  ),
-                ),
+                  )),
               ],
             ),
           ],
@@ -1380,23 +1420,30 @@ class _BusinessBanksPageState extends ConsumerState<BusinessBanksPage> {
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: AppColors.warning.withAlpha(30)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.warning),
-          SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              l10n.translate(
-                'noExchangeRate',
-                params: {'from': fromAcc.currency, 'to': toAcc.currency},
+          Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.warning),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  l10n.translate(
+                    'noExchangeRate',
+                    params: {'from': fromAcc.currency, 'to': toAcc.currency},
+                  ),
+                  style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: R.fontSize(context, 11),
+                    color: AppColors.warning,
+                  ),
+                ),
               ),
-              style: TextStyle(
-                fontFamily: 'Cairo',
-                fontSize: R.fontSize(context, 11),
-                color: AppColors.warning,
-              ),
-            ),
+            ],
           ),
+          // No known rate: the pencil still lets the merchant type one.
+          if (cross) ...[SizedBox(height: 6), rateLine()],
         ],
       ),
     );

@@ -15,6 +15,7 @@ import '../../../../shared/widgets/currency_selector.dart';
 import '../../../../shared/widgets/two_tone_icon.dart';
 import '../../../../shared/widgets/two_tone_icons.dart';
 import '../../../../shared/widgets/receipt/receipt.dart';
+import '../../../../shared/widgets/exchange_rate_override.dart';
 import '../../services/debt_reminder_service.dart';
 import '../providers/receipt_design_provider.dart';
 import '../../data/models/personal_models.dart';
@@ -25,6 +26,8 @@ import 'package:fyona_flutter/core/responsive/r_api.dart';
 import '../../../../core/localization/app_localizations.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../../../../core/utils/time_format.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 class PersonalDebtsPage extends ConsumerStatefulWidget {
   final String? debtId;
@@ -601,8 +604,7 @@ class _DebtCard extends StatelessWidget {
                 Flexible(
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
-                    child: Text('${fmtNum(debt.remaining)} ${currencySymbol(debt.currency)}',
-                      style: TextStyle(fontFamily: 'Cairo', fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
+                    child: MoneyText(amount: fmtNum(debt.remaining), currency: currencySymbol(debt.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
                   ),
                 ),
               ]),
@@ -1038,6 +1040,16 @@ class _DebtFormSheetState extends ConsumerState<_DebtFormSheet> {
   }
   return (bankMove: bankMove, debtCredit: amount);
 }
+/// Test hook: the pay/collect sheet as opened by [PersonalDebtsPage].
+@visibleForTesting
+Widget debugDebtPaySheet({
+  required PersonalDebt debt,
+  required Function(double amount, String method, String? bankId,
+          String? notes, String opId, String currency, double debtAmount)
+      onPay,
+}) =>
+    _DebtPaySheet(debt: debt, onPay: onPay);
+
 class _DebtPaySheet extends ConsumerStatefulWidget {
   final PersonalDebt debt;
   final Function(double amount, String method, String? bankId, String? notes,
@@ -1055,6 +1067,22 @@ class _DebtPaySheetState extends ConsumerState<_DebtPaySheet> {
   final _notesCtrl = TextEditingController();
   bool _submitting = false;
   late final String _opId;
+  /// Manual exchange rate typed via the pencil (wins over the saved one).
+  final _manualFx = ManualRateOverride();
+
+  /// Conversion pair of the current selection: payments are typed in the
+  /// ACCOUNT currency (account→debt), collections in the DEBT currency
+  /// (debt→account). Null when no cross-currency account is selected.
+  ({String from, String to})? _fxPair(PersonalFinanceState st) {
+    final acc = st.bankAccounts.where((a) => a.id == _bankId).firstOrNull;
+    if (acc == null) return null;
+    final accountCurrency = acc.currency.toUpperCase();
+    final debtCurrency = widget.debt.currency.toUpperCase();
+    if (accountCurrency == debtCurrency) return null;
+    return widget.debt.type == 'payable'
+        ? (from: accountCurrency, to: debtCurrency)
+        : (from: debtCurrency, to: accountCurrency);
+  }
 
   @override
   void initState() {
@@ -1162,10 +1190,15 @@ class _DebtPaySheetState extends ConsumerState<_DebtPaySheet> {
                       if (acc != null &&
                           acc.currency.toUpperCase() !=
                               widget.debt.currency.toUpperCase()) {
-                        final r = _findRate(
-                            widget.debt.currency.toUpperCase(),
+                        final manual = _manualFx.rateFor(
                             acc.currency.toUpperCase(),
-                            st.exchangeRates);
+                            widget.debt.currency.toUpperCase());
+                        final r = manual != null
+                            ? 1 / manual
+                            : _findRate(
+                                widget.debt.currency.toUpperCase(),
+                                acc.currency.toUpperCase(),
+                                st.exchangeRates);
                         if (r != null && r > 0) {
                           fill = widget.debt.remaining * r;
                         }
@@ -1305,6 +1338,25 @@ class _DebtPaySheetState extends ConsumerState<_DebtPaySheet> {
                 );
               }),
             ],
+            if (_fxPair(st) case final pair?) ...[
+              SizedBox(height: 12),
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _amountCtrl,
+                builder: (_, value, _) {
+                  final typed =
+                      double.tryParse(value.text.replaceAll(',', '')) ?? 0;
+                  return ExchangeRateOverrideLine(
+                    fromCurrency: pair.from,
+                    toCurrency: pair.to,
+                    autoRate: _findRate(pair.from, pair.to, st.exchangeRates),
+                    manualRate: _manualFx.rateFor(pair.from, pair.to),
+                    amount: typed > 0 ? typed : null,
+                    onManualRateChanged: (r) =>
+                        setState(() => _manualFx.set(pair.from, pair.to, r)),
+                  );
+                },
+              ),
+            ],
             SizedBox(height: 12),
             FyonaTextField(
               controller: _notesCtrl,
@@ -1402,7 +1454,9 @@ class _DebtPaySheetState extends ConsumerState<_DebtPaySheet> {
                 double debtCredit;
                 if (isReceivable) {
                   if (accountCurrency != debtCurrency) {
-                    rate = _findRate(debtCurrency, accountCurrency, st.exchangeRates);
+                    rate = effectiveExchangeRate(
+                        _findRate(debtCurrency, accountCurrency, st.exchangeRates),
+                        _manualFx.rateFor(debtCurrency, accountCurrency));
                   }
                   final split = splitReceivableCollection(
                       amount: amt,
@@ -1419,7 +1473,9 @@ class _DebtPaySheetState extends ConsumerState<_DebtPaySheet> {
                   }
                 } else {
                   if (accountCurrency != debtCurrency) {
-                    rate = _findRate(accountCurrency, debtCurrency, st.exchangeRates);
+                    rate = effectiveExchangeRate(
+                        _findRate(accountCurrency, debtCurrency, st.exchangeRates),
+                        _manualFx.rateFor(accountCurrency, debtCurrency));
                   }
                   final split = splitDebtPayment(
                       amount: amt,
@@ -1653,7 +1709,7 @@ class _DebtDetailPage extends ConsumerWidget {
                 ]),
                 SizedBox(height: 20),
                 FittedBox(
-                  child: Text('${fmtNum(debt.remaining)} ${currencySymbol(debt.currency)}', style: TextStyle(fontFamily: 'Cairo', fontSize: 28, fontWeight: FontWeight.w700, color: Colors.white)),
+                  child: MoneyText(amount: fmtNum(debt.remaining), currency: currencySymbol(debt.currency), style: TextStyle(fontFamily: 'Cairo', fontSize: 28, fontWeight: FontWeight.w700, color: Colors.white)),
                 ),
                 Text(l10n.translate('remainingOfTotal', params: {'amount': fmtNum(debt.amount)}), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), color: Colors.white.withAlpha(160))),
                 if (debt.paid > 0) ...[
@@ -1784,14 +1840,11 @@ class _DebtDetailPage extends ConsumerWidget {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                '${isIncome ? '+' : '-'}${fmtNum(t.amount)} ${currencySymbol(t.currency)}',
-                style: TextStyle(
+              MoneyText(amount: '${isIncome ? '+' : '-'}${fmtNum(t.amount)}', currency: currencySymbol(t.currency), style: TextStyle(
                     fontFamily: 'Cairo',
                     fontSize: R.fontSize(context, 13),
                     fontWeight: FontWeight.w700,
-                    color: color),
-              ),
+                    color: color)),
               SizedBox(width: 4),
               IconButton(
                 icon: Icon(Icons.delete_outline_rounded,
@@ -1873,7 +1926,7 @@ class _DebtDetailPage extends ConsumerWidget {
         amount: t.amount,
         currencySymbol: currencySymbol(t.currency),
         dateTime: t.date != null
-            ? DateFormat('yyyy/MM/dd HH:mm').format(t.date!)
+            ? formatDateTimeDisplay(t.date!)
             : '-',
         referenceNumber: '#TX-${t.id}',
         senderName: isPayable ? me : debt.personName,
@@ -1963,7 +2016,7 @@ class _DebtDetailPage extends ConsumerWidget {
           : l10n.translate('debtOwedTitle', params: {'name': debt.personName}),
       amount: debt.remaining,
       currencySymbol: currencySymbol(debt.currency),
-      dateTime: DateFormat('yyyy/MM/dd HH:mm').format(DateTime.now()),
+      dateTime: formatDateTimeDisplay(DateTime.now()),
       senderName: payerName,
       receiverName: receiverName,
       details: details,

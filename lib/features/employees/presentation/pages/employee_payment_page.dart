@@ -17,6 +17,7 @@ import '../../../../core/services/currency/currency_engine.dart';
 import '../../../../core/services/currency/business_currency_scope.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/data/local_directory/directory_scope.dart';
+import '../../../../shared/widgets/money_text.dart';
 
 double? parseEmployeeNumber(String value) {
   const arabic = '٠١٢٣٤٥٦٧٨٩';
@@ -927,15 +928,10 @@ class _EmployeePaymentPageState extends ConsumerState<EmployeePaymentPage> {
         ),
         const SizedBox(width: 8),
         Flexible(
-          child: Text(
-            '${fmtNum(amount)} $currency',
-            textDirection: TextDirection.ltr,
-            textAlign: TextAlign.end,
-            style: const TextStyle(
+          child: MoneyText(amount: fmtNum(amount), currency: currency, style: const TextStyle(
               fontFamily: 'Cairo',
               fontWeight: FontWeight.w800,
-            ),
-          ),
+            )),
         ),
       ],
     ),

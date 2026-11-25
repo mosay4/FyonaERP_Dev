@@ -6,6 +6,7 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/services/currency/currency_engine.dart'
     show currencyEngineProvider;
 import '../../../dashboard/data/business_finance_api.dart';
+import '../../../inventory/data/falcon_device_runner.dart';
 import '../../../inventory/data/inventory_api.dart';
 import '../../../invoices/data/invoices_api.dart';
 import '../../../purchases/data/purchase_api.dart';
@@ -284,19 +285,26 @@ final class AllBranchesInventoryApi extends InventoryApi {
 
   /// Falcon on all branches: the figures of every branch, each naming its
   /// branch, so the analysis compares branches and names them. A product or
-  /// category is the same name in every branch.
-  Future<Map<String, dynamic>> _falcon(
-    String path,
-    Map<String, dynamic> body,
+  /// category is the same name in every branch. Read and summarised on this
+  /// phone; only the compact summary goes to the analysis.
+  late final FalconDeviceRunner _falcon = FalconDeviceRunner(
+    network: commerce.network,
+    owner: commerce,
+    read: _falconFigures,
+    extra: const {'device_all_branches': true},
+  );
+
+  Future<FalconFigures> _falconFigures(
     String scope,
     String? refId,
-    String? reportCurrency,
+    String currency,
   ) async {
-    final currency = (reportCurrency ?? 'USD').toUpperCase();
     String? name;
+    String? rawName;
     String? category;
     if (scope == 'product' && refId != null) {
-      name = _nameKey((await getProduct(refId))['name']);
+      rawName = '${(await getProduct(refId))['name'] ?? ''}'.trim();
+      name = _nameKey(rawName);
     } else if (scope == 'category' && refId != null) {
       if (!_categoryNames.containsKey(refId)) await categories();
       category = _categoryNames[refId];
@@ -305,19 +313,27 @@ final class AllBranchesInventoryApi extends InventoryApi {
     String? categoryName;
     for (final branch in await commerce.bridges()) {
       String? localRef;
-      var localScope = scope;
       if (scope == 'category' && category != null) {
         localRef = await _categoryIn(branch.bridge, category);
         if (localRef == null) continue;
-      } else if (scope == 'product' && name != null) {
-        // Every branch's product of that name, analysed together.
-        localScope = 'inventory';
       }
-      final figures = await branch.bridge.falconFigures(
-        localScope,
-        localRef,
-        currency,
-      );
+      final FalconFigures figures;
+      if (scope == 'product' && name != null) {
+        // Every branch's product of that name, analysed together — read
+        // those products only (never the whole inventory of every branch).
+        final rows = <Map<String, dynamic>>[];
+        for (final p in await branch.bridge.products(search: rawName, limit: 50)) {
+          if (_nameKey(p['name']) != name) continue;
+          rows.addAll((await branch.bridge.falconFigures(
+            'product',
+            '${p['id']}',
+            currency,
+          )).items);
+        }
+        figures = (items: rows, category: null);
+      } else {
+        figures = await branch.bridge.falconFigures(scope, localRef, currency);
+      }
       categoryName ??= figures.category;
       for (final row in figures.items) {
         if (scope == 'product' && name != null && _nameKey(row['name']) != name) {
@@ -330,29 +346,22 @@ final class AllBranchesInventoryApi extends InventoryApi {
         });
       }
     }
-    final r = await commerce.network.post(
-      path,
-      data: {
-        ...body,
-        'scope': scope,
-        if (refId != null) 'ref_id': refId,
-        'report_currency': currency,
-        'device_items': items,
-        'device_all_branches': true,
-        if (categoryName != null) 'device_category': categoryName,
-      },
-    );
-    final data = r.data;
-    final inner = data is Map && data['data'] is Map ? data['data'] : data;
-    return inner is Map ? Map<String, dynamic>.from(inner) : <String, dynamic>{};
+    return (items: items, category: categoryName);
   }
+
+  @override
+  Future<Map<String, dynamic>?> falconPreview(
+    String scope,
+    String? refId, {
+    String? reportCurrency,
+  }) => _falcon.preview(scope, refId, reportCurrency: reportCurrency);
 
   @override
   Future<Map<String, dynamic>> falconAnalyze(
     String scope,
     String? refId, {
     String? reportCurrency,
-  }) => _falcon('/inventory/falcon/analyze', const {}, scope, refId, reportCurrency);
+  }) => _falcon.analyze(scope, refId, reportCurrency: reportCurrency);
 
   @override
   Future<Map<String, dynamic>> falconChat(
@@ -361,12 +370,12 @@ final class AllBranchesInventoryApi extends InventoryApi {
     String question,
     List<Map<String, dynamic>> history, {
     String? reportCurrency,
-  }) => _falcon(
-    '/inventory/falcon/chat',
-    {'question': question, 'history': history},
+  }) => _falcon.chat(
     scope,
     refId,
-    reportCurrency,
+    question,
+    history,
+    reportCurrency: reportCurrency,
   );
 
   // Nothing is added, edited, moved or deleted in «جميع الفروع».

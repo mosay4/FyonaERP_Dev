@@ -18,6 +18,7 @@ import '../../../../core/utils/amount_input_formatter.dart';
 import '../../../../shared/widgets/styled_snack.dart';
 import '../../data/branch_api.dart';
 import '../../../inventory/presentation/widgets/business_product_image.dart';
+import '../../../inventory/presentation/widgets/business_unit_image.dart';
 import '../../../../core/services/currency/currency_engine.dart';
 import '../../../core_business/presentation/providers/biz_payment_pref.dart';
 import '../../../reports/data/business_report_rates.dart';
@@ -1752,13 +1753,14 @@ class _TransferFormPageState extends ConsumerState<_TransferFormPage> {
     final line = _lines[index];
     final p = line.source;
     if (p == null) return const SizedBox.shrink();
-    final image = '${p['image'] ?? ''}';
     final qty = double.tryParse(line.qty.text.trim()) ?? 0;
-    final unit = (p['units'] as List? ?? const [])
+    final picked = (p['units'] as List? ?? const [])
         .whereType<Map>()
         .where((u) => '${u['id']}' == line.unitId)
-        .map((u) => '${u['name']}')
         .firstOrNull;
+    final unit = picked == null ? null : '${picked['name']}';
+    // The chosen unit's own photo (a carton), else the product's.
+    final image = businessUnitDisplayImage(picked, product: p) ?? '';
     return Container(
       margin: const EdgeInsets.only(bottom: 7),
       padding: const EdgeInsets.all(9),
