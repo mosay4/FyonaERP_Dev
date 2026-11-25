@@ -200,6 +200,17 @@ TESTS / TOOLS
      deleted (routes now build InvoiceViewPage).
    - Archived branches filtered in the drawer switcher (+ device archive).
 
+20. ROUND 13 (25-11-2026)
+   - Report openings v2 (report_scenes.dart, 16 WAV cues in assets/audio,
+     tools/report_scene_sounds.py); v1 backup in widgets/legacy/,
+     switch kUseLegacyReportScenes. New ReportArt icons.
+   - Report PDFs redesigned (pdf_engine generateReportPdf + charts/meta).
+   - Party operations page (party_operations_page.dart, ledger partyActivity).
+   - Fixes: stable localCommerceBridge (no false «غير مصرح»), all-branches
+     guard allows /business-sara/continue (deployed), all-mode report
+     currency union, local add-debt → credit invoice, home carousel focus.
+   - Category refresh quiet reload; inventory + adds category in «مع التصنيف».
+
 OPEN ITEMS (need owner decision or next round)
 1) 10 known failing tests remain (tools/ci/known_failures.txt), both
    deliberate product changes by the previous developer — owner decision:

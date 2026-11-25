@@ -120,6 +120,22 @@ flutter:
     - assets/audio/financial_executive.ogg
     - assets/audio/financial_precision.ogg
     - assets/audio/financial_balance.ogg
+    - assets/audio/report_overview_tiles.wav
+    - assets/audio/report_overview_ring.wav
+    - assets/audio/report_overview_settle.wav
+    - assets/audio/report_sales_print.wav
+    - assets/audio/report_sales_coins.wav
+    - assets/audio/report_sales_settle.wav
+    - assets/audio/report_money_dial.wav
+    - assets/audio/report_money_flow.wav
+    - assets/audio/report_money_settle.wav
+    - assets/audio/report_inventory_boxes.wav
+    - assets/audio/report_inventory_scan.wav
+    - assets/audio/report_inventory_settle.wav
+    - assets/audio/report_debts_open.wav
+    - assets/audio/report_debts_page.wav
+    - assets/audio/report_debts_scale.wav
+    - assets/audio/report_debts_settle.wav
     - assets/video/intro.mp4
     - assets/video/intro_poster.png
   fonts:

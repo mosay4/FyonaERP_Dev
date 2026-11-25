@@ -241,7 +241,7 @@ class _ReportsHubPageState extends ConsumerState<ReportsHubPage> {
     });
   }
 
-  Future<void> _loadCurrencies() async {
+  Future<void> _loadCurrencies([int attempt = 0]) async {
     final scope = BusinessReportsApi.scopeIdentity;
     final api = ref.read(businessReportsApiProvider);
     final ticket = ++_currencyRequest;
@@ -256,14 +256,26 @@ class _ReportsHubPageState extends ConsumerState<ReportsHubPage> {
       if (!mounted ||
           ticket != _currencyRequest ||
           scope != BusinessReportsApi.scopeIdentity ||
-          !identical(api, ref.read(businessReportsApiProvider)))
+          // Same data source (a background refresh rebuilds the API object,
+          // notably in «جميع الفروع»); dropping the result left the picker
+          // without the branches' unused currencies (e.g. YER_OLD).
+          api.scopeKey != ref.read(businessReportsApiProvider).scopeKey)
         return;
       _enabledSet = enabled
           .map((c) => c.trim().toUpperCase())
           .where((c) => c.isNotEmpty)
           .toSet();
       _applyCurrencyMerge();
-    } catch (_) {}
+    } catch (_) {
+      // A background refresh retired this API mid-read while the source is
+      // the same: read again from the current one.
+      final now = mounted ? ref.read(businessReportsApiProvider) : null;
+      if (attempt < 2 && now != null && ticket == _currencyRequest &&
+          scope == BusinessReportsApi.scopeIdentity &&
+          !identical(api, now) && api.scopeKey == now.scopeKey) {
+        await _loadCurrencies(attempt + 1);
+      }
+    }
   }
 
   int _currencyRequest = 0;
@@ -305,11 +317,7 @@ class _ReportsHubPageState extends ConsumerState<ReportsHubPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.auto_awesome_rounded,
-                size: 30,
-                color: AppColors.primary,
-              ),
+              ReportArt(reportArtKindFor(kind), size: 34),
               const SizedBox(height: 8),
               Text(
                 title,

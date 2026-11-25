@@ -80,10 +80,12 @@ class _CategoryDetailPageState extends ConsumerState<CategoryDetailPage> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool quiet = false}) async {
     if (!_active) return;
+    // A pull-to-refresh keeps the page on screen (and the refresh motion
+    // alive); only the first load may show the empty/loading state.
     setState(() {
-      _loading = true;
+      if (!quiet || _cat == null) _loading = true;
       _error = null;
     });
     try {
@@ -515,7 +517,7 @@ class _CategoryDetailPageState extends ConsumerState<CategoryDetailPage> {
                        : businessOperationError(l10n, _error!, fallback: 'invLoadError'),
                       style: const TextStyle(fontFamily: 'Cairo')))
               : FyonaRefresh(
-                  onRefresh: _load,
+                  onRefresh: () => _load(quiet: true),
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                     children: [

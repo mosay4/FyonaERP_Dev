@@ -14,6 +14,7 @@ import 'package:fyona_flutter/features/core_business/data/local_directory/direct
 import 'package:fyona_flutter/features/core_business/presentation/pages/customers_page.dart';
 import 'package:fyona_flutter/features/core_business/presentation/pages/party_debt_pages.dart';
 import 'package:fyona_flutter/features/core_business/presentation/pages/party_detail_page.dart';
+import 'package:fyona_flutter/features/core_business/presentation/pages/party_operations_page.dart';
 import 'package:fyona_flutter/features/core_business/presentation/providers/business_debt_operation_source.dart';
 import 'package:fyona_flutter/features/dashboard/presentation/pages/business_income_expense_page.dart';
 import 'package:fyona_flutter/features/dashboard/presentation/providers/business_dashboard_providers.dart';
@@ -294,12 +295,20 @@ void main() {
       });
       await tester.tap(find.text('$contextName false'));
       await tester.pumpAndSettle();
+      // The party's full history opens from one button; a debt row opens
+      // its existing debt detail.
+      final history = find.byKey(const ValueKey('party-operations-button'));
+      await until(history);
+      await tester.tap(history);
+      await tester.pumpAndSettle();
       await until(find.textContaining('OPEN-'));
       await tester.tap(find.textContaining('OPEN-').first);
       await tester.pumpAndSettle();
-      await until(find.byType(InvoiceViewPage));
-      await until(find.textContaining('OPEN-'));
+      await until(find.byType(DebtOperationDetailPage));
       router.pop();
+      await tester.pumpAndSettle();
+      await until(find.byType(PartyOperationsPage));
+      Navigator.of(tester.element(find.byType(PartyOperationsPage))).pop();
       await tester.pumpAndSettle();
       await tester.tap(find.text('مجموعات الديون'));
       await tester.pumpAndSettle();

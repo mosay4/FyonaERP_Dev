@@ -189,3 +189,160 @@ extension BusinessOperations on BusinessLedger {
     });
   }
 }
+
+/// Every operation linked to one customer/supplier on this branch, newest
+/// first: opening debts, sales/purchase invoices, confirmed returns and the
+/// later payments/settlements against them. A payment taken together with
+/// its invoice is part of that invoice row, not a separate operation; one
+/// settlement covering several invoices is a single row listing them.
+extension BusinessPartyActivity on BusinessLedger {
+  Future<List<Map<String, Object?>>> partyActivity(
+    BusinessLedgerAccess access,
+    DirectoryPartyReference party,
+  ) {
+    final branch = _branch(access, BusinessLedgerAction.readDebt);
+    _partyScope(access, party);
+    final kind = party.kind.name;
+    double money(Object? minor) => ((minor as num?) ?? 0) / 100;
+    return _directory._transaction((txn) async {
+      await _directory._scopedParty(txn, access.directory, party.kind, party.id);
+      final debts = await txn.rawQuery(
+        '''
+        SELECT id, number, invoice_date AS date, currency, total_minor,
+          paid_minor, MAX(0, total_minor - paid_minor) AS remaining_minor,
+          created_us
+        FROM ${BusinessLedger._debts}
+        WHERE branch_id = ? AND kind = ? AND party_id = ? AND cancelled_us IS NULL
+        ''',
+        [branch, kind, party.id],
+      );
+      final invoices = await txn.rawQuery(
+        '''
+        SELECT id, number, date, currency, total_minor, paid_minor,
+          balance_minor AS remaining_minor, created_us, invoice_type, status
+        FROM $_commerceInvoices
+        WHERE branch_id = ? AND party_kind = ? AND party_id = ?
+          AND deleted_us IS NULL AND status NOT IN ('draft', 'cancelled')
+        ''',
+        [branch, kind, party.id],
+      );
+      final returns = await txn.rawQuery(
+        '''
+        SELECT r.id, r.number, r.date, i.currency, r.total_minor, r.created_us,
+          r.invoice_type, r.invoice_id, i.number AS invoice_number, r.reason
+        FROM $_commerceReturns r JOIN $_commerceInvoices i
+          ON i.branch_id = r.branch_id AND i.id = r.invoice_id
+        WHERE r.branch_id = ? AND i.party_kind = ? AND i.party_id = ?
+          AND r.status = 'confirmed' AND i.deleted_us IS NULL
+        ''',
+        [branch, kind, party.id],
+      );
+      final payments = await txn.rawQuery(
+        '''
+        SELECT 'invoice' AS source, i.id AS invoice_id, i.number AS invoice_number,
+          i.invoice_type, p.date, p.created_us, p.payment_currency,
+          p.original_minor, p.applied_minor, p.method, a.bank_name
+        FROM $_commercePayments p JOIN $_commerceInvoices i
+          ON i.branch_id = p.branch_id AND i.id = p.invoice_id
+        LEFT JOIN ${BusinessLedger._accounts} a
+          ON a.branch_id = p.branch_id AND a.id = p.account_id
+        WHERE p.branch_id = ? AND i.party_kind = ? AND i.party_id = ?
+          AND i.deleted_us IS NULL AND i.status NOT IN ('draft', 'cancelled')
+          AND p.created_us <> i.created_us
+        UNION ALL
+        SELECT 'debt', d.id, d.number, NULL, p.date, p.created_us,
+          p.payment_currency, p.original_minor, p.applied_minor, p.method,
+          a.bank_name
+        FROM ${BusinessLedger._paymentHistory} p JOIN ${BusinessLedger._debts} d
+          ON d.branch_id = p.branch_id AND d.id = p.invoice_id
+        LEFT JOIN ${BusinessLedger._accounts} a
+          ON a.branch_id = p.branch_id AND a.id = p.account_id
+        WHERE p.branch_id = ? AND d.kind = ? AND d.party_id = ?
+          AND d.cancelled_us IS NULL
+          AND (p.command_id IS NULL OR EXISTS (
+            SELECT 1 FROM ${BusinessLedger._legs} l
+            WHERE l.branch_id = p.branch_id AND l.command_id = p.command_id
+              AND l.account_id = p.account_id AND $_visibleBankLeg
+          ))
+        ''',
+        [branch, kind, party.id, branch, kind, party.id],
+      );
+      final out = <Map<String, Object?>>[
+        for (final d in debts)
+          {
+            'type': 'debt',
+            'id': d['id'],
+            'number': d['number'],
+            'date': d['date'],
+            'currency': d['currency'],
+            'amount': money(d['total_minor']),
+            'paid': money(d['paid_minor']),
+            'remaining': money(d['remaining_minor']),
+            'created_us': d['created_us'],
+          },
+        for (final i in invoices)
+          {
+            'type': i['invoice_type'],
+            'id': i['id'],
+            'number': i['number'],
+            'date': i['date'],
+            'currency': i['currency'],
+            'amount': money(i['total_minor']),
+            'paid': money(i['paid_minor']),
+            'remaining': money(i['remaining_minor']),
+            'status': i['status'],
+            'created_us': i['created_us'],
+          },
+        for (final r in returns)
+          {
+            'type': '${r['invoice_type']}_return',
+            'id': r['id'],
+            'number': r['number'],
+            'date': r['date'],
+            'currency': r['currency'],
+            'amount': money(r['total_minor']),
+            'invoice_id': r['invoice_id'],
+            'invoice_number': r['invoice_number'],
+            'notes': r['reason'],
+            'created_us': r['created_us'],
+          },
+      ];
+      // One settlement command writes one row per covered invoice at the
+      // same instant and in the same paid currency.
+      final settlements = <String, Map<String, Object?>>{};
+      for (final p in payments) {
+        final key = '${p['created_us']}|${p['payment_currency']}';
+        final row = settlements.putIfAbsent(
+          key,
+          () => {
+            'type': 'payment',
+            'id': key,
+            'date': p['date'],
+            'currency': p['payment_currency'],
+            'amount': 0.0,
+            'account': p['bank_name'],
+            'method': p['method'],
+            'created_us': p['created_us'],
+            'invoices': <Map<String, Object?>>[],
+          },
+        );
+        row['amount'] = (row['amount'] as double) + money(p['original_minor']);
+        (row['invoices'] as List<Map<String, Object?>>).add({
+          'source': p['source'],
+          'id': p['invoice_id'],
+          'number': p['invoice_number'],
+          'invoice_type': p['invoice_type'],
+        });
+      }
+      out.addAll(settlements.values);
+      out.sort((a, b) {
+        final byDate = '${b['date'] ?? ''}'.compareTo('${a['date'] ?? ''}');
+        if (byDate != 0) return byDate;
+        return ((b['created_us'] as num?) ?? 0).compareTo(
+          (a['created_us'] as num?) ?? 0,
+        );
+      });
+      return out;
+    });
+  }
+}

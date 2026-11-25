@@ -42,8 +42,13 @@ def all_branches_blocked(method: str, path: str, scope_header: str | None,
         return False
     if path.rstrip('/') in ('/api/v1/inventory/falcon/analyze', '/api/v1/inventory/falcon/chat'):
         return False  # Analysis/chat read the signed scope; neither mutates inventory.
-    if path.rstrip('/') in ('/api/v1/business-sara/query', '/api/v1/business-sara/query-attachment'):
-        return False  # Tool preparation and execution enforce read-only separately.
+    if path.rstrip('/') in ('/api/v1/business-sara/query', '/api/v1/business-sara/query-attachment',
+                            '/api/v1/business-sara/continue'):
+        # Tool preparation and execution enforce read-only separately. The
+        # phone-ledger resume (/continue) only carries the phone's READ
+        # results back to the model; blocking it broke every all-branches
+        # question with «حدث خطأ غير متوقع».
+        return False
     if not path.startswith("/api/v1"):
         return False
     # Leaving «all branches» must always be possible: selecting a concrete

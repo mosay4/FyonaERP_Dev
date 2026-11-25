@@ -35,6 +35,7 @@ import '../providers/business_party_sharing_provider.dart';
 import '../widgets/local_directory_actions.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import 'party_operations_page.dart';
 
 /// Supplier / customer detail: party info, per-currency balance, and the
 /// single clear action (pay supplier / collect from customer).
@@ -1750,47 +1751,72 @@ class _PartyDetailPageState extends ConsumerState<PartyDetailPage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 18),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          l10n.translate('debtRecentOps'),
-                          style: DebtStyle.text(context, size: 14, bold: true),
-                        ),
-                      ),
-                      Text(
-                        l10n.translate(
-                          'debtOpsCount',
-                          params: {'n': '${_ops.length}'},
-                        ),
-                        style: DebtStyle.text(
-                          context,
-                          size: 11,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (_ops.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 18),
-                      child: Text(
-                        l10n.translate('debtEmptyOps'),
-                        textAlign: TextAlign.center,
-                        style: DebtStyle.text(
-                          context,
-                          size: 12,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    )
-                  else
-                    for (final o in _sortedOps) _opTile(context, l10n, o),
+                  const SizedBox(height: 14),
+                  _operationsButton(l10n, shownTitle),
                 ],
               ),
             ),
+    );
+  }
+
+  /// One clear entry to the party's full history (debts, invoices,
+  /// payments, returns) instead of an inline preview list.
+  Widget _operationsButton(AppLocalizations l10n, String name) {
+    final label = l10n.translate(
+      widget.isSupplier ? 'partyOpsSupplierBtn' : 'partyOpsCustomerBtn',
+    );
+    return Material(
+      color: DebtStyle.surface(context),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        key: const ValueKey('party-operations-button'),
+        borderRadius: BorderRadius.circular(16),
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => PartyOperationsPage(
+                isSupplier: widget.isSupplier,
+                name: name,
+                localParty: widget.localParty,
+                legacyOps: _sortedOps,
+              ),
+            ),
+          );
+          if (mounted && widget.localParty != null) await _loadDirectory();
+        },
+        child: Container(
+          height: 60,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: DebtStyle.border(context)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: DebtStyle.pink,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: const Icon(Icons.history_rounded,
+                    color: DebtStyle.red, size: 21),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: DebtStyle.text(context, size: 14.5, bold: true),
+                ),
+              ),
+              const DebtArrow(),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

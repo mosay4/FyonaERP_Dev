@@ -254,8 +254,14 @@ class _InventoryHomePageState extends ConsumerState<InventoryHomePage> {
           if (!BranchScope.readOnly &&
               ref.watch(employeeCanProvider('inventory.add')))
             IconButton(
-              tooltip: l10n.translate('invAddProduct'),
-              onPressed: () => context.push('/inventory/product/edit'),
+              // In «مع التصنيف» the + adds a CATEGORY (products are added
+              // from inside a category); elsewhere it adds a product.
+              tooltip: _categoriesView
+                  ? l10n.translate('invAddCategory')
+                  : l10n.translate('invAddProduct'),
+              onPressed: _categoriesView
+                  ? _addCategory
+                  : () => context.push('/inventory/product/edit'),
               icon: const Icon(Icons.add),
             ),
           IconButton(

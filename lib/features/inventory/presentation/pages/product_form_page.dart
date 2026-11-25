@@ -150,7 +150,22 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
   Object? _loadError;
   bool _imageRemoved = false;
   String? _commandId;
-  late final InventoryApi _source;
+  late InventoryApi _source;
+  late final (String?, String?, bool) _selection;
+
+  /// A background refresh (sync, branch access, auth reload) may hand an
+  /// equivalent API for the very same workspace/branch: keep editing with it.
+  /// Only a real change (other branch/organization, all-branches, another
+  /// kind of source) closes the form.
+  bool _sameSource(InventoryApi next) {
+    if (identical(next, _source)) return true;
+    if (next.runtimeType != _source.runtimeType ||
+        _selection != (BranchScope.organizationId, BranchScope.branchId, BranchScope.allMode)) {
+      return false;
+    }
+    _source = next;
+    return true;
+  }
 
   bool get isEdit => widget.id != null;
 
@@ -163,7 +178,7 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
   String get _writePermission => isEdit ? 'inventory.edit' : 'inventory.add';
 
   bool get _active => mounted && _allows(widget.localTarget) &&
-      identical(_source, ref.read(inventoryApiProvider)) &&
+      _sameSource(ref.read(inventoryApiProvider)) &&
       ref.read(employeeCanProvider('inventory')) &&
       ref.read(employeeCanProvider(_writePermission));
 
@@ -171,6 +186,7 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
   void initState() {
     super.initState();
     _source = ref.read(inventoryApiProvider);
+    _selection = (BranchScope.organizationId, BranchScope.branchId, BranchScope.allMode);
     if (widget.initialBarcode != null) _barcode.text = widget.initialBarcode!;
     if (isEdit && _active) _load();
   }
@@ -325,7 +341,7 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
       context: context,
       title: l10n.translate('invCategory'),
       guard: (_, sheet) => Consumer(builder: (context, ref, _) {
-        if (!identical(_source, ref.watch(inventoryApiProvider)) ||
+        if (!_sameSource(ref.watch(inventoryApiProvider)) ||
             !ref.watch(employeeCanProvider('inventory')) ||
             !ref.watch(employeeCanProvider(_writePermission))) {
           return Material(child: ListTile(title: Text(l10n.translate('unauthorized'))));
@@ -470,7 +486,7 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
           return;
         }
       }
-      if (!mounted || !identical(_source, ref.read(inventoryApiProvider))) return;
+      if (!mounted || !_sameSource(ref.read(inventoryApiProvider))) return;
       _showSaved(id);
     } catch (e) {
       if (mounted) {
@@ -549,7 +565,7 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    if (!identical(_source, ref.watch(inventoryApiProvider)) || !_allows(widget.localTarget) ||
+    if (!_sameSource(ref.watch(inventoryApiProvider)) || !_allows(widget.localTarget) ||
         !ref.watch(employeeCanProvider('inventory')) ||
         !ref.watch(employeeCanProvider(_writePermission))) {
       return Scaffold(body: Center(child: Text(l10n.translate('unauthorized'))));

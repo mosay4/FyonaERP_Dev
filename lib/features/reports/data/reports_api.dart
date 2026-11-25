@@ -293,22 +293,26 @@ class BusinessReportsApi {
   Future<Set<String>> deviceCurrencies() async {
     final all = _all;
     if (all != null) {
+      // The UNION of every branch's own set: its enabled (cash) currencies
+      // and the currencies in its data. One kind failing must not hide the
+      // others; a real scope change still stops the read.
+      Future<Set<String>> kind(
+        String kind,
+        Future<Set<String>> Function(BusinessLedger, BusinessLedgerAccess) load,
+      ) async {
+        try {
+          return {for (final read in await all.read(kind, load)) ...read.value};
+        } on ReportScopeChanged {
+          rethrow;
+        } catch (_) {
+          return {};
+        }
+      }
+
       return {
-        for (final read in await all.read(
-          'debts',
-          (ledger, access) => ledger.debtReportCurrencies(access),
-        ))
-          ...read.value,
-        for (final read in await all.read(
-          'money',
-          (ledger, access) => ledger.moneyReportCurrencies(access),
-        ))
-          ...read.value,
-        for (final read in await all.read(
-          'inventory',
-          (ledger, access) => ledger.inventoryReportCurrencies(access),
-        ))
-          ...read.value,
+        ...await kind('money', (ledger, access) => ledger.moneyReportCurrencies(access)),
+        ...await kind('debts', (ledger, access) => ledger.debtReportCurrencies(access)),
+        ...await kind('inventory', (ledger, access) => ledger.inventoryReportCurrencies(access)),
       };
     }
     final device = _device;

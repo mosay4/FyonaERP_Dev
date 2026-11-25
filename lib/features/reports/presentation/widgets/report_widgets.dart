@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:fl_chart/fl_chart.dart';
@@ -30,142 +31,178 @@ class ReportArt extends StatelessWidget {
   }
 }
 
+/// Report icons (v2): one motif per report, drawn on a 24-unit grid so the
+/// strokes stay crisp at every size. Neutral line + brand-crimson accent +
+/// a soft crimson wash, matching each report's opening motion.
 class _ReportArtPainter extends CustomPainter {
   final ReportArtKind kind;
   final bool dark;
   _ReportArtPainter({required this.kind, required this.dark});
 
-  Color get _stroke => dark ? Colors.white70 : const Color(0xFF565656);
+  Color get _ink => dark ? const Color(0xFFE2DEE1) : const Color(0xFF3A353B);
+  Color get _accent => dark ? const Color(0xFFD0405B) : AppColors.primary;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final s = size.width;
-    final stroke = Paint()
+    final u = size.shortestSide / 24;
+    canvas.save();
+    canvas.translate(
+      (size.width - 24 * u) / 2,
+      (size.height - 24 * u) / 2,
+    );
+    canvas.scale(u);
+    Paint line(Color c, [double w = 1.6]) => Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = s * 0.045
+      ..strokeWidth = w
       ..strokeCap = StrokeCap.round
-      ..color = _stroke;
-    final accent = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = s * 0.05
-      ..strokeCap = StrokeCap.round
-      ..color = AppColors.primary;
+      ..strokeJoin = StrokeJoin.round
+      ..color = c;
+    final ink = line(_ink);
+    final accent = line(_accent);
+    final wash = Paint()..color = _accent.withValues(alpha: dark ? .22 : .13);
+    final dot = Paint()..color = _accent;
+    final c = canvas;
     switch (kind) {
       case ReportArtKind.sales:
-        // Rising bars
-        final hs = [0.30, 0.48, 0.40, 0.62];
-        final bw = s * 0.13;
-        final gap = s * 0.07;
-        var x = s * 0.12;
-        for (var i = 0; i < hs.length; i++) {
-          final h = s * 0.5 * hs[i];
-          final r = RRect.fromRectAndRadius(
-            Rect.fromLTWH(x, s * 0.78 - h, bw, h),
-            Radius.circular(s * 0.03),
-          );
-          canvas.drawRRect(r, stroke);
-          x += bw + gap;
+        // Receipt with a rising trend arrow.
+        final receipt = Path()
+          ..moveTo(3.5, 3)
+          ..lineTo(13.5, 3)
+          ..lineTo(13.5, 20.5);
+        for (var i = 0; i < 3; i++) {
+          final x = 13.5 - i * 10 / 3;
+          receipt
+            ..lineTo(x - 5 / 3, 19)
+            ..lineTo(x - 10 / 3, 20.5);
         }
-        canvas.drawLine(
-          Offset(s * 0.10, s * 0.86),
-          Offset(s * 0.90, s * 0.86),
+        receipt.close();
+        c.drawPath(receipt, wash);
+        c.drawPath(receipt, ink);
+        c.drawLine(const Offset(6.5, 7.5), const Offset(10.5, 7.5), ink);
+        c.drawLine(const Offset(6.5, 11), const Offset(9.5, 11), ink);
+        c.drawLine(const Offset(6.5, 14.5), const Offset(10.5, 14.5), accent);
+        c.drawLine(const Offset(16, 17), const Offset(21, 11.5), accent);
+        c.drawPath(
+          Path()
+            ..moveTo(17.6, 11.2)
+            ..lineTo(21, 11.5)
+            ..lineTo(21.2, 14.9),
           accent,
         );
       case ReportArtKind.money:
-        // Banknote with coin
-        final r = RRect.fromRectAndRadius(
-          Rect.fromLTWH(s * 0.12, s * 0.30, s * 0.76, s * 0.40),
-          Radius.circular(s * 0.06),
+        // Safe: body, dial with a crimson index, handle and feet.
+        final body = RRect.fromRectAndRadius(
+          const Rect.fromLTWH(3, 3.5, 18, 15.5),
+          const Radius.circular(2.4),
         );
-        canvas.drawRRect(r, stroke);
-        canvas.drawCircle(Offset(s * 0.5, s * 0.50), s * 0.11, accent);
-        canvas.drawLine(
-          Offset(s * 0.5, s * 0.42),
-          Offset(s * 0.5, s * 0.58),
-          stroke..strokeWidth = s * 0.04,
-        );
+        c.drawRRect(body, wash);
+        c.drawRRect(body, ink);
+        const dial = Offset(10.5, 11.25);
+        c.drawCircle(dial, 4, ink);
+        c.drawLine(const Offset(10.5, 7.25), const Offset(10.5, 9.2), accent);
+        c.drawCircle(dial, 1.2, dot);
+        c.drawLine(const Offset(17.2, 8.8), const Offset(17.2, 13.7), ink);
+        c.drawLine(const Offset(6, 19), const Offset(6, 20.8), ink);
+        c.drawLine(const Offset(18, 19), const Offset(18, 20.8), ink);
       case ReportArtKind.inventory:
-        // Stacked crates
+        // Two cartons on a shelf, the newest one in crimson.
+        c.drawLine(const Offset(2.5, 20.5), const Offset(21.5, 20.5), ink);
         final big = RRect.fromRectAndRadius(
-          Rect.fromLTWH(s * 0.10, s * 0.34, s * 0.52, s * 0.46),
-          Radius.circular(s * 0.05),
+          const Rect.fromLTWH(3, 7.5, 11, 11.5),
+          const Radius.circular(1.2),
         );
-        canvas.drawRRect(big, stroke);
-        canvas.drawLine(
-          Offset(s * 0.36, s * 0.34),
-          Offset(s * 0.36, s * 0.80),
-          stroke..strokeWidth = s * 0.03,
+        c.drawRRect(big, ink);
+        c.drawPath(
+          Path()
+            ..moveTo(7, 7.5)
+            ..lineTo(7, 11.5)
+            ..lineTo(10, 11.5)
+            ..lineTo(10, 7.5),
+          ink,
         );
-        final small = RRect.fromRectAndRadius(
-          Rect.fromLTWH(s * 0.60, s * 0.52, s * 0.30, s * 0.28),
-          Radius.circular(s * 0.04),
+        final side = RRect.fromRectAndRadius(
+          const Rect.fromLTWH(15.5, 12, 6, 7),
+          const Radius.circular(1.1),
         );
-        canvas.drawRRect(small, accent);
+        c.drawRRect(side, wash);
+        c.drawRRect(side, accent);
+        c.drawLine(const Offset(18.5, 12), const Offset(18.5, 14.5), accent);
       case ReportArtKind.debts:
-        // Two parties + handshake line
-        canvas.drawCircle(Offset(s * 0.28, s * 0.30), s * 0.11, stroke);
-        canvas.drawCircle(Offset(s * 0.72, s * 0.30), s * 0.11, stroke);
-        canvas.drawLine(
-          Offset(s * 0.34, s * 0.52),
-          Offset(s * 0.66, s * 0.52),
-          accent,
-        );
-        canvas.drawLine(
-          Offset(s * 0.42, s * 0.70),
-          Offset(s * 0.58, s * 0.70),
-          stroke,
-        );
+        // Balance scale: what you are owed against what you owe.
+        c.drawLine(const Offset(12, 5.5), const Offset(12, 19.5), ink);
+        c.drawLine(const Offset(8, 20), const Offset(16, 20), ink);
+        c.drawLine(const Offset(3.5, 7), const Offset(20.5, 7), ink);
+        for (final (x, owed) in [(4.5, true), (19.5, false)]) {
+          c.drawLine(Offset(x, 7), Offset(x - 2.6, 13), line(_ink, 1.1));
+          c.drawLine(Offset(x, 7), Offset(x + 2.6, 13), line(_ink, 1.1));
+          final pan = Path()
+            ..moveTo(x - 3.3, 13)
+            ..quadraticBezierTo(x, 17.6, x + 3.3, 13)
+            ..close();
+          if (owed) c.drawPath(pan, wash);
+          c.drawPath(pan, owed ? accent : ink);
+        }
+        c.drawCircle(const Offset(12, 7), 1.6, dot);
       case ReportArtKind.profit:
-        // Up arrow inside a circle
-        canvas.drawCircle(Offset(s * 0.5, s * 0.5), s * 0.38, stroke);
-        canvas.drawLine(
-          Offset(s * 0.36, s * 0.62),
-          Offset(s * 0.64, s * 0.36),
+        // Coin stack beside an upward arrow.
+        for (final y in [16.5, 12.8, 9.1]) {
+          final coin = RRect.fromRectAndRadius(
+            Rect.fromLTWH(3, y, 10, 3.2),
+            const Radius.circular(1.6),
+          );
+          if (y == 9.1) c.drawRRect(coin, wash);
+          c.drawRRect(coin, y == 9.1 ? accent : ink);
+        }
+        c.drawLine(const Offset(18, 20), const Offset(18, 4.5), accent);
+        c.drawPath(
+          Path()
+            ..moveTo(14.8, 7.7)
+            ..lineTo(18, 4.5)
+            ..lineTo(21.2, 7.7),
           accent,
         );
-        final head = Path()
-          ..moveTo(s * 0.50, s * 0.35)
-          ..lineTo(s * 0.66, s * 0.35)
-          ..lineTo(s * 0.64, s * 0.51)
-          ..close();
-        canvas.drawPath(head, Paint()..color = AppColors.primary);
       case ReportArtKind.overview:
-        // Merging panels
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(s * 0.10, s * 0.14, s * 0.36, s * 0.32),
-            Radius.circular(s * 0.04),
-          ),
-          stroke,
-        );
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(s * 0.54, s * 0.14, s * 0.36, s * 0.32),
-            Radius.circular(s * 0.04),
-          ),
+        // Overview ring with a pulse through it.
+        const o = Offset(12, 12);
+        final ring = Rect.fromCircle(center: o, radius: 8.6);
+        const gap = .3;
+        for (var i = 0; i < 4; i++) {
+          c.drawArc(
+            ring,
+            -math.pi / 2 + i * math.pi / 2 + gap / 2,
+            math.pi / 2 - gap,
+            false,
+            i == 0 ? accent : ink,
+          );
+        }
+        c.drawPath(
+          Path()
+            ..moveTo(6.5, 12.5)
+            ..lineTo(9, 12.5)
+            ..lineTo(10.6, 8.6)
+            ..lineTo(13.2, 15.6)
+            ..lineTo(14.8, 12.5)
+            ..lineTo(17.5, 12.5),
           accent,
-        );
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(s * 0.10, s * 0.56, s * 0.36, s * 0.30),
-            Radius.circular(s * 0.04),
-          ),
-          accent,
-        );
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(s * 0.54, s * 0.56, s * 0.36, s * 0.30),
-            Radius.circular(s * 0.04),
-          ),
-          stroke,
         );
     }
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _ReportArtPainter old) =>
       old.dark != dark || old.kind != kind;
 }
+
+/// The icon that stands for a report route kind (`sales`, `money`, …).
+ReportArtKind reportArtKindFor(String kind) => switch (kind) {
+  'sales' => ReportArtKind.sales,
+  'money' => ReportArtKind.money,
+  'inventory' => ReportArtKind.inventory,
+  'debts' => ReportArtKind.debts,
+  'profit' => ReportArtKind.profit,
+  _ => ReportArtKind.overview,
+};
 
 /// 3D-tilt data card carrying a KPI question + its animated number.
 /// Ledger totals are decimal strings. Keep their cents even above the

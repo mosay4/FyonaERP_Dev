@@ -457,7 +457,7 @@ class _ReportViewPageState extends ConsumerState<ReportViewPage> {
       'today' => l10n.translate('reconPeriodToday'),
       'week' => l10n.translate('reconPeriodWeek'),
       'year' => l10n.translate('reconPeriodYear'),
-      'custom' => '${f ?? ''} → ${t ?? ''}',
+      'custom' => '${f ?? ''} – ${t ?? ''}', // en dash: present in the PDF font
       _ => l10n.translate('reconPeriodMonth'),
     };
     final allBranches = BranchScope.allMode;
@@ -478,8 +478,12 @@ class _ReportViewPageState extends ConsumerState<ReportViewPage> {
       final kpis = <Map<String, String>>[];
       final sections = <ReportPdfSection>[];
 
-      void kpi(String label, dynamic v) =>
-          kpis.add({'label': label, 'value': '${v ?? '—'}'});
+      final tones = _pdfKpiTones(l10n);
+      void kpi(String label, dynamic v) => kpis.add({
+        'label': label,
+        'value': '${v ?? '—'}',
+        'tone': ?tones[label],
+      });
 
       if (widget.kind == 'sales') {
         final sales = data['sales'] as Map? ?? {};
@@ -900,22 +904,34 @@ class _ReportViewPageState extends ConsumerState<ReportViewPage> {
                 '$periodLabel',
                 '${l10n.translate('repPdfCurrency')}: $_currency',
               ],
-        footerParts: widget.kind == 'money'
-            ? [
-                '${l10n.translate('repGeneratedAt')}',
-                genDate,
-                _valuationLabel(data, l10n),
-              ]
-            : [
-                '${l10n.translate('repGeneratedAt')}',
-                genDate,
-                _valuationLabel(data, l10n),
-              ],
+        // The template prints the issue date and «page X of Y» itself.
+        footerParts: [_valuationLabel(data, l10n)],
         headers: const [],
         rows: const [],
         kpis: kpis,
         sections: sections,
         isAr: isAr,
+        meta: [
+          (l10n.translate('repPeriod'), periodLabel),
+          (l10n.translate('repPdfCurrency'), currencyText),
+          (
+            l10n.translate('repBranch'),
+            allBranches
+                ? l10n.translate('branchAllShort')
+                : (BranchScope.branchName ?? '—'),
+          ),
+          if (widget.kind == 'money' && subtitleAcc != subtitleMoneyBase)
+            (
+              l10n.translate('invBank'),
+              subParts(subtitleAcc)
+                  .skip(subParts(subtitleMoneyBase).length)
+                  .join(' • '),
+            ),
+          (l10n.translate('bdvPdfIssued'), genDate),
+        ],
+        charts: _pdfCharts(data, l10n),
+        kpiTitle: l10n.translate('repPdfKpis'),
+        chartsTitle: l10n.translate('repPdfVisuals'),
         footer:
             '${l10n.translate('repGeneratedAt')}: '
             '${DateTime.now().toIso8601String().split('.').first} | '
@@ -1164,11 +1180,7 @@ class _ReportViewPageState extends ConsumerState<ReportViewPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.assessment_outlined,
-            color: AppColors.primary,
-            size: 36,
-          ),
+          ReportArt(reportArtKindFor(widget.kind), size: 40),
           const SizedBox(height: 14),
           Text(
             l10n.translate(_titleKey),
@@ -1436,6 +1448,171 @@ class _ReportViewPageState extends ConsumerState<ReportViewPage> {
 
   Map _invoiceAmount(Map section, String key) =>
       section['${key}_amounts'] as Map? ?? {'total': section[key]};
+
+  /// Calm accent per KPI in the report PDFs (label → tone).
+  Map<String, String> _pdfKpiTones(AppLocalizations l10n) => {
+    for (final (key, tone) in const [
+      ('repSales', 'brand'),
+      ('repPurchases', 'info'),
+      ('repPaid', 'in'),
+      ('repRemaining', 'amber'),
+      ('repReturnsTotal', 'slate'),
+      ('repIncome', 'in'),
+      ('repOutflow', 'out'),
+      ('repTransfers', 'info'),
+      ('repExpenses', 'amber'),
+      ('repSettlements', 'slate'),
+      ('repSettleAdjust', 'slate'),
+      ('repBalanceNow', 'brand'),
+      ('repBalancesNow', 'brand'),
+      ('repProducts', 'brand'),
+      ('repCategories', 'info'),
+      ('repTransferredCategories', 'info'),
+      ('repUnits', 'slate'),
+      ('repStockValueHero', 'in'),
+      ('repLowStock', 'amber'),
+      ('repOutOfStock', 'out'),
+      ('repExpiring', 'plum'),
+      ('repCustomersDebts', 'brand'),
+      ('repSuppliersDebts', 'info'),
+      ('repCollected', 'in'),
+      ('repPaidSuppliers', 'out'),
+      ('repProfit', 'in'),
+    ])
+      l10n.translate(key): tone,
+  };
+
+  /// Simple bar / ratio visuals for the report PDF, built only from single
+  /// numeric totals (multi-currency «as recorded» totals stay text-only).
+  List<ReportPdfChart> _pdfCharts(Map data, AppLocalizations l10n) {
+    double? total(Object? section) {
+      if (section is! Map || section['total'] == null) return null;
+      final v = _d(section['total']);
+      return v.isFinite ? v : null;
+    }
+
+    final charts = <ReportPdfChart>[];
+    void add(
+      String titleKey,
+      List<(String, Object?, String)> items, {
+      bool ratio = false,
+      String? title,
+    }) {
+      final bars = <ReportPdfBar>[];
+      for (final (label, section, tone) in items) {
+        final v = total(section);
+        if (v == null) return;
+        bars.add(ReportPdfBar(
+          l10n.translate(label),
+          v,
+          _storedTotalText(section as Map),
+          tone: tone,
+        ));
+      }
+      if (bars.every((b) => b.value == 0)) return;
+      charts.add(ReportPdfChart(
+        title: title ?? l10n.translate(titleKey),
+        bars: bars,
+        ratio: ratio,
+      ));
+    }
+
+    void ranked(String titleKey, List<Map> rows, String Function(Map) name,
+        Object? Function(Map) section, String tone, {String Function(Map)? show}) {
+      final bars = <ReportPdfBar>[];
+      for (final r in rows.take(6)) {
+        final s = section(r);
+        final v = s is num || s is String ? _d(s) : total(s);
+        if (v == null) continue;
+        bars.add(ReportPdfBar(
+          name(r),
+          v,
+          show?.call(r) ?? _storedTotalText(s as Map),
+          tone: tone,
+        ));
+      }
+      if (bars.length < 2) return;
+      charts.add(ReportPdfChart(
+        title: l10n.translate(titleKey),
+        bars: bars,
+        singleTone: true,
+      ));
+    }
+
+    List<Map> list(Object? v) => (v as List? ?? []).whereType<Map>().toList();
+    switch (widget.kind) {
+      case 'sales':
+        final sales = data['sales'] as Map? ?? {};
+        add('repPdfSalesVsPurchases', [
+          ('repSales', sales, 'brand'),
+          ('repPurchases', data['purchases'], 'info'),
+        ]);
+        add('repPdfSalesCollection', [
+          ('repPaid', _invoiceAmount(sales, 'paid'), 'in'),
+          ('repRemaining', _invoiceAmount(sales, 'remaining'), 'amber'),
+        ], ratio: true);
+        ranked(_productsTitle(data), list(data['top_products']),
+            (p) => '${p['name'] ?? ''}', (p) => p, 'brand');
+      case 'money':
+        add('repPdfInOut', [
+          ('repIncome', data['inflow'], 'in'),
+          ('repOutflow', data['outflow'], 'out'),
+        ], ratio: true);
+        ranked('repTopExpenseCats', list((data['expenses'] as Map?)?['categories']),
+            (c) => '${c['category'] ?? l10n.translate('repExpenseOther')}',
+            (c) => c, 'amber');
+      case 'inventory':
+        final status = [
+          for (final (key, count, tone) in [
+            ('repLowStock', data['low_count'], 'amber'),
+            ('repOutOfStock', data['out_count'], 'out'),
+            ('repExpiring', data['expiring_count'], 'plum'),
+          ])
+            ReportPdfBar(l10n.translate(key), _d(count), '${count ?? 0}',
+                tone: tone),
+        ];
+        if (status.any((b) => b.value > 0)) {
+          charts.add(ReportPdfChart(
+            title: l10n.translate('repPdfStockStatus'),
+            bars: status,
+          ));
+        }
+        ranked('repMostMoved', list(data['most_moved']),
+            (m) => '${m['name'] ?? ''}', (m) => m['moved'], 'info',
+            show: (m) => '${_f(m['moved'])} ${m['unit'] ?? ''}'.trim());
+      case 'debts':
+        add('repPdfDebtSplit', [
+          ('repCustomersDebts', data['customers'], 'brand'),
+          ('repSuppliersDebts', data['suppliers'], 'info'),
+        ], ratio: true);
+        add('repPdfPaymentsFlow', [
+          ('repCollected', data['collected'], 'in'),
+          ('repPaidSuppliers', data['paid_to_suppliers'], 'out'),
+        ]);
+      default:
+        add('repPdfHighlights', [
+          ('repSales', data['sales'], 'brand'),
+          ('repPurchases', data['purchases'], 'info'),
+          ('repExpenses', data['expenses'], 'amber'),
+          ('repProfit', data['profit'], 'in'),
+        ]);
+        final chart = list(data['chart']);
+        final points = chart.length > 12 ? chart.sublist(chart.length - 12) : chart;
+        final trend = [
+          for (final p in points)
+            ReportPdfBar('${p['date'] ?? ''}', _d(p['value']),
+                _money(p['value']), tone: 'brand'),
+        ];
+        if (trend.length > 1 && trend.any((b) => b.value != 0)) {
+          charts.add(ReportPdfChart(
+            title: l10n.translate('repTrend'),
+            bars: trend,
+            singleTone: true,
+          ));
+        }
+    }
+    return charts;
+  }
 
   String _productsTitle(Map data) => data['products_ranked'] == false
       ? 'repLocalSoldProductValues'

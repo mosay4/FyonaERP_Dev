@@ -141,10 +141,15 @@ void main() {
     expect(find.text('طلبات السداد'), findsNothing);
     // No raw storage currency token in the UI.
     expect(find.text('YER_OLD', skipOffstage: false), findsNothing);
-    // The current page includes one recent-operation preview; the full history
-    // remains in the dedicated individual/section pages.
-    expect(find.textContaining('INV-20261014-0007', skipOffstage: false),
-        findsOneWidget);
+    // No inline preview list: one button opens the party's full history.
+    expect(find.text('أحدث العمليات'), findsNothing);
+    final button = find.byKey(const ValueKey('party-operations-button'));
+    expect(find.text('عرض عمليات العميل'), findsOneWidget);
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('فاتورة بيع', skipOffstage: false), findsWidgets);
   });
 
   testWidgets('party detail: backend failure shows a friendly retry (no stack)',

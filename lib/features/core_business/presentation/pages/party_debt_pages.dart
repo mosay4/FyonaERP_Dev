@@ -94,6 +94,38 @@ void _unmigratedFinance(BuildContext context) => showFyonaSnack(
   success: false,
 );
 
+/// A device-ledger party's new debt (single or inside a section) is a credit
+/// sale/purchase on this phone — the same invoice screen and ledger command
+/// as the buttons, in the party's own branch. Used to be refused here with a
+/// red «حدث خطأ» for every device party.
+Future<bool> _addLocalDebt(
+  BuildContext context,
+  WidgetRef ref,
+  DirectoryPartyReference party, {
+  String? group,
+}) async {
+  try {
+    _localScope(ref, party);
+  } on DirectoryAccessDenied {
+    _unmigratedFinance(context);
+    return false;
+  }
+  if (!sameDirectoryScope(party.scope, ref.read(businessLocalLedgerScopeProvider))) {
+    _unmigratedFinance(context);
+    return false;
+  }
+  final supplier = party.kind == DirectoryPartyKind.supplier;
+  await context.push(Uri(
+    path: supplier ? '/purchases/add' : '/sales/add',
+    queryParameters: {
+      supplier ? 'supplier' : 'customer': party.id,
+      if (group != null && group.isNotEmpty) 'group': group,
+      'debt': '1',
+    },
+  ).toString());
+  return true;
+}
+
 String _iso(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
@@ -300,8 +332,13 @@ class _PartyDebtsPageState extends ConsumerState<PartyDebtsPage>
     if (mounted) _load();
   }
 
-  void _addDebt() {
-    if (widget.localParty != null || widget.partyId.isEmpty) {
+  Future<void> _addDebt() async {
+    final local = widget.localParty;
+    if (local != null) {
+      if (await _addLocalDebt(context, ref, local) && mounted) _load();
+      return;
+    }
+    if (widget.partyId.isEmpty) {
       _unmigratedFinance(context);
       return;
     }
@@ -1087,8 +1124,13 @@ class _PartySectionPageState extends ConsumerState<PartySectionPage>
     if (mounted) _load();
   }
 
-  void _addDebt() {
-    if (widget.localGroup != null || widget.partyId.isEmpty) {
+  Future<void> _addDebt() async {
+    final local = widget.localGroup;
+    if (local != null) {
+      if (await _addLocalDebt(context, ref, local.party, group: local.id) && mounted) _load();
+      return;
+    }
+    if (widget.partyId.isEmpty) {
       _unmigratedFinance(context);
       return;
     }

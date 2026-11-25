@@ -39,16 +39,57 @@ class _HomeAccountCardState extends State<HomeAccountCard> {
   PageController? _pageCtrl;
   double _currentPage = 0;
 
-  @override
-  void initState() {
-    super.initState();
-    _pageCtrl = PageController(viewportFraction: 0.62);
-    _pageCtrl!.addListener(() {
-      final v = _pageCtrl!.page ?? 0;
+  /// The banks the pager was built for, and whether the pager is on screen.
+  String? _signature;
+  bool _pagerShown = false;
+
+  PageController _newController(int page) {
+    // keepPage: false — a restored page from PageStorage could disagree with
+    // the focused-card state below (shrunk, half-transparent current card).
+    final controller = PageController(
+      viewportFraction: 0.62,
+      initialPage: page,
+      keepPage: false,
+    );
+    controller.addListener(() {
+      if (!identical(controller, _pageCtrl) || !controller.hasClients) return;
+      final v = controller.page ?? _currentPage;
       if ((v - _currentPage).abs() > 0.01 && mounted) {
         setState(() => _currentPage = v);
       }
     });
+    return controller;
+  }
+
+  /// A branch switch or a data reload (the card passes through its empty
+  /// state while loading) gives the pager a new set of banks or re-mounts
+  /// it. Its controller then starts exactly at the focused card, so the
+  /// focused card is always full size and opacity — no swipe needed.
+  void _syncPager(List<_BankGroup> groups) {
+    if (groups.length <= 1) {
+      // Empty while loading / one bank: no pager. The focused bank is kept
+      // for a reload of the same banks.
+      _pagerShown = false;
+      return;
+    }
+    final signature = [for (final g in groups) g.name].join('\u0001');
+    final changed = signature != _signature;
+    if (changed) {
+      // Other banks (a branch switch): start at the first card.
+      _signature = signature;
+      _activeIndex = 0;
+    }
+    if (changed || !_pagerShown) {
+      _activeIndex = _activeIndex.clamp(0, groups.length - 1);
+      _currentPage = _activeIndex.toDouble();
+      final old = _pageCtrl;
+      _pageCtrl = _newController(_activeIndex);
+      // The old pager (keyed by its banks) detaches first; then dispose.
+      if (old != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
+      }
+      _pagerShown = true;
+    }
   }
 
   @override
@@ -133,6 +174,7 @@ class _HomeAccountCardState extends State<HomeAccountCard> {
   @override
   Widget build(BuildContext context) {
     final groups = _grouped;
+    _syncPager(groups);
     if (groups.isEmpty) return const _EmptyCard();
 
     if (groups.length == 1) {
@@ -159,6 +201,7 @@ class _HomeAccountCardState extends State<HomeAccountCard> {
         SizedBox(
           height: 165,
           child: PageView.builder(
+            key: ValueKey(_pageCtrl),
             controller: _pageCtrl,
             padEnds: true,
             clipBehavior: Clip.none,

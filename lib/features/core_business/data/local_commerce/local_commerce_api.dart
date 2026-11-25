@@ -159,7 +159,9 @@ final class LocalCommerceBridge {
 
   DirectoryAccess _require(List<String> permissions) {
     if (!_current(permissions)) throw const DirectoryAccessDenied();
-    return _selected!;
+    // The live scope of the same workspace/branch: a refreshed branch token
+    // (writer session, transfer expiry) is used, never a stale copy.
+    return _scope() ?? (throw const DirectoryAccessDenied());
   }
 
   Future<T> _run<T>(
@@ -1151,33 +1153,64 @@ final class LocalCommerceBridge {
   }
 }
 
+final class _BridgeSlot {
+  _BridgeSlot(this.key);
+  final Object key;
+  bool alive = true;
+  LocalCommerceBridge? bridge;
+}
+
+final _bridgeSlots = Expando<_BridgeSlot>('localCommerceBridge');
+
+/// One bridge per workspace + branch. A background refresh (auth reload,
+/// branch-token refresh, epoch bump after access polling or sync) rebuilds
+/// this provider with the SAME selection: it then hands back the same bridge,
+/// so every screen holding it (product form, invoices, reconciliation...)
+/// stays authorized instead of flashing «غير مصرح بالوصول». Grants always use
+/// the live scope (see [LocalCommerceBridge._require]); only a real change of
+/// workspace, branch or ledger mode yields a new bridge.
 final localCommerceBridgeProvider = Provider<LocalCommerceBridge>((ref) {
   ref.watch(branchEpochProvider);
   final store = ref.watch(directoryPilotStoreProvider);
-  ref.watch(businessLocalLedgerScopeProvider);
+  final selected = ref.watch(businessLocalLedgerScopeProvider);
   final branch = BranchScope.branchId;
   final org = BranchScope.organizationId;
   final container = ref.container;
-  var alive = true;
-  ref.onDispose(() => alive = false);
-  return LocalCommerceBridge(
+  final key = (
+    store,
+    branch,
+    org,
+    BranchScope.readOnly,
+    selected?.workspace.storageId,
+    selected?.branchId,
+    selected?.financialCutover,
+    selected?.member,
+  );
+  final previous = _bridgeSlots[container];
+  final slot = previous != null && previous.key == key
+      ? previous
+      : _BridgeSlot(key);
+  _bridgeSlots[container] = slot;
+  slot.alive = true;
+  ref.onDispose(() => slot.alive = false);
+  return slot.bridge ??= LocalCommerceBridge(
     store,
     () =>
-        alive &&
+        slot.alive &&
             !BranchScope.readOnly &&
             BranchScope.branchId == branch &&
             BranchScope.organizationId == org
         ? container.read(businessLocalLedgerScopeProvider)
         : null,
-    (permission) => alive && container.read(employeeCanProvider(permission)),
+    (permission) => slot.alive && container.read(employeeCanProvider(permission)),
     bankChanged: () {
-      if (alive) container.read(businessBankRevisionProvider.notifier).state++;
+      if (slot.alive) container.read(businessBankRevisionProvider.notifier).state++;
     },
     operationsChanged: () {
-      if (alive) container.read(businessOperationsRevisionProvider.notifier).state++;
+      if (slot.alive) container.read(businessOperationsRevisionProvider.notifier).state++;
     },
     fullAccess: () =>
-        alive &&
+        slot.alive &&
         (container.read(employeeWorkspaceCompanyProvider) == null ||
             employeeHasFullAccess(container.read(employeePermissionsProvider))),
     rate: (from, to) => container.read(currencyEngineProvider).getRate(from, to),

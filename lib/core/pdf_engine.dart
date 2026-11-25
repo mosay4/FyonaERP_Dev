@@ -20,6 +20,33 @@ class ReportPdfSection {
       {required this.title, required this.headers, required this.rows});
 }
 
+/// One bar of a report visual: label, numeric value (for the bar length)
+/// and the already formatted amount shown next to it.
+class ReportPdfBar {
+  final String label;
+  final double value;
+  final String display;
+  /// brand · in · out · info · amber · slate · plum (calm accents).
+  final String? tone;
+  const ReportPdfBar(this.label, this.value, this.display, {this.tone});
+}
+
+/// A simple visual in a report PDF: horizontal bars, or one stacked ratio
+/// bar (shares of a whole) with a legend.
+class ReportPdfChart {
+  final String title;
+  final List<ReportPdfBar> bars;
+  final bool ratio;
+  /// Bars all in the first tone (a ranked list) instead of one per bar.
+  final bool singleTone;
+  const ReportPdfChart({
+    required this.title,
+    required this.bars,
+    this.ratio = false,
+    this.singleTone = false,
+  });
+}
+
 class PdfEngine {
   PdfEngine._();
 
@@ -48,14 +75,6 @@ class PdfEngine {
   //  adapts automatically. Arabic → full RTL + Cairo; English → LTR.
   // ════════════════════════════════════════════════════════════
 
-  static const int _kBrand = 0xFFB00020; // logo crimson
-  static const int _kBrandDeep = 0xFFA00020;
-  static const int _kBrandDark = 0xFF8C0A1C;
-  static const int _kCard = 0xFFF7F7F9;
-  static const int _kLine = 0xFFE5E7EB;
-  static const int _kInk = 0xFF1A1A1A;
-  static const int _kMuted = 0xFF6B7280;
-
   static Uint8List? _logoBytes;
   static Future<Uint8List?> _getLogo() async {
     if (_logoBytes == null) {
@@ -71,219 +90,476 @@ class PdfEngine {
 
   static bool _hasArabic(String s) => RegExp(r'[\u0600-\u06FF]').hasMatch(s);
 
-  /// A grouped table inside the report (title repeats on every page chunk).
-  static pw.Widget? _pdfLogoChip;
+  // ── Report template building blocks ────────────────────────────────
 
-  /// Section of a report: its own title + table (headers/rows adapt freely).
-  static List<pw.Widget> _sectionBlocks({
-    required String title,
-    required List<String> tableHeaders,
-    required List<List<String>> tableRows,
-    required bool rtl,
-    required pw.Font regular,
-    required pw.Font bold,
-    int chunkSize = 18,
+  static const _rBrand = PdfColor.fromInt(0xFFB00020);
+  static const _rBrandDeep = PdfColor.fromInt(0xFF8C0A1C);
+  static const _rBrandSoft = PdfColor.fromInt(0xFFFBEFF1);
+  static const _rInk = PdfColor.fromInt(0xFF1F2328);
+  static const _rMuted = PdfColor.fromInt(0xFF6B7280);
+  static const _rLine = PdfColor.fromInt(0xFFE5E7EB);
+  static const _rCard = PdfColor.fromInt(0xFFF7F7F9);
+  static const _rWhite = PdfColor.fromInt(0xFFFFFFFF);
+
+  /// Calm accent cycle for KPI cards / bars when no tone is given.
+  static const _rTones = <String, PdfColor>{
+    'brand': _rBrand,
+    'in': PdfColor.fromInt(0xFF2E7D5B),
+    'out': PdfColor.fromInt(0xFFC0392B),
+    'info': PdfColor.fromInt(0xFF2F5D9E),
+    'amber': PdfColor.fromInt(0xFFB7791F),
+    'slate': PdfColor.fromInt(0xFF4B5563),
+    'plum': PdfColor.fromInt(0xFF7A3E6C),
+  };
+  static const _rCycle = ['brand', 'info', 'in', 'amber', 'slate', 'plum'];
+
+  static PdfColor _tone(String? tone, int index) =>
+      _rTones[tone] ?? _rTones[_rCycle[index % _rCycle.length]]!;
+
+  /// Same writer quirk as «ر»/«ز»: a space between an Arabic word and a
+  /// number collapses («صفحة 1 من 5» → «صفحة1 من5»).
+  static final _spaceDigit = RegExp(
+      r'(?:(?<=[؀-ۿ])(?<![رزژ]) (?=[0-9])|(?<=[0-9]) (?=[؀-ۿ]))');
+
+  /// Text in the report template: the [_pdfText] spacing fix, Arabic always
+  /// shaped in an RTL run, and LTR only for runs without Arabic letters
+  /// (forcing LTR on Arabic corrupts the bold glyph subset).
+  static pw.Widget _rt(
+    String text, {
+    double size = 9,
+    bool bold = false,
+    PdfColor color = _rInk,
+    pw.TextAlign? align,
+    int? maxLines,
+    bool ltr = false,
+  }) =>
+      _pdfText(
+        text.replaceAll(_spaceDigit, '  '),
+        style: pw.TextStyle(
+          font: bold ? _fontBold! : _fontRegular!,
+          fontBold: _fontBold,
+          fontSize: size,
+          fontWeight: bold ? pw.FontWeight.bold : null,
+          color: color,
+        ),
+        textAlign: align,
+        maxLines: maxLines,
+        textDirection: _hasArabic(text)
+            ? pw.TextDirection.rtl
+            : (ltr ? pw.TextDirection.ltr : null),
+      );
+
+  /// A value that may hold several «amount currency» parts joined by «•»:
+  /// each part is its own paragraph (one line each) so mixed Arabic/Latin
+  /// currencies never reorder each other.
+  static pw.Widget _rValue(
+    String text, {
+    required double size,
+    bool bold = false,
+    PdfColor color = _rInk,
+    bool end = false,
+    pw.TextAlign? align,
   }) {
-    final blocks = <pw.Widget>[];
-    if (tableRows.isEmpty) return blocks;
-    for (var i = 0; i < tableRows.length; i += chunkSize) {
-      final chunk = tableRows.sublist(
-          i, (i + chunkSize) > tableRows.length ? tableRows.length : i + chunkSize);
-      blocks.add(_sectionTitle(title, bold));
-      blocks.add(pw.SizedBox(height: 6));
-      blocks.add(_brandTable(
-          headers: tableHeaders,
-          rows: chunk,
-          rtl: rtl,
-          regular: regular,
-          bold: bold,
-          zebraBase: i));
-      blocks.add(pw.SizedBox(height: 14));
+    final parts = text
+        .split('•')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.length < 2) {
+      return _rt(text, size: size, bold: bold, color: color, align: align,
+          ltr: true, maxLines: 2);
     }
-    return blocks;
+    return pw.Column(
+      mainAxisSize: pw.MainAxisSize.min,
+      crossAxisAlignment:
+          end ? pw.CrossAxisAlignment.end : pw.CrossAxisAlignment.start,
+      children: [
+        for (final p in parts)
+          _rt(p, size: size, bold: bold, color: color, align: align,
+              ltr: true, maxLines: 1),
+      ],
+    );
   }
 
-  static pw.Widget _sectionTitle(String title, pw.Font bold) {
+  static final _numericCell =
+      RegExp(r'^[+\-−]?\s*[0-9٠-٩][0-9٠-٩,.\s/:%\-]*');
+
+  /// A column reads as numeric (amount, quantity, date) when most of its
+  /// filled cells start with a digit — those align right.
+  static List<bool> _numericColumns(List<List<String>> rows, int n) => [
+        for (var c = 0; c < n; c++)
+          () {
+            var filled = 0, numeric = 0;
+            for (final r in rows) {
+              final v = c < r.length ? r[c].trim() : '';
+              if (v.isEmpty || v == '—') continue;
+              filled++;
+              if (_numericCell.hasMatch(v)) numeric++;
+            }
+            return filled > 0 && numeric * 10 >= filled * 6;
+          }(),
+      ];
+
+  static pw.Widget _reportHeader({
+    required String title,
+    required String? subtitle,
+    required String? badge,
+    required Uint8List? logo,
+  }) {
+    final chip = logo == null
+        ? pw.SizedBox()
+        : pw.Container(
+            width: 50,
+            height: 50,
+            padding: const pw.EdgeInsets.all(5),
+            decoration: pw.BoxDecoration(
+                color: _rWhite, borderRadius: pw.BorderRadius.circular(12)),
+            child: pw.Image(pw.MemoryImage(logo), fit: pw.BoxFit.contain),
+          );
     return pw.Container(
-      padding: const pw.EdgeInsets.only(bottom: 4),
-      child: pw.Row(children: [
-        pw.Container(width: 4, height: 14, color: pdfColor(_kBrand)),
-        pw.SizedBox(width: 6),
-        pw.Expanded(
-          child: _pdfText(title,
-              style: pw.TextStyle(
-                  font: bold,
-                  fontSize: 12,
-                  fontWeight: pw.FontWeight.bold,
-                  color: pdfColor(_kBrand))),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: pw.BoxDecoration(
+        gradient: const pw.LinearGradient(
+          begin: pw.Alignment.topLeft,
+          end: pw.Alignment.bottomRight,
+          colors: [PdfColor.fromInt(0xFFC81E3A), _rBrand, _rBrandDeep],
         ),
+        borderRadius: pw.BorderRadius.circular(14),
+      ),
+      child: pw.Row(children: [
+        chip,
+        pw.SizedBox(width: 14),
+        pw.Expanded(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              _rt(title, size: 18.5, bold: true, color: _rWhite, maxLines: 2),
+              if (subtitle != null && subtitle.trim().isNotEmpty) ...[
+                pw.SizedBox(height: 2),
+                _rt(subtitle, size: 10,
+                    color: const PdfColor.fromInt(0xE6FFFFFF), maxLines: 1),
+              ],
+            ],
+          ),
+        ),
+        if (badge != null && badge.trim().isNotEmpty)
+          pw.Container(
+            padding:
+                const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: pw.BoxDecoration(
+              color: _rBrandDeep,
+              borderRadius: pw.BorderRadius.circular(9),
+            ),
+            child: _rt(badge, size: 9.5, bold: true, color: _rWhite),
+          ),
       ]),
     );
   }
 
-  static pw.Table _brandTable({
-    required List<String> headers,
-    required List<List<String>> rows,
-    required bool rtl,
-    required pw.Font regular,
-    required pw.Font bold,
-    int zebraBase = 0,
-  }) {
-    List<String> fix(List<String> r) => rtl ? r.reversed.toList() : r;
-    return pw.TableHelper.fromTextArray(
-      tableDirection: rtl ? pw.TextDirection.rtl : pw.TextDirection.ltr,
-      headerDirection: rtl ? pw.TextDirection.rtl : pw.TextDirection.ltr,
-      headers: fix(headers),
-      data: [for (final r in rows) fix(r)],
-      headerStyle: pw.TextStyle(
-          font: bold,
-          fontSize: 8.5,
-          fontWeight: pw.FontWeight.bold,
-          color: pdfColor(0xFFFFFFFF)),
-      headerDecoration: pw.BoxDecoration(color: pdfColor(_kBrandDeep)),
-      headerAlignment: rtl ? pw.Alignment.centerRight : pw.Alignment.centerLeft,
-      cellStyle: pw.TextStyle(font: regular, fontSize: 8.5, color: pdfColor(_kInk)),
-      cellAlignment: rtl ? pw.Alignment.centerRight : pw.Alignment.centerLeft,
-      cellPadding: const pw.EdgeInsets.symmetric(
-          horizontal: 6, vertical: 4.5),
-      oddRowDecoration:
-          pw.BoxDecoration(color: pdfColor(zebraBase.isOdd ? 0xFFFFFFFF : _kCard)),
-      border: pw.TableBorder.all(color: pdfColor(_kLine), width: 0.6),
-      tableWidth: pw.TableWidth.max,
-    );
-  }
-
-  /// Directionally-isolated segment Texts: each script stays in its own
-  /// paragraph so mixed Arabic + Latin/dates never scramble each other.
-  static List<pw.Widget> segments(List<String> parts, pw.Font f, double size,
-      PdfColor color, bool boldIt) {
-    final out = <pw.Widget>[];
-    for (var i = 0; i < parts.length; i++) {
-      if (i > 0) {
-        out.add(_pdfText('•',
-            style: pw.TextStyle(font: f, fontSize: size, color: color)));
-        out.add(pw.SizedBox(width: 5));
-      }
-      out.add(_pdfText(parts[i],
-          maxLines: 1,
-          style: pw.TextStyle(
-              font: f,
-              fontSize: size,
-              fontWeight: boldIt ? pw.FontWeight.bold : null,
-              color: color)));
-
-      out.add(pw.SizedBox(width: 5));
-    }
-    if (out.isNotEmpty) out.removeLast();
-    return out;
-  }
-
-  static pw.Widget _brandHeader({
-    required String title,
-    required String? subtitle,
-    List<String>? subtitleParts,
-    required Uint8List? logo,
-    required bool rtl,
-    required pw.Font bold,
-    required pw.Font regular,
-  }) {
-    final textCol = pw.Column(
-      crossAxisAlignment:
-          rtl ? pw.CrossAxisAlignment.end : pw.CrossAxisAlignment.start,
-      children: [
-        _pdfText(title,
-            style: pw.TextStyle(
-                font: bold,
-                fontSize: 17,
-                fontWeight: pw.FontWeight.bold,
-                color: pdfColor(0xFFFFFFFF))),
-        if (subtitle != null && subtitle.isNotEmpty) ...[
-          pw.SizedBox(height: 3),
-          _pdfText(subtitle,
-              style: pw.TextStyle(
-                  font: regular, fontSize: 9.5, color: pdfColor(0xE6FFFFFF))),
-        ],
-      ],
-    );
-    final chip = logo == null
-        ? pw.SizedBox.shrink()
-        : pw.Container(
-            width: 46,
-            height: 46,
-            padding: const pw.EdgeInsets.all(4),
-            decoration: pw.BoxDecoration(
-              color: pdfColor(0xFFFFFFFF),
-              borderRadius: pw.BorderRadius.circular(10),
-            ),
-            child: pw.Image(pw.MemoryImage(logo), fit: pw.BoxFit.contain),
-          );
+  static pw.Widget _reportMeta(List<(String, String)> cells) {
     return pw.Container(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: pw.BoxDecoration(
-        gradient: pw.LinearGradient(
-          begin: pw.Alignment.topCenter,
-          end: pw.Alignment.bottomCenter,
-          colors: [
-            pdfColor(_kBrand),
-            pdfColor(_kBrandDeep),
-            pdfColor(_kBrandDark),
-          ],
-        ),
+        color: _rCard,
+        border: pw.Border.all(color: _rLine, width: 0.7),
         borderRadius: pw.BorderRadius.circular(10),
       ),
-      child: rtl
-          ? pw.Row(children: [chip, pw.SizedBox(width: 12), pw.Expanded(child: textCol)])
-          : pw.Row(children: [pw.Expanded(child: textCol), pw.SizedBox(width: 12), chip]),
+      padding: const pw.EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      child: pw.Row(children: [
+        for (var i = 0; i < cells.length; i++) ...[
+          if (i > 0) pw.Container(width: 0.7, height: 26, color: _rLine),
+          pw.Expanded(
+            child: pw.Padding(
+              padding: const pw.EdgeInsets.symmetric(horizontal: 8),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  _rt(cells[i].$1, size: 7.5, color: _rMuted, maxLines: 1),
+                  pw.SizedBox(height: 1),
+                  _rt(cells[i].$2,
+                      size: 9.5, bold: true, maxLines: 1, ltr: true),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ]),
     );
   }
 
-  static List<pw.Widget> _brandKpis(
-      List<Map<String, String>> kpis, pw.Font regular, pw.Font bold) {
+  static pw.Widget _reportBand(String title, {String? trailing}) {
+    return pw.Container(
+      decoration: pw.BoxDecoration(
+          color: _rBrandSoft, borderRadius: pw.BorderRadius.circular(8)),
+      child: pw.Row(children: [
+        pw.Container(
+          width: 4,
+          height: 28,
+          decoration: pw.BoxDecoration(
+              color: _rBrand, borderRadius: pw.BorderRadius.circular(2)),
+        ),
+        pw.SizedBox(width: 10),
+        pw.Expanded(
+            child: _rt(title, size: 11.5, bold: true, color: _rBrand,
+                maxLines: 1)),
+        if (trailing != null && trailing.isNotEmpty)
+          pw.Container(
+            margin: const pw.EdgeInsets.symmetric(horizontal: 10),
+            padding:
+                const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: pw.BoxDecoration(
+                color: _rBrand, borderRadius: pw.BorderRadius.circular(10)),
+            child: _rt(trailing, size: 8.5, bold: true, color: _rWhite,
+                ltr: true),
+          ),
+      ]),
+    );
+  }
+
+  static List<pw.Widget> _reportKpis(List<Map<String, String>> kpis) {
+    final perRow = kpis.length <= 4
+        ? kpis.length
+        : (kpis.length % 3 == 0 && kpis.length % 4 != 0 ? 3 : 4);
     final out = <pw.Widget>[];
-    for (var i = 0; i < kpis.length; i += 3) {
-      final chunk = kpis.sublist(i, (i + 3) > kpis.length ? kpis.length : i + 3);
+    for (var i = 0; i < kpis.length; i += perRow) {
+      final chunk = kpis.sublist(i, min(i + perRow, kpis.length));
+      // Every card in a row shares one height, sized for its longest value.
+      var lines = 1;
+      for (final k in chunk) {
+        final v = k['value'] ?? '';
+        final n = v.split('•').length;
+        lines = max(lines, n > 1 ? n : (v.length > 20 ? 2 : 1));
+      }
+      final cardHeight = 38.0 + (lines == 1 ? 22.5 : lines * 17.0);
       out.add(pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          for (final k in chunk)
+          for (var j = 0; j < perRow; j++) ...[
+            if (j > 0) pw.SizedBox(width: 7),
             pw.Expanded(
-              child: pw.Container(
-                margin: const pw.EdgeInsets.symmetric(horizontal: 3),
-                padding:
-                    const pw.EdgeInsets.symmetric(horizontal: 9, vertical: 8),
-                decoration: pw.BoxDecoration(
-                  color: pdfColor(_kCard),
-                  border: pw.Border.all(color: pdfColor(_kLine), width: 0.6),
-                  borderRadius: pw.BorderRadius.circular(8),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    _pdfText(k['label'] ?? '',
-                        maxLines: 1,
-                        style: pw.TextStyle(
-                            font: regular,
-                            fontSize: 7.5,
-                            color: pdfColor(_kMuted))),
-                    pw.SizedBox(height: 2),
-                    _pdfText(k['value'] ?? '',
-                        maxLines: 1,
-                        style: pw.TextStyle(
-                            font: bold,
-                            fontSize: 12.5,
-                            fontWeight: pw.FontWeight.bold,
-                            color: pdfColor(_kBrand))),
-                  ],
-                ),
-              ),
+              child: j >= chunk.length
+                  ? pw.SizedBox()
+                  : () {
+                      final k = chunk[j];
+                      final color = _tone(k['tone'], i + j);
+                      final value = k['value'] ?? '—';
+                      final long =
+                          value.contains('•') || value.length > 20;
+                      return pw.Container(
+                        height: cardHeight,
+                        decoration: pw.BoxDecoration(
+                          color: _rWhite,
+                          border: pw.Border.all(color: _rLine, width: 0.8),
+                          borderRadius: pw.BorderRadius.circular(9),
+                        ),
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                          children: [
+                            pw.Container(
+                              height: 3,
+                              decoration: pw.BoxDecoration(
+                                color: color,
+                                borderRadius: const pw.BorderRadius.only(
+                                    topLeft: pw.Radius.circular(9),
+                                    topRight: pw.Radius.circular(9)),
+                              ),
+                            ),
+                            pw.Padding(
+                              padding: const pw.EdgeInsets.fromLTRB(9, 6, 9, 8),
+                              child: pw.Column(
+                                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                children: [
+                                  _rt(k['label'] ?? '',
+                                      size: 7.8, color: _rMuted, maxLines: 1),
+                                  pw.SizedBox(height: 3),
+                                  _rValue(value,
+                                      size: long ? 9 : 12,
+                                      bold: true,
+                                      color: color),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }(),
             ),
+          ],
         ],
       ));
-      out.add(pw.SizedBox(height: 8));
+      out.add(pw.SizedBox(height: 7));
     }
     if (out.isNotEmpty) out.removeLast();
     return out;
   }
 
+  static pw.Widget _reportChart(ReportPdfChart chart, bool rtl) {
+    final bars = chart.bars.where((b) => b.value.isFinite).toList();
+    final peak = bars.fold<double>(0, (m, b) => max(m, b.value.abs()));
+    final sum = bars.fold<double>(0, (m, b) => m + max(0, b.value));
+    pw.Widget track(double share, PdfColor color, {double height = 7}) =>
+        pw.ClipRRect(
+          horizontalRadius: height / 2,
+          verticalRadius: height / 2,
+          child: pw.SizedBox(
+            height: height,
+            child: pw.Row(children: [
+              if (share > 0)
+                pw.Expanded(
+                    flex: max(1, (share * 1000).round()),
+                    child: pw.Container(color: color)),
+              if (share < 1)
+                pw.Expanded(
+                    flex: max(1, ((1 - share) * 1000).round()),
+                    child: pw.Container(color: _rCard)),
+            ]),
+          ),
+        );
+    final body = <pw.Widget>[];
+    if (chart.ratio) {
+      body.add(pw.ClipRRect(
+        horizontalRadius: 5,
+        verticalRadius: 5,
+        child: pw.SizedBox(
+          height: 11,
+          child: sum <= 0
+              ? pw.Container(color: _rLine)
+              : pw.Row(children: [
+                  for (var i = 0; i < bars.length; i++)
+                    if (bars[i].value > 0)
+                      pw.Expanded(
+                          flex: max(1, (bars[i].value / sum * 1000).round()),
+                          child: pw.Container(
+                              color: _tone(bars[i].tone, i))),
+                ]),
+        ),
+      ));
+      body.add(pw.SizedBox(height: 7));
+      for (var i = 0; i < bars.length; i++) {
+        final b = bars[i];
+        final pct = sum <= 0 ? 0 : (max(0, b.value) / sum * 100).round();
+        body.add(pw.Padding(
+          padding: const pw.EdgeInsets.only(bottom: 3),
+          child: pw.Row(children: [
+            pw.Container(
+                width: 7,
+                height: 7,
+                decoration: pw.BoxDecoration(
+                    color: _tone(b.tone, i), shape: pw.BoxShape.circle)),
+            pw.SizedBox(width: 5),
+            pw.Expanded(child: _rt(b.label, size: 8.5, maxLines: 1)),
+            _rt(b.display, size: 8.5, bold: true, ltr: true, maxLines: 1),
+            pw.SizedBox(width: 6),
+            pw.SizedBox(
+              width: 30,
+              child: _rt('$pct%',
+                  size: 8, color: _rMuted, ltr: true,
+                  align: rtl ? pw.TextAlign.left : pw.TextAlign.right),
+            ),
+          ]),
+        ));
+      }
+    } else {
+      for (var i = 0; i < bars.length; i++) {
+        final b = bars[i];
+        final color = _tone(b.tone, chart.singleTone ? 0 : i);
+        body.add(pw.Padding(
+          padding: const pw.EdgeInsets.only(bottom: 5),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              pw.Row(children: [
+                pw.Expanded(child: _rt(b.label, size: 8.5, maxLines: 1)),
+                _rt(b.display, size: 8.5, bold: true, color: color,
+                    ltr: true, maxLines: 1),
+              ]),
+              pw.SizedBox(height: 2),
+              track(peak <= 0 ? 0 : b.value.abs() / peak, color),
+            ],
+          ),
+        ));
+      }
+    }
+    return pw.Container(
+      padding: const pw.EdgeInsets.fromLTRB(11, 9, 11, 7),
+      decoration: pw.BoxDecoration(
+        color: _rWhite,
+        border: pw.Border.all(color: _rLine, width: 0.8),
+        borderRadius: pw.BorderRadius.circular(9),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          _rt(chart.title, size: 10, bold: true, maxLines: 1),
+          pw.SizedBox(height: 7),
+          ...body,
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _reportTable({
+    required bool rtl,
+    required List<String> headers,
+    required List<List<String>> rows,
+  }) {
+    final n = headers.length;
+    final numeric = _numericColumns(rows, n);
+    List<T> dir<T>(List<T> l) => rtl ? l.reversed.toList() : l;
+    final order = dir(List<int>.generate(n, (i) => i));
+    // Wider text columns, compact numbers.
+    double flex(int i) => numeric[i] ? 1.3 : (i == 0 ? 2.4 : 1.8);
+    pw.Widget cell(int i, String text, {bool head = false}) => pw.Container(
+          alignment: numeric[i] || rtl
+              ? pw.Alignment.centerRight
+              : pw.Alignment.centerLeft,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4.6),
+          child: !head && text.contains('•')
+              ? _rValue(text,
+                  size: 8.4,
+                  end: (numeric[i] || rtl) != rtl,
+                  align: numeric[i] || rtl
+                      ? pw.TextAlign.right
+                      : pw.TextAlign.left)
+              : _rt(text.isEmpty ? '—' : text,
+                  size: head ? 8.2 : 8.4,
+                  bold: head,
+                  color: head ? _rWhite : _rInk,
+                  align: numeric[i] || rtl
+                      ? pw.TextAlign.right
+                      : pw.TextAlign.left,
+                  ltr: numeric[i] && !head),
+        );
+    return pw.Table(
+      columnWidths: {
+        for (var c = 0; c < n; c++) c: pw.FlexColumnWidth(flex(order[c])),
+      },
+      border: const pw.TableBorder(
+        horizontalInside: pw.BorderSide(color: _rLine, width: 0.6),
+        bottom: pw.BorderSide(color: _rLine, width: 0.6),
+      ),
+      children: [
+        pw.TableRow(
+          repeat: true,
+          decoration: const pw.BoxDecoration(color: _rBrand),
+          children: [for (final i in order) cell(i, headers[i], head: true)],
+        ),
+        for (var r = 0; r < rows.length; r++)
+          pw.TableRow(
+            decoration: pw.BoxDecoration(color: r.isOdd ? _rCard : _rWhite),
+            children: [
+              for (final i in order)
+                cell(i, i < rows[r].length ? rows[r][i] : ''),
+            ],
+          ),
+      ],
+    );
+  }
+
+  /// The five Reports-section PDFs (overview, sales & purchases, money,
+  /// inventory, debts) share this template: branded header with the logo,
+  /// a meta strip (period · currency · branch · issued), KPI cards, simple
+  /// bar/ratio visuals, then one band + zebra table per section. The footer
+  /// carries the issue date and «page X of Y» on every page.
   static Future<Uint8List> generateReportPdf({
     required String title,
     required List<Map<String, String>> headers,
@@ -296,106 +572,190 @@ class PdfEngine {
     List<String>? footerParts,
     List<ReportPdfSection>? sections,
     bool? isAr,
+    List<(String, String)>? meta,
+    List<ReportPdfChart>? charts,
+    String? kpiTitle,
+    String? chartsTitle,
+    String? notes,
   }) async {
-    final regular = await _getFontRegular();
-    final bold = await _getFontBold();
+    await _getFontRegular();
+    await _getFontBold();
     final logo = await _getLogo();
     final rtl = isAr ??
         _hasArabic(title) ||
             ((sections?.isNotEmpty ?? false) &&
                 _hasArabic(sections!.first.title)) ||
             headers.any((h) => _hasArabic(h['label'] ?? ''));
-    final doc = pw.Document();
+    final now = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    final issued =
+        '${now.year}-${two(now.month)}-${two(now.day)}  ${two(now.hour)}:${two(now.minute)}';
+    final parts = (subtitleParts != null && subtitleParts.isNotEmpty)
+        ? subtitleParts
+        : (subtitle ?? '')
+            .split('•')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+    final badge = parts.isEmpty ? null : parts.first;
+    final metaCells = meta ??
+        [
+          for (final p in parts)
+            p.contains(':')
+                ? (p.substring(0, p.indexOf(':')).trim(),
+                    p.substring(p.indexOf(':') + 1).trim())
+                : ('', p),
+          (rtl ? 'تاريخ الإصدار' : 'Issued', issued),
+        ];
+    final footerText = (footerParts != null && footerParts.isNotEmpty)
+        ? footerParts.where((p) => p.trim().isNotEmpty).join('  ·  ')
+        : (footer ?? '');
+    final allSections = [
+      ...?sections,
+      if ((sections == null || sections.isEmpty) && rows.isNotEmpty)
+        ReportPdfSection(
+          title: '',
+          headers: headers.map((h) => h['label'] ?? '').toList(),
+          rows: rows,
+        ),
+    ];
+    final doc = pw.Document(title: title);
+    final textDir = rtl ? pw.TextDirection.rtl : pw.TextDirection.ltr;
     doc.addPage(
       pw.MultiPage(
-        pageFormat: pageFormat ?? PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.fromLTRB(24, 20, 24, 30),
         maxPages: 500,
-        footer: (pw.Context context) {
-          // Each footer part is its own paragraph — mixed Arabic/date/currency
-          // segments can never scramble each other.
-          final parts = (footerParts != null && footerParts.isNotEmpty)
-              ? footerParts
-              : ((footer ?? '').isEmpty ? const <String>[] : [footer!]);
-          // The footer renders OUTSIDE the page content, so the page-level
-          // Directionality never reaches it — without its own wrapper the
-          // Arabic footer segments fall back to LTR and letters disconnect.
-          return pw.Directionality(
-            textDirection:
-                rtl ? pw.TextDirection.rtl : pw.TextDirection.ltr,
-            child: pw.Container(
-              padding: pw.EdgeInsets.only(top: 6),
-              decoration: pw.BoxDecoration(
-                border: pw.Border(
-                    top: pw.BorderSide(color: pdfColor(_kLine), width: 0.6)),
-              ),
-              child: pw.Row(children: [
-              _pdfText('FYONA ERP',
-                  style: pw.TextStyle(
-                      font: bold,
-                      fontSize: 8,
-                      fontWeight: pw.FontWeight.bold,
-                      color: pdfColor(_kBrand))),
-              pw.SizedBox(width: 8),
-              pw.Expanded(
-                child: pw.Row(
-                    children: segments(parts, regular, 7.5,
-                        pdfColor(_kMuted), false)),
-              ),
-              _pdfText('${context.pageNumber} / ${context.pagesCount}',
-                  style: pw.TextStyle(
-                      font: regular, fontSize: 7.5, color: pdfColor(_kMuted))),
+        pageTheme: pw.PageTheme(
+          pageFormat: pageFormat ?? PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.fromLTRB(28, 26, 28, 22),
+          textDirection: textDir,
+          theme: pw.ThemeData.withFont(base: _fontRegular!, bold: _fontBold!),
+          buildBackground: (ctx) => pw.FullPage(
+            ignoreMargins: true,
+            child: pw.Column(children: [
+              pw.Container(height: 5, color: _rBrand),
+              pw.Spacer(),
+              pw.Container(height: 3, color: _rBrand),
             ]),
-          )
-          );
-        },
-        build: (pw.Context context) {
-          // ROOT FIX for scrambled Arabic («ت اي رت ش مل اوت اعي بم لا»):
-          // every pw.Text — including the ones INSIDE TableHelper — resolves
-          // its direction from the closest pw.Directionality. Without this
-          // wrapper, table cells default to LTR and Arabic renders as
-          // disconnected, reversed letters. One wrapper fixes the whole page.
-          final children = <pw.Widget>[];
-          children.add(_brandHeader(
+          ),
+        ),
+        header: (ctx) => ctx.pageNumber == 1
+            ? pw.SizedBox()
+            : pw.Container(
+                margin: const pw.EdgeInsets.only(bottom: 10),
+                padding: const pw.EdgeInsets.only(bottom: 6),
+                decoration: const pw.BoxDecoration(
+                    border: pw.Border(
+                        bottom: pw.BorderSide(color: _rLine, width: 0.8))),
+                child: pw.Row(children: [
+                  pw.Expanded(
+                      child: _rt(title, size: 9, bold: true, color: _rBrand,
+                          maxLines: 1)),
+                  if (badge != null) _rt(badge, size: 9, color: _rMuted),
+                ]),
+              ),
+        footer: (ctx) => pw.Container(
+          margin: const pw.EdgeInsets.only(top: 10),
+          padding: const pw.EdgeInsets.only(top: 6),
+          decoration: const pw.BoxDecoration(
+              border: pw.Border(top: pw.BorderSide(color: _rLine, width: 0.8))),
+          child: pw.Row(children: [
+            _rt('FYONA ERP', size: 8, bold: true, color: _rBrand),
+            pw.SizedBox(width: 10),
+            pw.Expanded(
+                child: _rt(footerText, size: 7.5, color: _rMuted, maxLines: 1)),
+            pw.SizedBox(width: 10),
+            _rt(issued, size: 8, color: _rMuted, ltr: true),
+            pw.SizedBox(width: 12),
+            _rt(
+                rtl
+                    ? 'صفحة ${ctx.pageNumber} من ${ctx.pagesCount}'
+                    : 'Page ${ctx.pageNumber} of ${ctx.pagesCount}',
+                size: 8,
+                bold: true,
+                color: _rBrand),
+          ]),
+        ),
+        build: (ctx) {
+          final out = <pw.Widget>[
+            _reportHeader(
               title: title,
-              subtitle: subtitle,
-              subtitleParts: subtitleParts,
+              subtitle: rtl ? 'تقرير من FYONA ERP' : 'FYONA ERP report',
+              badge: badge,
               logo: logo,
-              rtl: rtl,
-              bold: bold,
-              regular: regular));
-          children.add(pw.SizedBox(height: 12));
-          if (kpis != null && kpis.isNotEmpty) {
-            children.addAll(_brandKpis(kpis, regular, bold));
-            children.add(pw.SizedBox(height: 10));
-          }
-          if (sections != null && sections.isNotEmpty) {
-            for (final sec in sections) {
-              children.addAll(_sectionBlocks(
-                  title: sec.title,
-                  tableHeaders: sec.headers,
-                  tableRows: sec.rows,
-                  rtl: rtl,
-                  regular: regular,
-                  bold: bold));
-            }
-          } else if (rows.isNotEmpty) {
-            children.addAll(_sectionBlocks(
-                title: '',
-                tableHeaders: headers.map((h) => h['label'] ?? '').toList(),
-                tableRows: rows,
-                rtl: rtl,
-                regular: regular,
-                bold: bold));
-          }
-          return [
-            pw.Directionality(
-              textDirection: rtl ? pw.TextDirection.rtl : pw.TextDirection.ltr,
-              child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: children),
             ),
+            pw.SizedBox(height: 10),
+            if (metaCells.isNotEmpty) ...[
+              _reportMeta(metaCells),
+              pw.SizedBox(height: 14),
+            ],
           ];
+          if (kpis != null && kpis.isNotEmpty) {
+            out.add(pw.Inseparable(
+              child: pw.Column(children: [
+                _reportBand(kpiTitle ?? (rtl ? 'ملخص المؤشرات' : 'Key figures')),
+                pw.SizedBox(height: 8),
+                ..._reportKpis(kpis),
+              ]),
+            ));
+            out.add(pw.SizedBox(height: 14));
+          }
+          final visuals = [
+            for (final c in charts ?? const <ReportPdfChart>[])
+              if (c.bars.length > 1 || (!c.ratio && c.bars.isNotEmpty)) c,
+          ];
+          if (visuals.isNotEmpty) {
+            out.add(_reportBand(
+                chartsTitle ?? (rtl ? 'نظرة بصرية' : 'At a glance')));
+            out.add(pw.SizedBox(height: 8));
+            for (var i = 0; i < visuals.length; i += 2) {
+              if (visuals.length == 1) {
+                out.add(_reportChart(visuals[i], rtl));
+                out.add(pw.SizedBox(height: 8));
+                continue;
+              }
+              out.add(pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Expanded(child: _reportChart(visuals[i], rtl)),
+                  pw.SizedBox(width: 8),
+                  pw.Expanded(
+                      child: i + 1 < visuals.length
+                          ? _reportChart(visuals[i + 1], rtl)
+                          : pw.SizedBox()),
+                ],
+              ));
+              out.add(pw.SizedBox(height: 8));
+            }
+            out.add(pw.SizedBox(height: 6));
+          }
+          for (final sec in allSections) {
+            if (sec.rows.isEmpty) continue;
+            final n = sec.headers.length;
+            if (sec.title.trim().isNotEmpty) {
+              // The band never stays alone at the bottom of a page.
+              out.add(pw.Inseparable(
+                child: pw.Column(children: [
+                  _reportBand(sec.title, trailing: '${sec.rows.length}'),
+                  pw.SizedBox(height: 6),
+                ]),
+              ));
+            }
+            out.add(_reportTable(
+              rtl: rtl,
+              headers: n == 0 ? const [''] : sec.headers,
+              rows: sec.rows,
+            ));
+            out.add(pw.SizedBox(height: 16));
+          }
+          if (notes != null && notes.trim().isNotEmpty) {
+            out.add(pw.Container(
+              padding: const pw.EdgeInsets.all(9),
+              decoration: pw.BoxDecoration(
+                  color: _rCard, borderRadius: pw.BorderRadius.circular(8)),
+              child: _rt(notes, size: 8, color: _rMuted),
+            ));
+          }
+          return out;
         },
       ),
     );
@@ -1063,9 +1423,11 @@ pw.Text _pdfText(
   pw.TextStyle? style,
   pw.TextAlign? textAlign,
   int? maxLines,
+  pw.TextDirection? textDirection,
 }) => pw.Text(
   text.replaceAllMapped(_tailSpace, (m) => '${m[1]}  '),
   style: style,
   textAlign: textAlign,
   maxLines: maxLines,
+  textDirection: textDirection,
 );
