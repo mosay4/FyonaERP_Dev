@@ -2092,12 +2092,19 @@ class MainActivity : FlutterFragmentActivity() {
 
     private fun speechStart(lang: String, result: MethodChannel.Result) {
         speechRelease()
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+        // On-device recognizer first (Android 12+): bound by the system, so it
+        // needs no package-visibility entry in the manifest. Otherwise the
+        // classic recognizer (visible on Android 10 and older); else the app
+        // falls back to the record-and-upload path.
+        val onDevice = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            try { SpeechRecognizer.isOnDeviceRecognitionAvailable(this) } catch (_: Exception) { false }
+        if (!onDevice && !SpeechRecognizer.isRecognitionAvailable(this)) {
             result.success(false)
             return
         }
         try {
-            val recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+            val recognizer = if (onDevice) SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+                else SpeechRecognizer.createSpeechRecognizer(this)
             speechRecognizer = recognizer
             recognizer.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) { speechEvent("ready", null) }
