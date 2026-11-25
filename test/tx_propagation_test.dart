@@ -10,6 +10,7 @@ import 'package:fyona_flutter/core/services/sync_engine.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:convert';
+import 'support/personal_ledger_test_support.dart';
 
 /// REPRODUCTION for "tx edit/delete doesn't reach other devices":
 /// device-1 stages a transaction UPDATE then DELETE offline (dead Dio),
@@ -94,14 +95,14 @@ void main() {
   }
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_operation_log');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM sync_operation_log');
     await DatabaseHelper.rawDelete('DELETE FROM sync_cursor');
   }
 
-  Future<List<Map<String, dynamic>>> queueRows() =>
-      DatabaseHelper.rawQuery('SELECT * FROM sync_queue ORDER BY id ASC');
+  Future<List<Map<String, dynamic>>> queueRows() async =>
+      (await testLedger()).rawQuery('SELECT * FROM sync_queue ORDER BY id ASC');
 
   Map<String, dynamic> _decodeOpData(dynamic raw) {
     if (raw == null) return const {};

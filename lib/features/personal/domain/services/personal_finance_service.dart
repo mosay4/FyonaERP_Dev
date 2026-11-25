@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../../core/database/database_helper.dart';
 import '../../../../core/database/repositories/personal_repository.dart';
 import '../../../../core/database/repositories/personal_cache_repository.dart';
 import '../../../../core/database/repositories/sync_outbox.dart';
@@ -10,6 +9,7 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/network/api_endpoints.dart';
 import '../../../../core/offline/offline_guard.dart';
 import '../../../../core/offline/sync_operation_types.dart';
+import '../../data/ledger/personal_ledger.dart';
 import '../../../../core/services/currency/currency_engine.dart';
 import '../../data/models/personal_models.dart';
 import '../../data/repositories/personal_finance_api.dart';
@@ -757,8 +757,8 @@ class PersonalFinanceService {
       // one from under its unconfirmed create/update would orphan the replay.
       Set<String> ownPending = const {};
       try {
-        final rows = await DatabaseHelper.rawQuery(
-          "SELECT entity_id FROM sync_queue "
+        final rows = await (await PersonalLedger.forNamespace(_userId)).rawQuery(
+          "SELECT entity_id FROM ${PersonalLedgerDatabase.outbox} "
           "WHERE entity_type = 'personal_bank_account' "
           "  AND user_id = ? "
           "  AND status IN ('pending', 'syncing', 'failed', 'conflict') "
@@ -1378,8 +1378,8 @@ class PersonalFinanceService {
 
   Future<bool> _hasPendingInsert(String entityId) async {
     try {
-      final rows = await DatabaseHelper.rawQuery(
-        "SELECT id FROM sync_queue WHERE entity_type = 'personal_transaction' "
+      final rows = await (await PersonalLedger.forNamespace(_userId)).rawQuery(
+        "SELECT id FROM ${PersonalLedgerDatabase.outbox} WHERE entity_type = 'personal_transaction' "
         "AND entity_id = ? AND operation = 'INSERT' "
         "AND status IN ('pending','syncing','failed') LIMIT 1",
         [entityId],
@@ -2429,7 +2429,7 @@ class PersonalFinanceService {
   //
   // The server has no category entity: it only derives names from the
   // user's transactions. Categories the user adds/edits live on the device
-  // in the encrypted Personal mirror (`personal_entity_cache`, entity
+  // in the encrypted Personal ledger mirror (`personal_rows`, entity
   // [categoryEntityType]) — offline, survive restart, and travel with the
   // Personal backup/restore (the mirror table is snapshotted and restored
   // whole). Derived names (transactions) are merged in; a stored category

@@ -1,9 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/features/personal/data/account_type_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import '../../support/personal_ledger_test_support.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  });
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    await resetPersonalLedger();
+  });
 
   test('a choice is kept on the device and marked for the other devices', () async {
     PersonalAccountTypeStore.now = () => 100;

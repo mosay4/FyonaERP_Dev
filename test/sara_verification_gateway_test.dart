@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/features/ai/domain/agent/tool_executor.dart';
@@ -14,6 +13,7 @@ import 'package:fyona_flutter/features/personal/data/models/personal_models.dart
 import 'package:fyona_flutter/features/personal/di/personal_providers.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:fyona_flutter/core/services/currency/currency_engine.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// P0 verification gateway tests: every outcome must reflect truth.
 /// No network is touched except dead-port Dio (fast-fail); sync states are
@@ -42,11 +42,11 @@ void main() {
   }
 
   Future<void> cleanAll() async {
-    await DatabaseHelper.rawDelete(
+    await (await testLedger()).rawDelete(
         'DELETE FROM personal_entity_cache WHERE user_id = ?',
         [uid.toString()]);
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_operation_log');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM sync_operation_log');
   }
 
   setUp(() async => cleanAll());
@@ -57,7 +57,7 @@ void main() {
     required String entityId,
     required String status,
   }) async {
-    await DatabaseHelper.insert('sync_queue', {
+    await (await testLedger()).insert('sync_queue', {
       'operation_id': 'op_${entityId}_$status',
       'table_name': 't',
       'entity_type': entityType,
@@ -74,7 +74,7 @@ void main() {
     required String entityId,
     required String status,
   }) async {
-    await DatabaseHelper.insert('sync_operation_log', {
+    await (await testLedger()).insert('sync_operation_log', {
       'operation_id': 'op_${entityId}_$status',
       'entity_type': entityType,
       'entity_id': entityId,

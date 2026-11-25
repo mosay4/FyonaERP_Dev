@@ -7,7 +7,6 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/localization/app_localizations.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
@@ -17,6 +16,7 @@ import 'package:fyona_flutter/features/personal/domain/services/personal_finance
 import 'package:fyona_flutter/features/personal/presentation/pages/personal_budget_form_page.dart';
 
 import 'test_utils.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// Budget wizard: amounts survive Back/Next, and Next is blocked until every
 /// selected category carries an amount.
@@ -53,8 +53,8 @@ void main() {
   }
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
   }
 
   setUp(() async => cleanDb());

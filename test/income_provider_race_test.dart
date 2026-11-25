@@ -2,7 +2,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/core/services/currency/currency_engine.dart';
@@ -13,6 +12,7 @@ import 'package:fyona_flutter/features/personal/presentation/providers/personal_
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'test_utils.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// Service wrapper that delays exactly ONE transactions read: it models a
 /// slow load() started on a slow network whose snapshot resolves with
@@ -58,10 +58,10 @@ void main() {
   });
 
   Future<void> cleanNs() async {
-    await DatabaseHelper.rawDelete(
+    await (await testLedger()).rawDelete(
         'DELETE FROM personal_entity_cache WHERE user_id = ?',
         [uid.toString()]);
-    await DatabaseHelper.rawDelete(
+    await (await testLedger()).rawDelete(
         'DELETE FROM sync_queue WHERE user_id = ?', [uid.toString()]);
   }
 

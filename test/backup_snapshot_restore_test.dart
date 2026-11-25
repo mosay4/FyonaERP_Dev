@@ -14,6 +14,9 @@ import 'package:fyona_flutter/features/personal/domain/services/backup/backup_in
 import 'package:fyona_flutter/features/personal/domain/services/backup/backup_snapshot.dart';
 import 'package:fyona_flutter/features/personal/domain/services/backup_service.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
+import 'package:fyona_flutter/features/personal/data/ledger/personal_ledger.dart';
+import 'package:fyona_flutter/features/personal/data/ledger/personal_ledger_backup.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// Backup/Restore 4.0.0 verification (Personal only).
 ///
@@ -176,14 +179,15 @@ void main() {
   });
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete(
+    await (await testLedger()).rawDelete(
         'DELETE FROM personal_entity_cache WHERE user_id = ?', [uid]);
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
     for (final t in BackupSnapshotBuilder.snapshotTables) {
       try {
-        await DatabaseHelper.rawDelete('DELETE FROM $t');
+        await _wipeTable(t);
       } catch (_) {}
     }
+    await (await testLedger()).rawDelete('DELETE FROM personal_kv');
     nativeFiles.clear();
     nativeNames.clear();
     final prefs = await SharedPreferences.getInstance();
@@ -672,7 +676,7 @@ void main() {
       final before = await fingerprintForSvc();
       final beforeCount =
           (before['personal_entity_cache'] as List).length;
-      await DatabaseHelper.rawUpdate(
+      await (await testLedger()).rawUpdate(
         'UPDATE personal_entity_cache SET data_json = ? '
         'WHERE user_id = ? AND entity_type = ? AND remote_id = ?',
         [
@@ -709,7 +713,7 @@ void main() {
       // Simulate full local reset of personal tables.
       for (final t in BackupService.restoreTables) {
         try {
-          await DatabaseHelper.rawDelete('DELETE FROM $t');
+          await _wipeTable(t);
         } catch (_) {}
       }
       final wiped = await fingerprintForSvc();
@@ -870,7 +874,7 @@ void main() {
       // Simulate full reset with the backup file present.
       for (final t in BackupService.restoreTables) {
         try {
-          await DatabaseHelper.rawDelete('DELETE FROM $t');
+          await _wipeTable(t);
         } catch (_) {}
       }
       await BackupService.setAutoSyncEnabled(true);
@@ -909,7 +913,7 @@ void main() {
       // Simulate reset: wipe personal tables.
       for (final t in BackupService.restoreTables) {
         try {
-          await DatabaseHelper.rawDelete('DELETE FROM $t');
+          await _wipeTable(t);
         } catch (_) {}
       }
       await BackupService.setAutoSyncEnabled(true);
@@ -930,7 +934,7 @@ void main() {
       required String currency,
       required double balance,
     }) async {
-      await DatabaseHelper.rawInsert(
+      await (await testLedger()).rawInsert(
         'INSERT OR REPLACE INTO personal_entity_cache '
         '(user_id, entity_type, remote_id, data_json, updated_at) '
         'VALUES (?, ?, ?, ?, ?)',
@@ -963,7 +967,7 @@ void main() {
       expect(save.success, isTrue, reason: save.message);
       // Simulate post-reset stub: same logical cash, fresh UUID, zero.
       const stubId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee1';
-      await DatabaseHelper.rawDelete(
+      await (await testLedger()).rawDelete(
           'DELETE FROM personal_entity_cache WHERE user_id = ? AND entity_type = ?',
           [uid, 'personal_bank_account']);
       await insertMirrorBank(
@@ -1028,7 +1032,7 @@ void main() {
           localUserId: uid, serverUserUuid: serverUuid);
       expect(save.success, isTrue, reason: save.message);
       // Simulate reset stubs with fresh UUIDs.
-      await DatabaseHelper.rawDelete(
+      await (await testLedger()).rawDelete(
           'DELETE FROM personal_entity_cache WHERE user_id = ? AND entity_type = ?',
           [uid, 'personal_bank_account']);
       const stubs = ['s1-1111-1111-1111-111111111111',
@@ -1584,7 +1588,7 @@ void main() {
       final accId = banks.firstWhere((b) => b.bankName == 'Scale').id;
       final cache = PersonalCacheRepository();
       final now = DateTime.now().toIso8601String();
-      await DatabaseHelper.transaction((tx) async {
+      await (await testLedger()).transaction((tx) async {
         for (var i = 0; i < 10000; i++) {
           final id = BackupIntegrity.newUuid();
           await tx.rawInsert(
@@ -1626,7 +1630,7 @@ void main() {
       final ents = read.data!['entities'] as Map;
       expect((ents['transactions'] as List).length, 10000);
       // Wipe only transactions, restore, compare counts back.
-      await DatabaseHelper.rawDelete(
+      await (await testLedger()).rawDelete(
           "DELETE FROM personal_entity_cache WHERE user_id = ? AND entity_type = 'personal_transaction'",
           [uid]);
       final res = await bs.restoreFromBackup(
@@ -1787,19 +1791,19 @@ void main() {
       // Raw legacy rows (verbatim path): spending categories, rates,
       // wallet, bank-transaction leg, debt payment row, upload.
       final now = DateTime.now().toIso8601String();
-      await DatabaseHelper.rawInsert(
+      await (await testLedger()).rawInsert(
         'INSERT INTO spending_categories '
         '(user_id, name, name_ar, icon, color, sort_order, is_active, created_at) '
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [uid, 'food', 'طعام', 'FOOD', '#111111', 1, 1, now],
       );
-      await DatabaseHelper.rawInsert(
+      await (await testLedger()).rawInsert(
         'INSERT INTO personal_exchange_rates '
         '(user_id, from_currency, to_currency, rate, created_at, updated_at) '
         'VALUES (?, ?, ?, ?, ?, ?)',
         [uid, 'USD', 'SAR', 3.75, now, now],
       );
-      await DatabaseHelper.rawInsert(
+      await (await testLedger()).rawInsert(
         'INSERT INTO personal_wallets '
         '(user_id, balance, currency, created_at, updated_at) '
         'VALUES (?, ?, ?, ?, ?)',
@@ -1861,6 +1865,12 @@ void main() {
       ]) {
         if (prefs.containsKey(k)) out[k] = prefs.get(k);
       }
+      // Trees / account types live in the encrypted ledger now.
+      for (final e in (await PersonalLedgerKv.all()).entries) {
+        if (exact.contains(e.key) || prefixes.any(e.key.startsWith)) {
+          out[e.key] = e.value;
+        }
+      }
       return out;
     }
 
@@ -1908,12 +1918,15 @@ void main() {
       // Wipe everything (tables + user prefs, keep backup runtime keys).
       for (final t in BackupService.restoreTables) {
         try {
-          await DatabaseHelper.rawDelete('DELETE FROM $t');
+          await _wipeTable(t);
         } catch (_) {}
       }
       final prefs = await SharedPreferences.getInstance();
       for (final k in (await fingerprintPrefs()).keys.toList()) {
-        if (!k.startsWith('backup_')) await prefs.remove(k);
+        if (!k.startsWith('backup_')) {
+          await prefs.remove(k);
+          await PersonalLedgerKv.remove(k);
+        }
       }
       final doc = await BackupService.readDocumentContent(save.fileUri!);
       final read = await bs.readBackupContent(
@@ -2085,12 +2098,15 @@ void main() {
       // Wipe everything (device + prefs user keys).
       for (final t in BackupService.restoreTables) {
         try {
-          await DatabaseHelper.rawDelete('DELETE FROM $t');
+          await _wipeTable(t);
         } catch (_) {}
       }
       final prefs = await SharedPreferences.getInstance();
       for (final k in (await fingerprintPrefs()).keys.toList()) {
-        if (!k.startsWith('backup_')) await prefs.remove(k);
+        if (!k.startsWith('backup_')) {
+          await prefs.remove(k);
+          await PersonalLedgerKv.remove(k);
+        }
       }
       final res = await bs.restoreServerBackup(
         '33333333-3333-3333-3333-333333333333',
@@ -2260,7 +2276,7 @@ Future<Map<String, dynamic>> fingerprintForSvc() async {
   final fp = <String, dynamic>{};
   for (final t in BackupService.restoreTables) {
     try {
-      final rows = await DatabaseHelper.query(t);
+      final rows = await _tableRows(t);
       final norm = rows
           .map((r) {
             final m = Map<String, dynamic>.from(r)..remove('updated_at');
@@ -2285,3 +2301,16 @@ String _fpKey(String table, Map<String, dynamic> r) {
   }
   return r['id']?.toString() ?? '';
 }
+
+Future<void> _wipeTable(String t) async {
+  if (PersonalLedgerBackup.isLedgerTable(t)) {
+    await (await testLedger()).rawDelete('DELETE FROM $t');
+  } else {
+    await DatabaseHelper.rawDelete('DELETE FROM $t');
+  }
+}
+
+Future<List<Map<String, dynamic>>> _tableRows(String t) async =>
+    PersonalLedgerBackup.isLedgerTable(t)
+        ? (await testLedger()).query(t)
+        : DatabaseHelper.query(t);

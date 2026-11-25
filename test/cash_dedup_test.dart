@@ -1,12 +1,12 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:fyona_flutter/features/personal/data/models/personal_models.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// Cash uniqueness rule: the same currency is NEVER created twice in the
 /// same account — unless the account TYPE differs (checking vs savings).
@@ -51,10 +51,10 @@ void main() {
   }
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete(
+    await (await testLedger()).rawDelete(
         'DELETE FROM personal_entity_cache WHERE user_id = ?',
         [uid.toString()]);
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
   }
 
   setUp(() async => cleanDb());
@@ -156,8 +156,8 @@ void main() {
       });
     }
 
-    Future<List<Map<String, dynamic>>> queueOps() =>
-        DatabaseHelper.rawQuery('SELECT * FROM sync_queue ORDER BY id ASC');
+    Future<List<Map<String, dynamic>>> queueOps() async =>
+        (await testLedger()).rawQuery('SELECT * FROM sync_queue ORDER BY id ASC');
 
     test('unreferenced zero stub beside the live row is removed', () async {
       await seedCashRow('cash-live', 'USD', 500);

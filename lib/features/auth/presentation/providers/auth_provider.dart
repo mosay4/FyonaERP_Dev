@@ -18,6 +18,7 @@ import '../../../../core/network/session_notifier.dart';
 import '../../../../core/network/session_timeout_provider.dart';
 import '../../../../core/services/connectivity_service.dart';
 import '../../../../core/database/database_helper.dart';
+import '../../../personal/data/ledger/personal_ledger.dart';
 import '../../../../core/database/providers/database_providers.dart';
 import '../../data/models/auth_response.dart';
 
@@ -645,6 +646,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
     } catch (_) {}
     try {
       await _ref.read(sessionTimeoutProvider.notifier).setDuration(null);
+    } catch (_) {}
+    // Close this user's encrypted Personal ledger: the data stays on the
+    // device (encrypted) for the next login of the same user, and nothing
+    // can read or write it until a user is selected again.
+    try {
+      await PersonalLedger.deactivate();
     } catch (_) {}
     state = const AuthState(status: AuthStatus.unauthenticated);
   }

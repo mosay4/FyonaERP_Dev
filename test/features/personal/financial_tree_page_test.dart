@@ -7,6 +7,8 @@ import 'package:fyona_flutter/features/personal/presentation/pages/widgets/tree/
 import 'package:fyona_flutter/features/personal/presentation/providers/financial_tree_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../support/memory_financial_tree_storage.dart';
+
 Widget _app(ProviderContainer container) => UncontrolledProviderScope(
   container: container,
   child: MaterialApp(
@@ -20,6 +22,7 @@ Widget _app(ProviderContainer container) => UncontrolledProviderScope(
 ProviderContainer _container() => ProviderContainer(
   overrides: [
     currencyEngineProvider.overrideWith((ref) => CurrencyEngine()),
+    financialTreeStorageProvider.overrideWithValue(MemoryFinancialTreeStorage()),
   ],
 );
 

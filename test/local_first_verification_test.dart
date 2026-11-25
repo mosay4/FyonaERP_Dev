@@ -9,6 +9,7 @@ import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/features/personal/data/models/personal_models.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// Local-First verification for the Personal section (TEST 1-4).
 ///
@@ -42,8 +43,8 @@ void main() {
   }
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
   }
 
   setUp(() async => cleanDb());
@@ -64,7 +65,7 @@ void main() {
     final sql = where.isEmpty
         ? 'SELECT * FROM sync_queue ORDER BY id ASC'
         : 'SELECT * FROM sync_queue WHERE ${where.join(' AND ')} ORDER BY id ASC';
-    return DatabaseHelper.rawQuery(sql, args);
+    return (await testLedger()).rawQuery(sql, args);
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -332,7 +333,7 @@ void main() {
         ...row,
         '_sync_version': 3,
       });
-      await DatabaseHelper.rawDelete(
+      await (await testLedger()).rawDelete(
         'DELETE FROM sync_queue WHERE entity_type = ? AND entity_id = ?',
         [entityType, id],
       );
@@ -383,7 +384,7 @@ void main() {
 
       await svc.updateSavingsGoal(
           SavingsGoal(id: goalId, name: 'G4-Renamed', targetAmount: 4000));
-      var goalOps = await DatabaseHelper.rawQuery(
+      var goalOps = await (await testLedger()).rawQuery(
         'SELECT * FROM sync_queue WHERE entity_type = ? AND entity_id = ?',
         ['personal_savings_goal', goalId],
       );
@@ -392,7 +393,7 @@ void main() {
       expect(goalOps.first['base_version'], 3);
 
       await svc.deleteSavingsGoal(goalId);
-      goalOps = await DatabaseHelper.rawQuery(
+      goalOps = await (await testLedger()).rawQuery(
         'SELECT * FROM sync_queue WHERE entity_type = ? AND entity_id = ?',
         ['personal_savings_goal', goalId],
       );
@@ -401,7 +402,7 @@ void main() {
 
       await svc.updateDebt(PersonalDebt(
           id: debtId, type: 'payable', personName: 'P4-Renamed', amount: 900));
-      var debtOps = await DatabaseHelper.rawQuery(
+      var debtOps = await (await testLedger()).rawQuery(
         'SELECT * FROM sync_queue WHERE entity_type = ? AND entity_id = ?',
         ['personal_debt', debtId],
       );
@@ -409,7 +410,7 @@ void main() {
       expect(debtOps.first['operation'], 'UPDATE');
 
       await svc.deleteDebt(debtId);
-      debtOps = await DatabaseHelper.rawQuery(
+      debtOps = await (await testLedger()).rawQuery(
         'SELECT * FROM sync_queue WHERE entity_type = ? AND entity_id = ?',
         ['personal_debt', debtId],
       );
@@ -444,13 +445,13 @@ void main() {
         ...txs.first,
         '_sync_version': 2,
       });
-      await DatabaseHelper.rawDelete(
+      await (await testLedger()).rawDelete(
         'DELETE FROM sync_queue WHERE entity_type = ? AND entity_id = ?',
         ['personal_transaction', txId],
       );
 
       await svc.updateTransaction(id: txId, category: 'T4-Edited');
-      var ops = await DatabaseHelper.rawQuery(
+      var ops = await (await testLedger()).rawQuery(
         'SELECT * FROM sync_queue WHERE entity_type = ? AND entity_id = ?',
         ['personal_transaction', txId],
       );
@@ -460,7 +461,7 @@ void main() {
 
       final ok = await svc.deleteTransaction(txId);
       expect(ok, isTrue);
-      ops = await DatabaseHelper.rawQuery(
+      ops = await (await testLedger()).rawQuery(
         'SELECT * FROM sync_queue WHERE entity_type = ? AND entity_id = ?',
         ['personal_transaction', txId],
       );

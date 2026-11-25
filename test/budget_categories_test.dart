@@ -2,12 +2,12 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/features/personal/data/models/personal_models.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// Budget categories: stable client UUIDs + mirror persistence + linkage.
 ///
@@ -40,8 +40,8 @@ void main() {
   }
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
   }
 
   setUp(() async => cleanDb());
@@ -93,7 +93,7 @@ void main() {
       final svc = makeService();
       await svc.addBudget(testBudget());
 
-      final ops = await DatabaseHelper.rawQuery(
+      final ops = await (await testLedger()).rawQuery(
         "SELECT data FROM sync_queue WHERE entity_type = 'personal_budget' "
         "AND operation = 'INSERT'",
       );
@@ -158,7 +158,7 @@ void main() {
         ],
       ));
 
-      final ops = await DatabaseHelper.rawQuery(
+      final ops = await (await testLedger()).rawQuery(
         "SELECT data FROM sync_queue WHERE entity_type = 'personal_budget' "
         "AND entity_id = 'bud-u' AND operation = 'UPDATE'",
       );

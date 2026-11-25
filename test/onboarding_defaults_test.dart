@@ -2,12 +2,12 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/core/services/currency/enabled_currencies_service.dart';
 import 'package:fyona_flutter/core/utils/country_phone_data.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// First-run onboarding defaults: per-country phone examples + currencies.
 void main() {
@@ -103,11 +103,11 @@ void main() {
     }
 
     Future<void> cleanCash() async {
-      await DatabaseHelper.rawDelete(
+      await (await testLedger()).rawDelete(
           "DELETE FROM personal_entity_cache WHERE entity_type = 'personal_bank_account'");
-      await DatabaseHelper.rawDelete(
+      await (await testLedger()).rawDelete(
           "DELETE FROM personal_entity_cache WHERE entity_type = 'personal_transaction'");
-      await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+      await (await testLedger()).rawDelete('DELETE FROM sync_queue');
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('cash_vault_7');
     }

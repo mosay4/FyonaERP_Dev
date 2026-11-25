@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/core/router/route_names.dart';
@@ -15,6 +14,7 @@ import 'package:fyona_flutter/shared/widgets/sara_action_dispatcher.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'support/personal_ledger_test_support.dart';
 
 class _FakePath extends PathProviderPlatform {
   _FakePath(this.d);
@@ -55,8 +55,8 @@ void main() {
   }
 
   Future<void> clean() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache WHERE user_id = ?', [uid.toString()]);
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache WHERE user_id = ?', [uid.toString()]);
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
   }
 
   setUp(clean);

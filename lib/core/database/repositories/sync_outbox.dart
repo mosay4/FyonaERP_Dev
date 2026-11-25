@@ -3,6 +3,7 @@ import 'dart:core';
 import 'dart:math';
 import '../database_helper.dart';
 import '../../offline/sync_operation_types.dart';
+import '../../../features/personal/data/ledger/personal_ledger.dart';
 import '../../offline/sync_integrity.dart';
 
 /// Schema of one operation in the durable outbox (operation journal).
@@ -124,9 +125,19 @@ String generateUuidV4() {
 ///  * Failures are retried with a backoff schedule; permanent failures and
 ///    conflicts are KEPT (never silently deleted) so financial data cannot
 ///    disappear.
-///  * Deletes/cancellations are archived to `sync_operation_log` for audit.
+///  * Deletes/cancellations are archived to the outbox log for audit.
+///
+/// Storage: the active user's encrypted Personal ledger (`personal_outbox`,
+/// `personal_outbox_log`) — the same columns and statuses the old plain
+/// `sync_queue` / `sync_operation_log` had, so replay is unchanged. Only the
+/// device id stays in the app database (it is not user data).
 class SyncOutbox {
   static const int maxRetries = 6;
+  static const _queue = PersonalLedgerDatabase.outbox;
+  static const _log = PersonalLedgerDatabase.outboxLog;
+
+  static Future<PersonalLedgerDatabase> _db([int? userId]) =>
+      PersonalLedger.forNamespace(userId);
 
   /// The local device identifier, stable across restarts.
   static Future<String> getDeviceId() async {
@@ -175,13 +186,15 @@ class SyncOutbox {
     // explicit idempotency key. Best-effort outside a txn here; the primary
     // writer (commitOfflineWrite) stamps atomically with the mirror row.
     // Replay payloads and behavior are unchanged by these columns.
+    final db = await _db(uid);
     final integrity = await _integrityStamp(
+      db,
       entityType: entityType ?? tableName,
       entityId: resolvedEntityId,
       payload: payload,
       opId: opId,
     );
-    await DatabaseHelper.insert('sync_queue', {
+    await db.insert(_queue, {
       'operation_id': opId,
       'operation_type': operationType ?? SyncOperationTypes.fromLegacy(operation),
       'table_name': tableName,
@@ -211,7 +224,8 @@ class SyncOutbox {
   /// Computes the additive integrity stamp for one staged operation.
   /// Never throws: on any failure all three fields stay null (legacy shape).
   static Future<({int? revision, String? hash, String? key})>
-      _integrityStamp({
+      _integrityStamp(
+    PersonalLedgerDatabase db, {
     required String entityType,
     String? entityId,
     Map<String, dynamic>? payload,
@@ -220,8 +234,8 @@ class SyncOutbox {
     try {
       int? revision;
       if (entityId != null && entityId.isNotEmpty) {
-        final rows = await DatabaseHelper.rawQuery(
-          'SELECT COALESCE(MAX(op_revision), 0) AS m FROM sync_queue '
+        final rows = await db.rawQuery(
+          'SELECT COALESCE(MAX(op_revision), 0) AS m FROM $_queue '
           'WHERE entity_type = ? AND entity_id = ?',
           [entityType, entityId],
         );
@@ -264,8 +278,8 @@ class SyncOutbox {
     final staleBefore =
         DateTime.now().toUtc().subtract(staleSyncingAfter).toIso8601String();
     final userClause = userId != null ? ' AND user_id = $userId' : '';
-    final rows = await DatabaseHelper.rawQuery(
-      "SELECT * FROM sync_queue "
+    final rows = await (await _db(userId)).rawQuery(
+      "SELECT * FROM $_queue "
       "WHERE ((status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)) "
       "   OR (status = 'syncing' AND updated_at <= ?) "
       "   OR (status = 'failed' AND retry_count < ${maxRetries.toString()} "
@@ -292,8 +306,8 @@ class SyncOutbox {
       args.add(userId);
     }
     where.add("status = 'pending'");
-    final rows = await DatabaseHelper.rawQuery(
-      'SELECT * FROM sync_queue WHERE ${where.join(' AND ')} ORDER BY occurred_at ASC',
+    final rows = await (await _db(userId)).rawQuery(
+      'SELECT * FROM $_queue WHERE ${where.join(' AND ')} ORDER BY occurred_at ASC',
       args,
     );
     return rows.map(_fromRow).toList();
@@ -351,15 +365,15 @@ class SyncOutbox {
   /// Mark an operation as in-flight. Stale `syncing` rows are reclaimed by
   /// [nextBatch] after 2 minutes so a killed app never wedges an operation.
   static Future<void> markInProgress(int id) async {
-    await DatabaseHelper.rawUpdate(
-      "UPDATE sync_queue SET status = 'syncing', updated_at = ? WHERE id = ?",
+    await (await _db()).rawUpdate(
+      "UPDATE $_queue SET status = 'syncing', updated_at = ? WHERE id = ?",
       [_nowIso(), id],
     );
   }
 
   static Future<void> markPending(int id) async {
-    await DatabaseHelper.rawUpdate(
-      "UPDATE sync_queue SET status = 'pending', updated_at = ? WHERE id = ?",
+    await (await _db()).rawUpdate(
+      "UPDATE $_queue SET status = 'pending', updated_at = ? WHERE id = ?",
       [_nowIso(), id],
     );
   }
@@ -373,7 +387,7 @@ class SyncOutbox {
   }) async {
     await _archiveById(id,
         status: archivedStatus ?? 'synced', response: response);
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue WHERE id = ?', [id]);
+    await (await _db()).rawDelete('DELETE FROM $_queue WHERE id = ?', [id]);
   }
 
   /// Record a failure. Transient failures are re-armed with exponential
@@ -385,8 +399,8 @@ class SyncOutbox {
     bool permanent = false,
     Map<String, dynamic>? response,
   }) async {
-    final row = await DatabaseHelper.query('sync_queue',
-        where: 'id = ?', whereArgs: [id]);
+    final db = await _db();
+    final row = await db.query(_queue, where: 'id = ?', whereArgs: [id]);
     if (row.isEmpty) return;
     final retryCount = ((row.first['retry_count'] as num?)?.toInt() ?? 0) + 1;
     final exhausted = permanent || retryCount >= maxRetries;
@@ -400,8 +414,8 @@ class SyncOutbox {
           .add(Duration(seconds: backoffSeconds))
           .toIso8601String();
     }
-    await DatabaseHelper.rawUpdate(
-      'UPDATE sync_queue SET status = ?, retry_count = ?, error_message = ?, '
+    await db.rawUpdate(
+      'UPDATE $_queue SET status = ?, retry_count = ?, error_message = ?, '
       'next_attempt_at = ?, updated_at = ? WHERE id = ?',
       [
         nextStatus,
@@ -427,8 +441,8 @@ class SyncOutbox {
     String error, {
     Map<String, dynamic>? response,
   }) async {
-    await DatabaseHelper.rawUpdate(
-      "UPDATE sync_queue SET status = 'conflict', error_message = ?, updated_at = ? WHERE id = ?",
+    await (await _db()).rawUpdate(
+      "UPDATE $_queue SET status = 'conflict', error_message = ?, updated_at = ? WHERE id = ?",
       [error, _nowIso(), id],
     );
     await _archiveById(id,
@@ -442,12 +456,12 @@ class SyncOutbox {
     String? errorOverride,
   }) async {
     try {
-      final rows = await DatabaseHelper.query('sync_queue',
-          where: 'id = ?', whereArgs: [id]);
+      final db = await _db();
+      final rows = await db.query(_queue, where: 'id = ?', whereArgs: [id]);
       if (rows.isEmpty) return;
       final r = rows.first;
-      await DatabaseHelper.rawInsert(
-        'INSERT INTO sync_operation_log '
+      await db.rawInsert(
+        'INSERT INTO $_log '
         '(operation_id, operation_type, entity_type, entity_id, operation, '
         ' status, device_id, user_id, occurred_at, created_at, synced_at, '
         ' retry_count, attempts, error_message, response_json) '
@@ -476,22 +490,22 @@ class SyncOutbox {
   }
 
   static Future<int> pendingCount({int? userId}) async {
-    final rows = await DatabaseHelper.rawQuery(
-        "SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','syncing')"
+    final rows = await (await _db(userId)).rawQuery(
+        "SELECT COUNT(*) as c FROM $_queue WHERE status IN ('pending','syncing')"
         "${userId != null ? ' AND user_id = $userId' : ''}");
     return rows.isNotEmpty ? (rows.first['c'] as num?)?.toInt() ?? 0 : 0;
   }
 
   static Future<int> failedCount({int? userId}) async {
-    final rows = await DatabaseHelper.rawQuery(
-        "SELECT COUNT(*) as c FROM sync_queue WHERE status = 'failed'"
+    final rows = await (await _db(userId)).rawQuery(
+        "SELECT COUNT(*) as c FROM $_queue WHERE status = 'failed'"
         "${userId != null ? ' AND user_id = $userId' : ''}");
     return rows.isNotEmpty ? (rows.first['c'] as num?)?.toInt() ?? 0 : 0;
   }
 
   static Future<int> conflictCount({int? userId}) async {
-    final rows = await DatabaseHelper.rawQuery(
-        "SELECT COUNT(*) as c FROM sync_queue WHERE status = 'conflict'"
+    final rows = await (await _db(userId)).rawQuery(
+        "SELECT COUNT(*) as c FROM $_queue WHERE status = 'conflict'"
         "${userId != null ? ' AND user_id = $userId' : ''}");
     return rows.isNotEmpty ? (rows.first['c'] as num?)?.toInt() ?? 0 : 0;
   }
@@ -505,13 +519,14 @@ class SyncOutbox {
   static Future<int> resetStaleForRetry({int? userId}) async {
     final now = _nowIso();
     final userClause = userId != null ? ' AND user_id = $userId' : '';
-    final rearmed = await DatabaseHelper.rawUpdate(
-      "UPDATE sync_queue SET status = 'pending', next_attempt_at = NULL, updated_at = ? "
+    final db = await _db(userId);
+    final rearmed = await db.rawUpdate(
+      "UPDATE $_queue SET status = 'pending', next_attempt_at = NULL, updated_at = ? "
       "WHERE status = 'failed'$userClause",
       [now],
     );
-    await DatabaseHelper.rawUpdate(
-      "UPDATE sync_queue SET status = 'pending', updated_at = ? WHERE status = 'syncing'$userClause",
+    await db.rawUpdate(
+      "UPDATE $_queue SET status = 'pending', updated_at = ? WHERE status = 'syncing'$userClause",
       [now],
     );
     return rearmed;
@@ -526,10 +541,11 @@ class SyncOutbox {
     int? userId,
   }) async {
     if (entityId.isEmpty) return;
-    final rows = await DatabaseHelper.rawQuery(
+    final db = await _db(userId);
+    final rows = await db.rawQuery(
       userId != null
-          ? "SELECT id FROM sync_queue WHERE user_id = ? AND entity_type = ? AND entity_id = ? AND status IN ('pending','syncing','failed')"
-          : "SELECT id FROM sync_queue WHERE entity_type = ? AND entity_id = ? AND status IN ('pending','syncing','failed')",
+          ? "SELECT id FROM $_queue WHERE user_id = ? AND entity_type = ? AND entity_id = ? AND status IN ('pending','syncing','failed')"
+          : "SELECT id FROM $_queue WHERE entity_type = ? AND entity_id = ? AND status IN ('pending','syncing','failed')",
       userId != null
           ? [userId, entityType, entityId]
           : [entityType, entityId],
@@ -538,7 +554,7 @@ class SyncOutbox {
       final id = (r['id'] as num?)?.toInt();
       if (id == null) continue;
       await _archiveById(id, status: 'cancelled');
-      await DatabaseHelper.rawDelete('DELETE FROM sync_queue WHERE id = ?', [id]);
+      await db.rawDelete('DELETE FROM $_queue WHERE id = ?', [id]);
     }
   }
 
@@ -547,13 +563,13 @@ class SyncOutbox {
   /// coalesced: every transaction/payment/contribution operation is replayed
   /// exactly once, in order, so no financial effect can be lost.
   static Future<void> coalesce({int? userId}) async {
-    await DatabaseHelper.rawQuery("""
-      DELETE FROM sync_queue
+    await (await _db(userId)).rawQuery("""
+      DELETE FROM $_queue
       WHERE id IN (
-        SELECT s2.id FROM sync_queue s2
+        SELECT s2.id FROM $_queue s2
         JOIN (
           SELECT entity_type, entity_id, MAX(id) AS max_id
-          FROM sync_queue
+          FROM $_queue
           WHERE status IN ('pending','syncing')
             AND entity_type NOT LIKE 'personal%'
           GROUP BY entity_type, entity_id

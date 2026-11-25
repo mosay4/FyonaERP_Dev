@@ -17,6 +17,7 @@ import 'package:fyona_flutter/core/services/sync_engine.dart';
 import 'package:fyona_flutter/features/personal/data/models/personal_models.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import '../support/personal_ledger_test_support.dart';
 
 /// Full end-to-end integration: REAL FastAPI backend (SQLite) + REAL client
 /// service + REAL sync engine. Two "virtual devices" run in the same process
@@ -89,7 +90,11 @@ void main() {
       'sync_cursor',
     ]) {
       try {
-        await DatabaseHelper.rawDelete('DELETE FROM $table');
+        if (table == 'sync_cursor') {
+          await DatabaseHelper.rawDelete('DELETE FROM $table');
+        } else {
+          await (await testLedger()).rawDelete('DELETE FROM $table');
+        }
       } catch (_) {}
     }
   }

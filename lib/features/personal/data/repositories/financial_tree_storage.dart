@@ -1,15 +1,17 @@
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../ledger/personal_ledger.dart';
 import '../models/financial_tree_models.dart';
 
 const _kTreesKey = 'financial_trees_v1';
 const _kReportsKey = 'financial_tree_reports_v1';
 
 /// Local persistence for user-built financial trees and saved report snapshots.
+///
+/// Stored in the signed-in user's encrypted Personal ledger (same keys the
+/// old SharedPreferences entries used; those are moved over once).
 class FinancialTreeStorage {
   Future<List<FinancialTree>> loadTrees() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_kTreesKey);
+    final raw = await PersonalLedgerKv.getString(_kTreesKey);
     if (raw == null || raw.isEmpty) return [];
     try {
       final list = jsonDecode(raw) as List<dynamic>;
@@ -22,8 +24,7 @@ class FinancialTreeStorage {
   }
 
   Future<List<FinancialTreeNode>> loadNodes(String treeId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('financial_tree_nodes_$treeId');
+    final raw = await PersonalLedgerKv.getString('financial_tree_nodes_$treeId');
     if (raw == null || raw.isEmpty) return [];
     try {
       final list = jsonDecode(raw) as List<dynamic>;
@@ -36,7 +37,6 @@ class FinancialTreeStorage {
   }
 
   Future<void> saveTree(FinancialTree tree) async {
-    final prefs = await SharedPreferences.getInstance();
     final trees = await loadTrees();
     final index = trees.indexWhere((t) => t.id == tree.id);
     if (index >= 0) {
@@ -44,29 +44,26 @@ class FinancialTreeStorage {
     } else {
       trees.insert(0, tree);
     }
-    await prefs.setString(_kTreesKey, jsonEncode(trees.map((t) => t.toJson()).toList()));
+    await PersonalLedgerKv.setString(_kTreesKey, jsonEncode(trees.map((t) => t.toJson()).toList()));
   }
 
   Future<void> saveNodes(FinancialTree tree, List<FinancialTreeNode> nodes) async {
-    final prefs = await SharedPreferences.getInstance();
     await saveTree(tree);
-    await prefs.setString(
+    await PersonalLedgerKv.setString(
       'financial_tree_nodes_${tree.id}',
       jsonEncode(nodes.map((n) => n.toJson()).toList()),
     );
   }
 
   Future<void> deleteTree(String treeId) async {
-    final prefs = await SharedPreferences.getInstance();
     final trees = await loadTrees();
     trees.removeWhere((t) => t.id == treeId);
-    await prefs.setString(_kTreesKey, jsonEncode(trees.map((t) => t.toJson()).toList()));
-    await prefs.remove('financial_tree_nodes_$treeId');
+    await PersonalLedgerKv.setString(_kTreesKey, jsonEncode(trees.map((t) => t.toJson()).toList()));
+    await PersonalLedgerKv.remove('financial_tree_nodes_$treeId');
   }
 
   Future<List<FinancialTreeReportSnapshot>> loadReports() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_kReportsKey);
+    final raw = await PersonalLedgerKv.getString(_kReportsKey);
     if (raw == null || raw.isEmpty) return [];
     try {
       final list = jsonDecode(raw) as List<dynamic>;
@@ -79,20 +76,18 @@ class FinancialTreeStorage {
   }
 
   Future<void> saveReport(FinancialTreeReportSnapshot report) async {
-    final prefs = await SharedPreferences.getInstance();
     final reports = await loadReports();
     reports.removeWhere((r) => r.reportId == report.reportId);
     reports.insert(0, report);
     while (reports.length > 100) {
       reports.removeLast();
     }
-    await prefs.setString(_kReportsKey, jsonEncode(reports.map((r) => r.toJson()).toList()));
+    await PersonalLedgerKv.setString(_kReportsKey, jsonEncode(reports.map((r) => r.toJson()).toList()));
   }
 
   Future<void> deleteReport(String reportId) async {
-    final prefs = await SharedPreferences.getInstance();
     final reports = await loadReports();
     reports.removeWhere((r) => r.reportId == reportId);
-    await prefs.setString(_kReportsKey, jsonEncode(reports.map((r) => r.toJson()).toList()));
+    await PersonalLedgerKv.setString(_kReportsKey, jsonEncode(reports.map((r) => r.toJson()).toList()));
   }
 }

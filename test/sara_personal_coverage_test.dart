@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
@@ -15,6 +14,7 @@ import 'package:fyona_flutter/shared/widgets/sara_action_dispatcher.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'support/personal_ledger_test_support.dart';
 
 class _FakePath extends PathProviderPlatform {
   _FakePath(this.d);
@@ -98,7 +98,7 @@ void main() {
 
     test('cash cannot be deleted, a transfer cannot exceed the balance, maintenance blocks', () async {
       const uid = 8811;
-      await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache WHERE user_id = ?', [uid.toString()]);
+      await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache WHERE user_id = ?', [uid.toString()]);
       final svc = _svc(uid);
       await svc.addBankAccount(bankName: 'كاش', currency: 'SAR', openingBalance: 100);
       await svc.addBankAccount(bankName: 'الراجحي', currency: 'SAR', openingBalance: 50);

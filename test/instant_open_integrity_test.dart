@@ -15,6 +15,8 @@ import 'package:fyona_flutter/core/offline/sync_integrity.dart';
 import 'package:fyona_flutter/features/personal/di/personal_providers.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:fyona_flutter/features/personal/presentation/providers/personal_providers.dart';
+import 'package:fyona_flutter/features/personal/data/ledger/personal_ledger_migration.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// Pre-v15 shape of sync_queue (before the additive integrity columns), used
 /// to prove the v14 -> v15 upgrade path.
@@ -94,9 +96,9 @@ void main() {
       ]);
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_operation_log');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM sync_operation_log');
     await DatabaseHelper.rawDelete('DELETE FROM sync_cursor');
   }
 
@@ -382,7 +384,7 @@ void main() {
   // ═══════════════════════════════════════════════════════════════════
   group('integrity migration (v15, nullable-only)', () {
     test('fresh DB carries the three nullable columns', () async {
-      final cols = await DatabaseHelper.rawQuery(
+      final cols = await (await testLedger()).rawQuery(
           "PRAGMA table_info('sync_queue')");
       final names = cols.map((c) => c['name'].toString()).toSet();
       expect(names,
@@ -431,6 +433,9 @@ void main() {
             'SELECT * FROM sync_queue WHERE operation_id = ?',
             [legacyOpId]);
         expect(rows.length, 1, reason: 'legacy row must survive upgrade');
+        // The one-time move carries the legacy row into the encrypted
+        // ledger unchanged (null integrity columns included).
+        await PersonalLedgerMigration.run(await testLedger(), namespaces: {7});
         final ops = await SyncOutbox.nextBatch(limit: 10, userId: 7);
         final legacy =
             ops.firstWhere((o) => o.operationId == legacyOpId);
@@ -473,7 +478,7 @@ void main() {
         data: {'bank_name': 'S', 'client_operation_id': 'op-key-1'},
         baseVersion: 3,
       );
-      var rows = await DatabaseHelper.rawQuery(
+      var rows = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_id = 'bank-stamp'");
       expect(rows.length, 1);
       expect(rows.first['op_revision'], 1);
@@ -492,7 +497,7 @@ void main() {
         data: {'bank_name': 'S2'},
         baseVersion: 3,
       );
-      rows = await DatabaseHelper.rawQuery(
+      rows = await (await testLedger()).rawQuery(
         "SELECT op_revision, idempotency_key FROM sync_queue "
         "WHERE entity_id = 'bank-stamp' ORDER BY id ASC");
       expect(rows.length, 2);

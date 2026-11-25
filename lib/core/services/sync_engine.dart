@@ -10,6 +10,7 @@ import '../database/providers/database_providers.dart';
 import '../network/api_endpoints.dart';
 import '../network/dio_provider.dart';
 import '../../features/auth/di/auth_providers.dart';
+import '../../features/personal/data/ledger/personal_ledger.dart';
 import '../offline/offline_guard.dart';
 import '../offline/sync_integrity.dart';
 import '../offline/sync_logger.dart';
@@ -380,8 +381,8 @@ class SyncEngine {
       // Drop any stale retry backoff so the post-login cycle replays
       // immediately instead of waiting out an old transient backoff.
       try {
-        await DatabaseHelper.rawUpdate(
-          'UPDATE sync_queue SET next_attempt_at = NULL, updated_at = ? WHERE id = ?',
+        await (await PersonalLedger.forNamespace(_activeUserId)).rawUpdate(
+          'UPDATE ${PersonalLedgerDatabase.outbox} SET next_attempt_at = NULL, updated_at = ? WHERE id = ?',
           [DateTime.now().toUtc().toIso8601String(), op.id],
         );
       } catch (_) {}
@@ -762,8 +763,8 @@ class SyncEngine {
         // until the queued op is server-confirmed.
         final pending = <String>{};
         try {
-          final prow = await DatabaseHelper.rawQuery(
-            "SELECT entity_type, entity_id FROM sync_queue "
+          final prow = await (await PersonalLedger.forNamespace(_activeUserId)).rawQuery(
+            "SELECT entity_type, entity_id FROM ${PersonalLedgerDatabase.outbox} "
             "WHERE status IN ('pending', 'syncing', 'failed', 'conflict') "
             "AND user_id = ? "
             "AND entity_id IS NOT NULL AND entity_id != ''",

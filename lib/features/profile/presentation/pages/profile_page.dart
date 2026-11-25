@@ -54,7 +54,6 @@ import '../../../../shared/widgets/currency_selector.dart';
 import '../../../../core/utils/currency_formatter.dart'
     show currencyName, currencyLabel, fmtNum;
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../../../core/database/database_helper.dart';
 import '../../../../core/database/repositories/personal_cache_repository.dart';
 import '../../../../core/database/providers/database_providers.dart';
 import '../../../../features/personal/presentation/providers/personal_providers.dart';
@@ -3927,15 +3926,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       if (fnvNs != stableNs) {
         await repo.resetAllData(fnvNs);
       }
-      await DatabaseHelper.rawDelete(
-        'DELETE FROM personal_entity_cache WHERE user_id IN (?, ?)',
-        [stableNs, fnvNs],
-      );
-      // User-scoped outbox wipe only: never touch other users' queues.
-      await DatabaseHelper.rawDelete(
-        'DELETE FROM sync_queue WHERE user_id IN (?, ?)',
-        [stableNs, fnvNs],
-      );
+      // Mirror + outbox of this user's namespaces only (encrypted ledger):
+      // never touch other users' data.
+      await ref
+          .read(personalCacheRepositoryProvider)
+          .wipeNamespaces([stableNs, fnvNs]);
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('money_format_${scope}_sep');
       await prefs.remove('money_format_${scope}_dec');

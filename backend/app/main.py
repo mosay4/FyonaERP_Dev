@@ -30,6 +30,7 @@ from .api.v1.branches import router as branches_router
 from .api.v1.business_media_transit import router as media_transit_router
 from .api.v1.business_relay import router as business_relay_router
 from .api.v1.business_peer_relay import router as business_peer_relay_router
+from .api.v1.personal_relay import router as personal_relay_router
 from .api.v1.business_local_migration import router as business_local_migration_router
 from .api.v1.reconciliation import router as reconciliation_router
 from .api.v1.business_reports import router as business_reports_router
@@ -328,6 +329,9 @@ app.include_router(media_transit_router,
 app.include_router(business_relay_router,
                    prefix=f"{settings.API_PREFIX}/business-relay",
                    tags=["Business relay"])
+app.include_router(personal_relay_router,
+                   prefix=f"{settings.API_PREFIX}/personal-relay",
+                   tags=["Personal relay"])
 app.include_router(business_peer_relay_router,
                    prefix=f"{settings.API_PREFIX}/peer-relay",
                    tags=["Peer relay"])

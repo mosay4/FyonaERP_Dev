@@ -16,6 +16,7 @@ import 'package:fyona_flutter/core/services/connectivity_service.dart';
 import 'package:fyona_flutter/core/services/sync_engine.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// Focused reproduction of the reported bug: an income added while ONLINE
 /// must stay visible through push → queue-delete → pull, exactly like the
@@ -100,7 +101,11 @@ void main() {
       'sync_cursor',
     ]) {
       try {
-        await DatabaseHelper.rawDelete('DELETE FROM $table');
+        if (table == 'sync_cursor') {
+          await DatabaseHelper.rawDelete('DELETE FROM $table');
+        } else {
+          await (await testLedger()).rawDelete('DELETE FROM $table');
+        }
       } catch (_) {}
     }
     for (var i = 0; i < 3; i++) {
@@ -163,7 +168,7 @@ void main() {
       Future<String> dumpState(String tag) async {
         final rows = await PersonalCacheRepository()
             .getCollection(ns, 'personal_transaction');
-        final ops = await DatabaseHelper.rawQuery(
+        final ops = await (await testLedger()).rawQuery(
             'SELECT entity_id, status FROM sync_queue WHERE user_id = ?',
             [ns.toString()]);
         final buf = StringBuffer('$tag mirror=${rows.length} ');

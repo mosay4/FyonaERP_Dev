@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' show DatabaseExecutor;
 import '../database_helper.dart';
+import '../../../features/personal/data/ledger/personal_ledger.dart';
 import '../../offline/sync_integrity.dart';
 import '../../offline/sync_operation_types.dart';
 import 'sync_outbox.dart';
@@ -23,11 +25,72 @@ class MirrorMutation {
 
 /// Local mirror + pending-write queue for the personal finance module.
 ///
-/// Every successful server read is mirrored here (keyed by `remote_id`, the
-/// server UUID) so the module keeps working when the server is unreachable.
-/// Offline writes are also staged here and enqueued into `sync_queue` so the
-/// [SyncEngine] can push them once connectivity returns.
+/// Every successful server read is mirrored here (keyed by the server UUID)
+/// so the module keeps working when the server is unreachable. Offline writes
+/// are also staged here and enqueued into the outbox so the [SyncEngine] can
+/// push them once connectivity returns.
+///
+/// Storage: the signed-in user's encrypted Personal ledger
+/// ([PersonalLedger] — `personal_rows` + `personal_outbox`), never the plain
+/// app database. Rows keep their integer namespace (`user_id`) exactly as
+/// before, so every caller keeps the same API and semantics.
 class PersonalCacheRepository {
+  static const _rows = PersonalLedgerDatabase.rows;
+  static const _outbox = PersonalLedgerDatabase.outbox;
+
+  static Future<PersonalLedgerDatabase> _ledger(int userId) =>
+      PersonalLedger.forNamespace(userId);
+
+  static int _versionOf(Map<String, dynamic>? row) {
+    final v = row?['_sync_version'];
+    return v is num ? v.toInt() : 0;
+  }
+
+  /// Upsert of one mirror row (`INSERT OR REPLACE`: a re-written row moves
+  /// to the end of the collection order, exactly like the old mirror).
+  static Future<void> _put(
+    DatabaseExecutor db,
+    int userId,
+    String entityType,
+    String id,
+    Map<String, dynamic> row,
+  ) => db.rawInsert(
+    'INSERT OR REPLACE INTO $_rows '
+    '(user_id, entity_type, id, data_json, updated_us, deleted, version) '
+    'VALUES (?, ?, ?, ?, ?, 0, ?)',
+    [
+      userId,
+      entityType,
+      id,
+      jsonEncode(row),
+      DateTime.now().microsecondsSinceEpoch,
+      _versionOf(row),
+    ],
+  );
+
+  static Future<void> _drop(
+    DatabaseExecutor db,
+    int userId,
+    String entityType,
+    String id,
+  ) => db.rawDelete(
+    'DELETE FROM $_rows WHERE user_id = ? AND entity_type = ? AND id = ?',
+    [userId, entityType, id],
+  );
+
+  /// Ledger-side namespace wipe (reset account): mirror rows and outbox
+  /// operations of [namespaces] only — never other users' data.
+  Future<void> wipeNamespaces(Iterable<int> namespaces) async {
+    final ns = namespaces.where((n) => n > 0).toSet().toList();
+    if (ns.isEmpty) return;
+    final db = await _ledger(ns.first);
+    final marks = List.filled(ns.length, '?').join(',');
+    await db.transaction((tx) async {
+      await tx.rawDelete('DELETE FROM $_rows WHERE user_id IN ($marks)', ns);
+      await tx.rawDelete('DELETE FROM $_outbox WHERE user_id IN ($marks)', ns);
+    });
+  }
+
   /// In-memory canonical namespace per real user id, warmed at auth
   /// boundaries (login / session restore / biometric entry) BEFORE any
   /// personal provider runs. Reads during a session NEVER change it, so
@@ -51,11 +114,20 @@ class PersonalCacheRepository {
   /// id when available, else the deterministic FNV fallback. Every reader
   /// (finance service, sync engine) MUST use this — never String.hashCode
   /// (random per launch) and never a value that changes mid-session.
+  ///
+  /// Also selects [realUserId]'s encrypted Personal ledger as the active one
+  /// (every caller asks for the signed-in user's namespace).
   static int stableIdSync(String realUserId) {
     if (realUserId.isEmpty) return 0;
+    PersonalLedger.select(realUserId);
+    final fnv = fnvNamespace(realUserId);
+    PersonalLedger.registerNamespace(realUserId, fnv);
     final hit = _memStableIds[realUserId];
-    if (hit != null && hit > 0) return hit;
-    return fnvNamespace(realUserId);
+    if (hit != null && hit > 0) {
+      PersonalLedger.registerNamespace(realUserId, hit);
+      return hit;
+    }
+    return fnv;
   }
 
   /// Warm the canonical namespace for [realUserId]: resolve + persist the
@@ -64,8 +136,13 @@ class PersonalCacheRepository {
   /// in memory. Call at auth boundaries before personal providers run.
   Future<int> warmStableId(String realUserId) async {
     if (realUserId.isEmpty) return 0;
+    PersonalLedger.select(realUserId);
+    PersonalLedger.registerNamespace(realUserId, fnvNamespace(realUserId));
     final resolved = await stableUserIdFor(realUserId);
-    if (resolved > 0) _memStableIds[realUserId] = resolved;
+    if (resolved > 0) {
+      _memStableIds[realUserId] = resolved;
+      PersonalLedger.registerNamespace(realUserId, resolved);
+    }
     try {
       await _dropUnknownNamespaceMirrors(realUserId, resolved);
     } catch (_) {}
@@ -95,8 +172,9 @@ class PersonalCacheRepository {
     if (keep.isEmpty) return;
     final marks = List.filled(keep.length, '?').join(',');
     try {
-      await DatabaseHelper.rawDelete(
-        'DELETE FROM personal_entity_cache WHERE user_id NOT IN ($marks)',
+      final db = await _ledger(resolved > 0 ? resolved : fnvNamespace(realUserId));
+      await db.rawDelete(
+        'DELETE FROM $_rows WHERE user_id NOT IN ($marks)',
         keep.toList(),
       );
     } catch (_) {}
@@ -142,12 +220,25 @@ class PersonalCacheRepository {
       // the previously-used deterministic FNV hash namespace (single extra id).
       final legacy = await _legacyHashNamespace(realUserId);
       if (legacy != null && legacy != resolved) {
-        await DatabaseHelper.rawUpdate(
-          'UPDATE personal_entity_cache SET user_id = ? WHERE user_id = ?',
+        // Rows still in the old plain store (not yet moved to the ledger).
+        try {
+          await DatabaseHelper.rawUpdate(
+            'UPDATE personal_entity_cache SET user_id = ? WHERE user_id = ?',
+            [resolved, legacy],
+          );
+          await DatabaseHelper.rawUpdate(
+            'UPDATE sync_queue SET user_id = ? WHERE user_id = ? AND entity_id IS NOT NULL',
+            [resolved, legacy],
+          );
+        } catch (_) {}
+        PersonalLedger.registerNamespace(realUserId, resolved);
+        final db = await _ledger(resolved);
+        await db.rawUpdate(
+          'UPDATE $_rows SET user_id = ? WHERE user_id = ?',
           [resolved, legacy],
         );
-        await DatabaseHelper.rawUpdate(
-          'UPDATE sync_queue SET user_id = ? WHERE user_id = ? AND entity_id IS NOT NULL',
+        await db.rawUpdate(
+          'UPDATE $_outbox SET user_id = ? WHERE user_id = ? AND entity_id IS NOT NULL',
           [resolved, legacy],
         );
       }
@@ -182,7 +273,6 @@ class PersonalCacheRepository {
     String entityType,
     List<Map<String, dynamic>> rows,
   ) async {
-    final now = DateTime.now().toIso8601String();
     // Collect remote (server) ids we are about to store.
     final remoteIds = <String>{};
     final rowsFor = <String, Map<String, dynamic>>{};
@@ -201,8 +291,9 @@ class PersonalCacheRepository {
     final deleteIds = await pendingDeleteIds(userId, entityType);
 
     // Read live mirror to know current local ids.
-    final currentRows = await DatabaseHelper.rawQuery(
-      'SELECT remote_id, data_json FROM personal_entity_cache '
+    final db = await _ledger(userId);
+    final currentRows = await db.rawQuery(
+      'SELECT id AS remote_id, data_json FROM $_rows '
       'WHERE user_id = ? AND entity_type = ?',
       [userId, entityType],
     );
@@ -237,13 +328,11 @@ class PersonalCacheRepository {
     finalIds.addAll(pendingIds.where((id) => !deleteIds.contains(id)));
     finalIds.addAll(currentLocalIds.where((id) => !remoteIds.contains(id) && pendingIds.contains(id) && !deleteIds.contains(id)));
 
+    await db.transaction((tx) async {
     // Delete rows that are NOT in the final set (i.e. not server & not pending).
     for (final id in currentLocalIds) {
       if (!finalIds.contains(id)) {
-        await DatabaseHelper.rawDelete(
-          'DELETE FROM personal_entity_cache WHERE user_id = ? AND entity_type = ? AND remote_id = ?',
-          [userId, entityType, id],
-        );
+        await _drop(tx, userId, entityType, id);
       }
     }
 
@@ -263,13 +352,10 @@ class PersonalCacheRepository {
         continue;
       }
       if (row != null) {
-        await DatabaseHelper.rawInsert(
-          'INSERT OR REPLACE INTO personal_entity_cache '
-          '(user_id, entity_type, remote_id, data_json, updated_at) VALUES (?, ?, ?, ?, ?)',
-          [userId, entityType, id, jsonEncode(row), now],
-        );
+        await _put(tx, userId, entityType, id, row);
       }
     }
+    });
   }
 
   /// Returns server rows PLUS any local mirror row that still has a pending
@@ -314,8 +400,8 @@ class PersonalCacheRepository {
         byId[rid] = r;
       }
     }
-    final pendingRows = await DatabaseHelper.rawQuery(
-      'SELECT data_json FROM personal_entity_cache '
+    final pendingRows = await (await _ledger(userId)).rawQuery(
+      'SELECT data_json FROM $_rows '
       'WHERE user_id = ? AND entity_type = ?',
       [userId, entityType],
     );
@@ -349,8 +435,8 @@ class PersonalCacheRepository {
   /// behavior resumes. Never throws.
   Future<Set<String>> pendingDeleteIds(int userId, String entityType) async {
     try {
-      final rows = await DatabaseHelper.rawQuery(
-        "SELECT entity_id FROM sync_queue "
+      final rows = await (await _ledger(userId)).rawQuery(
+        "SELECT entity_id FROM $_outbox "
         "WHERE entity_type = ? "
         "  AND user_id = ? "
         "  AND operation = 'DELETE' "
@@ -400,8 +486,8 @@ class PersonalCacheRepository {
       for (final t in types) t: <String>{},
     };
     try {
-      final rows = await DatabaseHelper.rawQuery(
-        "SELECT data FROM sync_queue "
+      final rows = await (await _ledger(userId)).rawQuery(
+        "SELECT data FROM $_outbox "
         "WHERE entity_type = 'personal_transaction' "
         "  AND user_id = ? "
         "  AND operation IN ('INSERT', 'UPDATE') "
@@ -434,8 +520,8 @@ class PersonalCacheRepository {
   /// server pull; the sync engine re-arms transient failures on the next
   /// connectivity gain and conflicts are held for explicit resolution.
   Future<Set<String>> _pendingOutboxIds(int userId, String entityType) async {
-    final rows = await DatabaseHelper.rawQuery(
-      "SELECT entity_id FROM sync_queue "
+    final rows = await (await _ledger(userId)).rawQuery(
+      "SELECT entity_id FROM $_outbox "
       "WHERE entity_type = ? "
       "  AND user_id = ? "
       "  AND status IN ('pending', 'syncing', 'failed', 'conflict') "
@@ -446,9 +532,9 @@ class PersonalCacheRepository {
   }
 
   Future<List<Map<String, dynamic>>> getCollection(int userId, String entityType) async {
-    final rows = await DatabaseHelper.rawQuery(
-      'SELECT data_json FROM personal_entity_cache '
-      'WHERE user_id = ? AND entity_type = ? ORDER BY id ASC',
+    final rows = await (await _ledger(userId)).rawQuery(
+      'SELECT data_json FROM $_rows '
+      'WHERE user_id = ? AND entity_type = ? AND deleted = 0 ORDER BY seq ASC',
       [userId, entityType],
     );
     return rows.map((r) {
@@ -467,15 +553,15 @@ class PersonalCacheRepository {
   Future<DateTime?> getMirrorUpdatedAt(
       int userId, String entityType, String remoteId) async {
     try {
-      final rows = await DatabaseHelper.rawQuery(
-        'SELECT updated_at FROM personal_entity_cache '
-        'WHERE user_id = ? AND entity_type = ? AND remote_id = ? LIMIT 1',
+      final rows = await (await _ledger(userId)).rawQuery(
+        'SELECT updated_us FROM $_rows '
+        'WHERE user_id = ? AND entity_type = ? AND id = ? LIMIT 1',
         [userId, entityType, remoteId],
       );
       if (rows.isEmpty) return null;
-      final raw = rows.first['updated_at']?.toString() ?? '';
-      if (raw.isEmpty) return null;
-      return DateTime.tryParse(raw);
+      final us = (rows.first['updated_us'] as num?)?.toInt();
+      if (us == null) return null;
+      return DateTime.fromMicrosecondsSinceEpoch(us);
     } catch (_) {
       return null;
     }
@@ -487,23 +573,18 @@ class PersonalCacheRepository {
     String remoteId,
     Map<String, dynamic> data,
   ) async {
-    await DatabaseHelper.rawInsert(
-      'INSERT OR REPLACE INTO personal_entity_cache '
-      '(user_id, entity_type, remote_id, data_json, updated_at) VALUES (?, ?, ?, ?, ?)',
-      [userId, entityType, remoteId, jsonEncode(data), DateTime.now().toIso8601String()],
-    );
+    await (await _ledger(userId))
+        .transaction((tx) => _put(tx, userId, entityType, remoteId, data));
   }
 
   Future<void> removeItem(int userId, String entityType, String remoteId) async {
-    await DatabaseHelper.rawDelete(
-      'DELETE FROM personal_entity_cache WHERE user_id = ? AND entity_type = ? AND remote_id = ?',
-      [userId, entityType, remoteId],
-    );
+    await (await _ledger(userId))
+        .transaction((tx) => _drop(tx, userId, entityType, remoteId));
   }
 
   Future<bool> isOfflineCached(int userId, String entityType) async {
-    final rows = await DatabaseHelper.rawQuery(
-      'SELECT 1 FROM personal_entity_cache WHERE user_id = ? AND entity_type = ? LIMIT 1',
+    final rows = await (await _ledger(userId)).rawQuery(
+      'SELECT 1 FROM $_rows WHERE user_id = ? AND entity_type = ? AND deleted = 0 LIMIT 1',
       [userId, entityType],
     );
     return rows.isNotEmpty;
@@ -572,40 +653,27 @@ class PersonalCacheRepository {
         operationType ?? SyncOperationTypes.fromLegacy(operation);
     final occurred = occurredAt ?? nowUtc;
 
-    await DatabaseHelper.transaction((tx) async {
+    final db = await _ledger(userId);
+    await db.transaction((tx) async {
       if (cancelExistingOps) {
         // A new intent for this entity supersedes queued (not yet
         // server-confirmed) operations for it. Conflicts are preserved.
         await tx.rawDelete(
-          "DELETE FROM sync_queue WHERE entity_type = ? AND entity_id = ? "
+          "DELETE FROM $_outbox WHERE entity_type = ? AND entity_id = ? "
           "AND status IN ('pending','syncing','failed')",
           [entityType, remoteId],
         );
       }
       if (primaryRow != null) {
-        await tx.rawInsert(
-          'INSERT OR REPLACE INTO personal_entity_cache '
-          '(user_id, entity_type, remote_id, data_json, updated_at) VALUES (?, ?, ?, ?, ?)',
-          [userId, entityType, remoteId, jsonEncode(primaryRow), nowLocal],
-        );
+        await _put(tx, userId, entityType, remoteId, primaryRow);
       } else {
-        await tx.rawDelete(
-          'DELETE FROM personal_entity_cache WHERE user_id = ? AND entity_type = ? AND remote_id = ?',
-          [userId, entityType, remoteId],
-        );
+        await _drop(tx, userId, entityType, remoteId);
       }
       for (final m in related) {
         if (m.row != null) {
-          await tx.rawInsert(
-            'INSERT OR REPLACE INTO personal_entity_cache '
-            '(user_id, entity_type, remote_id, data_json, updated_at) VALUES (?, ?, ?, ?, ?)',
-            [userId, m.entityType, m.remoteId, jsonEncode(m.row), nowLocal],
-          );
+          await _put(tx, userId, m.entityType, m.remoteId, m.row!);
         } else {
-          await tx.rawDelete(
-            'DELETE FROM personal_entity_cache WHERE user_id = ? AND entity_type = ? AND remote_id = ?',
-            [userId, m.entityType, m.remoteId],
-          );
+          await _drop(tx, userId, m.entityType, m.remoteId);
         }
       }
       // ── Additive integrity stamp (shadow phase), computed INSIDE the same
@@ -620,7 +688,7 @@ class PersonalCacheRepository {
       String? idempotencyKey;
       try {
         final revRows = await tx.rawQuery(
-          'SELECT COALESCE(MAX(op_revision), 0) AS m FROM sync_queue '
+          'SELECT COALESCE(MAX(op_revision), 0) AS m FROM $_outbox '
           'WHERE entity_type = ? AND entity_id = ?',
           [entityType, remoteId],
         );
@@ -641,7 +709,7 @@ class PersonalCacheRepository {
         idempotencyKey = null;
       }
       await tx.rawInsert(
-        'INSERT INTO sync_queue ('
+        'INSERT INTO $_outbox ('
         'operation_id, operation_type, table_name, entity_type, entity_id, '
         'record_id, user_id, device_id, operation, data, base_version, source, '
         'status, retry_count, depends_on, occurred_at, next_attempt_at, '
@@ -681,27 +749,17 @@ class PersonalCacheRepository {
     String? deleteRemoteId,
     List<MirrorMutation> related = const [],
   }) async {
-    final nowLocal = DateTime.now().toIso8601String();
-    await DatabaseHelper.transaction((tx) async {
+    final db = await _ledger(userId);
+    await db.transaction((tx) async {
       for (final m in related) {
         if (m.row != null) {
-          await tx.rawInsert(
-            'INSERT OR REPLACE INTO personal_entity_cache '
-            '(user_id, entity_type, remote_id, data_json, updated_at) VALUES (?, ?, ?, ?, ?)',
-            [userId, m.entityType, m.remoteId, jsonEncode(m.row), nowLocal],
-          );
+          await _put(tx, userId, m.entityType, m.remoteId, m.row!);
         } else {
-          await tx.rawDelete(
-            'DELETE FROM personal_entity_cache WHERE user_id = ? AND entity_type = ? AND remote_id = ?',
-            [userId, m.entityType, m.remoteId],
-          );
+          await _drop(tx, userId, m.entityType, m.remoteId);
         }
       }
       if (deleteEntityType != null && deleteRemoteId != null) {
-        await tx.rawDelete(
-          'DELETE FROM personal_entity_cache WHERE user_id = ? AND entity_type = ? AND remote_id = ?',
-          [userId, deleteEntityType, deleteRemoteId],
-        );
+        await _drop(tx, userId, deleteEntityType, deleteRemoteId);
       }
     });
   }
@@ -728,26 +786,19 @@ class PersonalCacheRepository {
       {'id': outId, 'mirror': outMirrorRow, 'send': outSend, 'type': SyncOperationTypes.transactionCreate},
       {'id': inId, 'mirror': inMirrorRow, 'send': inSend, 'type': SyncOperationTypes.transactionCreate},
     ];
-    await DatabaseHelper.transaction((tx) async {
+    final db = await _ledger(userId);
+    await db.transaction((tx) async {
       // Balance mutations first (both accounts)
       for (final m in balanceMutations) {
         if (m.row != null) {
-          await tx.rawInsert(
-            'INSERT OR REPLACE INTO personal_entity_cache '
-            '(user_id, entity_type, remote_id, data_json, updated_at) VALUES (?, ?, ?, ?, ?)',
-            [userId, m.entityType, m.remoteId, jsonEncode(m.row), nowLocal],
-          );
+          await _put(tx, userId, m.entityType, m.remoteId, m.row!);
         }
       }
       // Both transaction mirrors
       for (final op in ops) {
         final rid = op['id'] as String;
         final mirror = op['mirror'] as Map<String, dynamic>;
-        await tx.rawInsert(
-          'INSERT OR REPLACE INTO personal_entity_cache '
-          '(user_id, entity_type, remote_id, data_json, updated_at) VALUES (?, ?, ?, ?, ?)',
-          [userId, 'personal_transaction', rid, jsonEncode({...mirror, 'id': rid}), nowLocal],
-        );
+        await _put(tx, userId, 'personal_transaction', rid, {...mirror, 'id': rid});
       }
       // Both outbox rows
       for (final op in ops) {
@@ -762,7 +813,7 @@ class PersonalCacheRepository {
         String? idempotencyKey;
         try {
           final revRows = await tx.rawQuery(
-            'SELECT COALESCE(MAX(op_revision), 0) AS m FROM sync_queue WHERE entity_type = ? AND entity_id = ?',
+            'SELECT COALESCE(MAX(op_revision), 0) AS m FROM $_outbox WHERE entity_type = ? AND entity_id = ?',
             ['personal_transaction', rid],
           );
           final maxRev = revRows.isNotEmpty ? ((revRows.first['m'] as num?)?.toInt() ?? 0) : 0;
@@ -776,7 +827,7 @@ class PersonalCacheRepository {
           idempotencyKey = null;
         }
         await tx.rawInsert(
-          'INSERT INTO sync_queue (operation_id, operation_type, table_name, entity_type, entity_id, record_id, user_id, device_id, operation, data, base_version, source, status, retry_count, depends_on, occurred_at, next_attempt_at, created_at, updated_at, op_revision, payload_hash, idempotency_key) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, ?, ?, ?, ?, ?)',
+          'INSERT INTO $_outbox (operation_id, operation_type, table_name, entity_type, entity_id, record_id, user_id, device_id, operation, data, base_version, source, status, retry_count, depends_on, occurred_at, next_attempt_at, created_at, updated_at, op_revision, payload_hash, idempotency_key) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, ?, ?, ?, ?, ?)',
           [
             opId,
             op['type'],

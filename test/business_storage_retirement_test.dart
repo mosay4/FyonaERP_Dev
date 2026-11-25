@@ -4,8 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/database/database_helper.dart';
-import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
-import 'package:fyona_flutter/core/database/repositories/sync_outbox.dart';
 import 'package:fyona_flutter/core/startup/retired_business_storage.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
@@ -33,17 +31,24 @@ void main() {
       final db = await DatabaseHelper.database;
       await db.execute('CREATE TABLE customers (id INTEGER PRIMARY KEY)');
       await db.insert('customers', {'id': 1});
-      final cache = PersonalCacheRepository();
+      // Rows an older build left in the plain database (Personal now lives
+      // in the encrypted ledger, so seed the old tables directly).
       for (final kind in ['customer', 'personal_transaction']) {
-        await cache.upsertItem(42, kind, kind, {'id': kind});
-        await SyncOutbox.enqueue(
-          tableName: kind,
-          entityType: kind,
-          entityId: kind,
-          operation: 'INSERT',
-          data: {'id': kind},
-          userId: 42,
-        );
+        await db.insert('personal_entity_cache', {
+          'user_id': 42,
+          'entity_type': kind,
+          'remote_id': kind,
+          'data_json': '{"id":"$kind"}',
+        });
+        await db.insert('sync_queue', {
+          'operation_id': 'op-$kind',
+          'table_name': kind,
+          'entity_type': kind,
+          'entity_id': kind,
+          'user_id': 42,
+          'operation': 'INSERT',
+          'status': 'pending',
+        });
       }
       await db.execute('PRAGMA user_version = 15');
       await DatabaseHelper.close();

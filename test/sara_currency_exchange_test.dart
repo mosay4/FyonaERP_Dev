@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:dio/dio.dart';
-import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
@@ -13,6 +12,7 @@ import 'package:fyona_flutter/core/services/currency/enabled_currencies_service.
 import 'package:fyona_flutter/features/ai/domain/agent/tool_executor.dart';
 import 'package:fyona_flutter/features/ai/domain/agent/tool_registry.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
+import 'support/personal_ledger_test_support.dart';
 
 Map<String, dynamic> _loadContract() {
   final file = File('backend/app/domain/services/sara_tool_contract.v1.json');
@@ -39,9 +39,9 @@ void main() {
   }
 
   Future<void> clean() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache WHERE user_id = ?', [uid.toString()]);
-    await DatabaseHelper.rawDelete('DELETE FROM personal_exchange_rates WHERE user_id = ?', [uid]);
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache WHERE user_id = ?', [uid.toString()]);
+    await (await testLedger()).rawDelete('DELETE FROM personal_exchange_rates WHERE user_id = ?', [uid]);
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
     // Clear enabled currencies for this user
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('enabled_currencies_$uid');

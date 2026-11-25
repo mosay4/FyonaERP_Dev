@@ -13,6 +13,8 @@ import '../../../../core/database/repositories/personal_cache_repository.dart';
 import '../../../../core/database/repositories/personal_repository.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/network/api_client.dart';
+import '../../data/ledger/personal_ledger.dart';
+import '../../data/ledger/personal_ledger_backup.dart';
 import 'backup/backup_integrity.dart';
 import 'backup/backup_snapshot.dart';
 import 'backup/server_backup_service.dart';
@@ -419,8 +421,8 @@ class BackupService {
 
   Future<int> _outboxCount() async {
     try {
-      final rows = await DatabaseHelper.rawQuery(
-          'SELECT COUNT(*) AS c FROM sync_queue');
+      final rows = await (await PersonalLedger.active()).rawQuery(
+          'SELECT COUNT(*) AS c FROM ${PersonalLedgerDatabase.outbox}');
       if (rows.isEmpty) return 0;
       return (rows.first['c'] as num?)?.toInt() ?? 0;
     } catch (_) {
@@ -435,8 +437,8 @@ class BackupService {
     final outbox = await _outboxCount();
     var mirror = -1;
     try {
-      final rows = await DatabaseHelper.rawQuery(
-        'SELECT COUNT(*) AS c FROM personal_entity_cache WHERE user_id = ?',
+      final rows = await (await PersonalLedger.forNamespace(localUserId)).rawQuery(
+        'SELECT COUNT(*) AS c FROM ${PersonalLedgerDatabase.rows} WHERE user_id = ?',
         [localUserId],
       );
       if (rows.isNotEmpty) {
@@ -1076,10 +1078,14 @@ class BackupService {
     final missing = <String>[];
     for (final table in restoreTables) {
       try {
-        final rows = await DatabaseHelper.rawQuery(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-          [table],
-        );
+        final ledgerTable = PersonalLedgerBackup.isLedgerTable(table);
+        final name = table == PersonalLedgerBackup.mirrorTable
+            ? PersonalLedgerDatabase.rows
+            : table;
+        final sql = "SELECT name FROM sqlite_master WHERE type='table' AND name=?";
+        final rows = ledgerTable
+            ? await (await PersonalLedger.active()).rawQuery(sql, [name])
+            : await DatabaseHelper.rawQuery(sql, [name]);
         if (rows.isEmpty) missing.add(table);
       } catch (_) {
         missing.add(table);
@@ -1272,11 +1278,15 @@ class BackupService {
         catSweepIds = plan.catSweepIds;
       } catch (_) {}
       final nowIso = DateTime.now().toIso8601String();
-      await DatabaseHelper.transaction((tx) async {
+      // Personal tables: one transaction in the encrypted ledger.
+      final ledger = await PersonalLedger.forNamespace(mergeNs);
+      await ledger.transaction((tx) async {
         for (final sweepId in sweepIds) {
-          await tx.rawDelete(
-            'DELETE FROM personal_entity_cache WHERE user_id = ? AND entity_type = ? AND remote_id = ?',
-            [mergeNs, 'personal_bank_account', sweepId],
+          await PersonalLedgerBackup.deleteMirrorRow(
+            tx,
+            userId: mergeNs,
+            entityType: 'personal_bank_account',
+            remoteId: sweepId,
           );
           sweptStubs++;
         }
@@ -1290,6 +1300,24 @@ class BackupService {
           sweptStubs++;
         }
         for (final table in restoreTables) {
+          if (!PersonalLedgerBackup.isLedgerTable(table)) continue;
+          final rows = tables[table];
+          if (rows is! List) continue;
+          for (final row in rows) {
+            if (row is! Map) continue;
+            await _upsertRow(
+              tx,
+              table,
+              Map<String, dynamic>.from(row),
+              nowIso: nowIso,
+            );
+          }
+        }
+      });
+      // Non-Personal tables of the archive (app database).
+      await DatabaseHelper.transaction((tx) async {
+        for (final table in restoreTables) {
+          if (PersonalLedgerBackup.isLedgerTable(table)) continue;
           final rows = tables[table];
           if (rows is! List) continue;
           for (final row in rows) {
@@ -1749,21 +1777,13 @@ class BackupService {
           : int.tryParse(rowMap['user_id']?.toString() ?? '');
       if (rowUserId == null) return;
       final dataJson = rowMap['data_json']?.toString() ?? '{}';
-      final updated = await tx.update(
-        table,
-        {'data_json': dataJson, 'updated_at': nowIso},
-        where: 'user_id = ? AND entity_type = ? AND remote_id = ?',
-        whereArgs: [rowUserId, entityType, remoteId],
+      await PersonalLedgerBackup.upsertMirrorRow(
+        tx,
+        userId: rowUserId,
+        entityType: entityType,
+        remoteId: remoteId,
+        dataJson: dataJson,
       );
-      if (updated == 0) {
-        await tx.insert(table, {
-          'user_id': rowUserId,
-          'entity_type': entityType,
-          'remote_id': remoteId,
-          'data_json': dataJson,
-          'updated_at': nowIso,
-        });
-      }
       return;
     }
     if (table == 'users') return; // login state is never rewritten
@@ -1901,7 +1921,9 @@ class BackupService {
       if (want is! List) continue;
       List<Map<String, dynamic>> have;
       try {
-        have = await DatabaseHelper.query(table);
+        have = PersonalLedgerBackup.isLedgerTable(table)
+            ? await PersonalLedgerBackup.exportTable(table)
+            : await DatabaseHelper.query(table);
       } catch (_) {
         problems.add('unreadable:$table');
         continue;

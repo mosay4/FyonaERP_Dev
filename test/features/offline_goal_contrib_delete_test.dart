@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import '../support/personal_ledger_test_support.dart';
 
 /// Reproduces the reported bug end-to-end against the REAL service code:
 /// offline goal contribution → offline delete of that transaction.
@@ -33,12 +33,12 @@ void main() {
   Future<void> cleanDb() async {
     // NOTE: never open/close the file directly — sqflite caches open DBs by
     // path, so closing our own handle would kill DatabaseHelper's handle too.
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
   }
 
   Future<List<Map<String, dynamic>>> queueOps() async {
-    return DatabaseHelper.rawQuery('SELECT * FROM sync_queue ORDER BY id ASC');
+    return (await testLedger()).rawQuery('SELECT * FROM sync_queue ORDER BY id ASC');
   }
 
   setUp(() async => cleanDb());
@@ -124,7 +124,10 @@ void main() {
       final cache = PersonalCacheRepository();
 
       // Pre-warm fallback namespace (what a fresh provider uses).
-      final fnv = PersonalCacheRepository.fnvNamespace(realUser);
+      // (The provider asks stableIdSync, which also selects the user's
+      // encrypted ledger.)
+      final fnv = PersonalCacheRepository.stableIdSync(realUser);
+      expect(fnv, PersonalCacheRepository.fnvNamespace(realUser));
       expect(fnv, isNot(0));
 
       // Write rows under the FNV namespace (simulates writes made before

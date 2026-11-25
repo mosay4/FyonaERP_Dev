@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'tables.dart';
+import '../../features/personal/data/ledger/personal_ledger.dart';
 
 class DatabaseHelper {
   static Database? _database;
@@ -355,6 +356,8 @@ class DatabaseHelper {
   static Future<void> sanitizeMalformedEntityIds() async {
     final db = await database;
     await _sanitizeMalformedEntityIds(db);
+    // Personal rows now live in the encrypted ledger: same repair there.
+    await PersonalLedger.sanitizeMalformedEntityIds();
   }
 
   static bool _isMalformedEntityId(String id) {

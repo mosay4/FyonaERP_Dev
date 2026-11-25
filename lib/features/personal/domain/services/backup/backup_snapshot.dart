@@ -2,6 +2,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../../core/database/database_helper.dart';
 import '../../../../../core/database/repositories/personal_cache_repository.dart';
+import '../../../data/ledger/personal_ledger.dart';
+import '../../../data/ledger/personal_ledger_backup.dart';
+import '../../../data/ledger/personal_ledger_migration.dart';
 import 'backup_integrity.dart';
 
 /// Schema-4.0.0 snapshot builder (Personal only).
@@ -90,7 +93,11 @@ class BackupSnapshotBuilder {
     final tables = <String, dynamic>{};
     for (final table in snapshotTables) {
       try {
-        var rows = await DatabaseHelper.query(table);
+        // Personal tables come from the user's encrypted ledger (same
+        // archive shape as before); the rest from the app database.
+        var rows = PersonalLedgerBackup.isLedgerTable(table)
+            ? await PersonalLedgerBackup.exportTable(table)
+            : await DatabaseHelper.query(table);
         if (table == 'users') {
           rows = rows.map((row) {
             final clean = Map<String, dynamic>.from(row);
@@ -159,6 +166,31 @@ class BackupSnapshotBuilder {
         }
       }
     } catch (_) {}
+    // Trees and account types now live in the encrypted ledger under the
+    // same keys: export them exactly as the preference entries they were.
+    try {
+      final kv = await PersonalLedgerKv.all();
+      for (final e in kv.entries) {
+        final allowed = userPrefExactKeys.contains(e.key) ||
+            userPrefPrefixes.any(e.key.startsWith);
+        if (!allowed) continue;
+        final val = e.value;
+        if (val is bool) {
+          out[e.key] = {'type': 'bool', 'value': val};
+        } else if (val is int) {
+          out[e.key] = {'type': 'int', 'value': val};
+        } else if (val is double) {
+          out[e.key] = {'type': 'double', 'value': val};
+        } else if (val is String) {
+          out[e.key] = {'type': 'string', 'value': val};
+        } else if (val is List) {
+          out[e.key] = {
+            'type': 'string-list',
+            'value': val.map((x) => x.toString()).toList(),
+          };
+        }
+      }
+    } catch (_) {}
     return out;
   }
 
@@ -172,6 +204,26 @@ class BackupSnapshotBuilder {
         if (node is! Map) continue;
         final type = node['type']?.toString();
         final value = node['value'];
+        if (PersonalLedgerMigration.isLedgerPrefKey(key)) {
+          // Restored into the encrypted ledger, never back to plaintext.
+          Object? typed;
+          switch (type) {
+            case 'bool':
+              typed = value is bool ? value : null;
+            case 'int':
+              typed = value is int ? value : null;
+            case 'double':
+              typed = value is num ? value.toDouble() : null;
+            case 'string':
+              typed = value?.toString();
+            case 'string-list':
+              typed = value is List
+                  ? value.map((e) => e.toString()).toList()
+                  : null;
+          }
+          if (typed != null) await PersonalLedgerKv.put(key, typed);
+          continue;
+        }
         switch (type) {
           case 'bool':
             if (value is bool) await p.setBool(key, value);

@@ -534,6 +534,15 @@ async def update_my_phone(
 
 
 async def _retire_relay_devices(db: AsyncSession, session_ids: list[UUID]) -> None:
+    """Retire the kicked sessions' Business and Personal relay replicas."""
+    if not session_ids:
+        return
+    await _retire_business_relay_devices(db, session_ids)
+    await _retire_personal_relay_devices(db, session_ids)
+
+
+async def _retire_business_relay_devices(db: AsyncSession,
+                                         session_ids: list[UUID]) -> None:
     """A kicked device stops receiving Business relay operations at once:
     its replica(s) are retired (it rejoins with a full copy if it signs in
     again — business_relay.register). Best-effort: the relay tables exist
@@ -561,6 +570,33 @@ async def _retire_relay_devices(db: AsyncSession, session_ids: list[UUID]) -> No
                 await relay._retire(conn, org, rid)
     except Exception as exc:  # never fail the kick itself
         logger.warning("relay_retire_on_kick_failed", error=str(exc))
+
+
+async def _retire_personal_relay_devices(db: AsyncSession,
+                                         session_ids: list[UUID]) -> None:
+    """Same for the Personal relay (personal_relay.register rejoins with a
+    full copy). Best-effort, never fails the kick."""
+    try:
+        if db.get_bind().dialect.name != "postgresql":
+            return
+        from sqlalchemy import select as _select, text as _text
+        from app.domain.services import personal_relay as prelay
+
+        conn = await db.connection()
+        present = await conn.scalar(
+            _text("SELECT to_regclass('personal_relay_replicas') IS NOT NULL"))
+        if not present:
+            return
+        async with db.begin_nested():
+            rows = (await conn.execute(
+                _select(prelay.replicas.c.id, prelay.replicas.c.user_id).where(
+                    prelay.replicas.c.session_id.in_(session_ids),
+                    prelay.replicas.c.retired.is_(False),
+                ))).all()
+            for rid, uid in rows:
+                await prelay._retire(conn, uid, rid)
+    except Exception as exc:  # never fail the kick itself
+        logger.warning("personal_relay_retire_on_kick_failed", error=str(exc))
 
 
 @router.get("/sessions")

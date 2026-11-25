@@ -8,6 +8,7 @@ import 'package:fyona_flutter/core/network/dio_provider.dart';
 import 'package:fyona_flutter/core/services/connectivity_service.dart';
 import 'package:fyona_flutter/core/services/sync_engine.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// Auth-expiry reconnect: device offline 90 days, token dead on return.
 ///
@@ -91,9 +92,9 @@ void main() {
   }
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_operation_log');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM sync_operation_log');
     await DatabaseHelper.rawDelete('DELETE FROM sync_cursor');
   }
 
@@ -141,8 +142,8 @@ void main() {
     );
   }
 
-  Future<List<Map<String, dynamic>>> queueRows() =>
-      DatabaseHelper.rawQuery('SELECT * FROM sync_queue ORDER BY id ASC');
+  Future<List<Map<String, dynamic>>> queueRows() async =>
+      (await testLedger()).rawQuery('SELECT * FROM sync_queue ORDER BY id ASC');
 
   setUp(() async {
     await cleanDb();
@@ -227,7 +228,7 @@ void main() {
         final remaining = await queueRows();
         expect(remaining, isEmpty, reason: 'all ops must sync after login');
         // ...audited exactly once each (no duplication)...
-        final log = await DatabaseHelper.rawQuery(
+        final log = await (await testLedger()).rawQuery(
             'SELECT operation_id FROM sync_operation_log');
         expect(log.length, 4, reason: 'each op archived exactly once');
         // ...flag cleared, pull ran (cursor advanced in the same cycle).
@@ -293,7 +294,7 @@ void main() {
       try {
         await e2.processQueue();
         expect(await queueRows(), isEmpty);
-        final log = await DatabaseHelper.rawQuery(
+        final log = await (await testLedger()).rawQuery(
             'SELECT operation_id FROM sync_operation_log');
         expect(log.length, 4, reason: 'archive must survive the restart');
       } finally {

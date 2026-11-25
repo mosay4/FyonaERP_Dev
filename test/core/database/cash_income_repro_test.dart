@@ -3,6 +3,7 @@ import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import '../../support/personal_ledger_test_support.dart';
 
 /// Reproduction for: "income to CASH while online shows the transaction but
 /// the cash balance stays 0 (banks work fine; offline works fine)".
@@ -18,8 +19,7 @@ void main() {
     } catch (_) {}
     final path = '${await getDatabasesPath()}/fyona_erp.db';
     final db = await databaseFactory.openDatabase(path);
-    await db.delete('personal_entity_cache');
-    await db.delete('sync_queue');
+    await resetPersonalLedger();
     await db.close();
   });
 

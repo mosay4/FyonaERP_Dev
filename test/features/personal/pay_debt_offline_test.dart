@@ -8,6 +8,7 @@ import 'package:fyona_flutter/core/network/dio_provider.dart';
 import 'package:fyona_flutter/core/services/sync_engine.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import '../../support/personal_ledger_test_support.dart';
 
 DioException _offlineErr(String path) => DioException(
       requestOptions: RequestOptions(path: path),
@@ -143,8 +144,7 @@ void main() {
     } catch (_) {}
     final path = '${await getDatabasesPath()}/fyona_erp.db';
     final db = await databaseFactory.openDatabase(path);
-    await db.delete('personal_entity_cache');
-    await db.delete('sync_queue');
+    await resetPersonalLedger();
     await db.close();
   });
 
@@ -328,7 +328,7 @@ void main() {
             reason: 'the client UUID must materialise the same row server-side');
 
         // 4. Staged op consumed: no INSERT left in the outbox.
-        final leftoverTxOps = await DatabaseHelper.rawQuery(
+        final leftoverTxOps = await (await testLedger()).rawQuery(
           "SELECT * FROM sync_queue WHERE entity_type = 'personal_transaction' "
           "AND operation = 'INSERT'",
         );

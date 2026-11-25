@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:fyona_flutter/core/database/database_helper.dart';
+import 'package:fyona_flutter/features/personal/data/ledger/personal_ledger.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/core/network/api_endpoints.dart';
 import 'package:fyona_flutter/core/offline/offline_guard.dart';
@@ -322,8 +322,9 @@ class SaraVerificationGateway {
   /// as failure).
   Future<String> syncStateFor(String queueEntityType, String id) async {
     try {
-      final rows = await DatabaseHelper.rawQuery(
-        "SELECT status FROM sync_queue WHERE entity_type = ? AND entity_id = ? "
+      final ledger = await PersonalLedger.active();
+      final rows = await ledger.rawQuery(
+        "SELECT status FROM ${PersonalLedgerDatabase.outbox} WHERE entity_type = ? AND entity_id = ? "
         "AND status IN ('pending','syncing','failed','conflict') "
         "ORDER BY id DESC LIMIT 1",
         [queueEntityType, id],
@@ -333,8 +334,8 @@ class SaraVerificationGateway {
         if (s == 'failed' || s == 'conflict') return 'failed';
         return 'pending';
       }
-      final archived = await DatabaseHelper.rawQuery(
-        "SELECT status FROM sync_operation_log WHERE entity_type = ? AND entity_id = ? "
+      final archived = await ledger.rawQuery(
+        "SELECT status FROM ${PersonalLedgerDatabase.outboxLog} WHERE entity_type = ? AND entity_id = ? "
         "ORDER BY id DESC LIMIT 1",
         [queueEntityType, id],
       );

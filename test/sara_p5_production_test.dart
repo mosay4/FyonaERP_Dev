@@ -8,7 +8,6 @@ import 'package:fyona_flutter/features/ai/domain/agent/verification_gateway.dart
 import 'package:fyona_flutter/features/ai/domain/agent/tool_registry.dart';
 import 'package:fyona_flutter/features/ai/domain/agent/parameter_collector.dart';
 import 'package:fyona_flutter/features/ai/domain/agent/confirmation_handler.dart';
-import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
@@ -17,6 +16,7 @@ import 'package:fyona_flutter/features/ai/domain/agent/tool_executor.dart';
 import 'package:fyona_flutter/core/services/currency/currency_engine.dart';
 import 'package:dio/dio.dart';
 import 'dart:convert';
+import 'support/personal_ledger_test_support.dart';
 
 class _FakePath extends PathProviderPlatform {
   final Directory d;
@@ -37,12 +37,12 @@ PersonalFinanceService _svc(int uid) {
 }
 
 Future<void> _clean(int uid) async {
-  await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache WHERE user_id = ?', [uid.toString()]);
-  await DatabaseHelper.rawDelete('DELETE FROM spending_categories WHERE user_id = ?', [uid]);
-  await DatabaseHelper.rawDelete('DELETE FROM personal_debt_payments WHERE user_id = ?', [uid]);
-  await DatabaseHelper.rawDelete('DELETE FROM personal_debts WHERE user_id = ?', [uid]);
-  await DatabaseHelper.rawDelete('DELETE FROM personal_exchange_rates WHERE user_id = ?', [uid]);
-  await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+  await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache WHERE user_id = ?', [uid.toString()]);
+  await (await testLedger()).rawDelete('DELETE FROM spending_categories WHERE user_id = ?', [uid]);
+  await (await testLedger()).rawDelete('DELETE FROM personal_debt_payments WHERE user_id = ?', [uid]);
+  await (await testLedger()).rawDelete('DELETE FROM personal_debts WHERE user_id = ?', [uid]);
+  await (await testLedger()).rawDelete('DELETE FROM personal_exchange_rates WHERE user_id = ?', [uid]);
+  await (await testLedger()).rawDelete('DELETE FROM sync_queue');
   final prefs = await SharedPreferences.getInstance();
   await prefs.remove('enabled_currencies_$uid');
 }

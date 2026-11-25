@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import '../../support/personal_ledger_test_support.dart';
 
 /// Regression test for the debt-delete resurrection bug:
 ///
@@ -22,8 +23,7 @@ void main() {
     } catch (_) {}
     final path = '${await getDatabasesPath()}/fyona_erp.db';
     final db = await databaseFactory.openDatabase(path);
-    await db.delete('personal_entity_cache');
-    await db.delete('sync_queue');
+    await resetPersonalLedger();
     await db.close();
   });
 

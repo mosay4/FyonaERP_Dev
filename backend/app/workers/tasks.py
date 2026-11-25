@@ -656,6 +656,33 @@ def cleanup_expired_sessions() -> dict:
     return {"status": "ok", "deleted": deleted}
 
 
+# ── Personal relay maintenance ──
+
+
+@celery.task(name="purge_personal_relay")
+def purge_personal_relay() -> dict:
+    """Drop Personal relay operations older than the retention (their missing
+    destinations are flagged for a snapshot) and old delivery tombstones."""
+    from sqlalchemy import text as _text
+
+    from app.domain.services import personal_relay
+
+    async def _run() -> int:
+        async with async_session_factory() as db:
+            conn = await db.connection()
+            if db.get_bind().dialect.name != "postgresql":
+                return 0
+            present = await conn.scalar(
+                _text("SELECT to_regclass('personal_relay_ops') IS NOT NULL"))
+            if not present:
+                return 0
+            purged = await personal_relay.purge_expired(conn)
+            await db.commit()
+            return purged
+
+    return {"status": "ok", "purged": _run_async(_run())}
+
+
 # ── Subscription renewal retries (custom off-session schedule) ──
 
 

@@ -9,6 +9,7 @@ import 'package:fyona_flutter/features/personal/domain/services/personal_finance
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:dio/dio.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'support/personal_ledger_test_support.dart';
 
 void main() {
   setUpAll(() {
@@ -31,8 +32,8 @@ void main() {
   }
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
   }
 
   tearDown(() async {
@@ -163,7 +164,7 @@ void main() {
       });
 
       // User B's pending IDs should NOT include user A's bank-a
-      final pendingB = await DatabaseHelper.rawQuery(
+      final pendingB = await (await testLedger()).rawQuery(
         "SELECT entity_id FROM sync_queue "
         "WHERE entity_type = 'personal_bank_account' "
         "AND user_id = ? "
@@ -175,7 +176,7 @@ void main() {
           reason: 'User B pending ops must NOT contain user A entity');
 
       // User A's pending IDs should include bank-a
-      final pendingA = await DatabaseHelper.rawQuery(
+      final pendingA = await (await testLedger()).rawQuery(
         "SELECT entity_id FROM sync_queue "
         "WHERE entity_type = 'personal_bank_account' "
         "AND user_id = ? "
@@ -208,7 +209,7 @@ void main() {
       );
 
       // Simulate what _pullRemote does: check pending for user B
-      final pendingForPull = await DatabaseHelper.rawQuery(
+      final pendingForPull = await (await testLedger()).rawQuery(
         "SELECT entity_id FROM sync_queue "
         "WHERE entity_type = 'personal_bank_account' "
         "AND user_id = ? "
@@ -223,7 +224,7 @@ void main() {
           reason: 'User B pull must not be blocked by user A pending ops');
 
       // But user A's pending set DOES contain bank-x
-      final pendingForA = await DatabaseHelper.rawQuery(
+      final pendingForA = await (await testLedger()).rawQuery(
         "SELECT entity_id FROM sync_queue "
         "WHERE entity_type = 'personal_bank_account' "
         "AND user_id = ? "
@@ -379,7 +380,7 @@ void main() {
       );
 
       // Verify Device A's staged op has __changed = ['bank_name']
-      var ops = await DatabaseHelper.rawQuery(
+      var ops = await (await testLedger()).rawQuery(
         "SELECT data FROM sync_queue WHERE entity_type = 'personal_bank_account' "
         "AND entity_id = 'bank-multi' AND operation = 'UPDATE' ORDER BY id DESC LIMIT 1",
       );
@@ -410,7 +411,7 @@ void main() {
       );
 
       // Verify Device B's staged op has __changed = ['notes']
-      ops = await DatabaseHelper.rawQuery(
+      ops = await (await testLedger()).rawQuery(
         "SELECT data FROM sync_queue WHERE entity_type = 'personal_bank_account' "
         "AND entity_id = 'bank-multi' AND operation = 'UPDATE' ORDER BY id DESC LIMIT 1",
       );

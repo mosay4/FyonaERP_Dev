@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import '../../support/personal_ledger_test_support.dart';
 
 void main() {
   setUpAll(() {
@@ -17,8 +18,7 @@ void main() {
     } catch (_) {}
     final path = '${await getDatabasesPath()}/fyona_erp.db';
     final db = await databaseFactory.openDatabase(path);
-    await db.delete('personal_entity_cache');
-    await db.delete('sync_queue');
+    await resetPersonalLedger();
     await db.close();
   });
 
@@ -67,7 +67,7 @@ void main() {
   group('sync queue enqueue', () {
     test('enqueue writes a pending sync_queue row carrying remote_id in data', () async {
       await cache.enqueue(userId, 'personal_transaction', 'tx-1', 'UPDATE', data: {'amount': 99.0});
-      final rows = await DatabaseHelper.rawQuery("SELECT * FROM sync_queue WHERE status = 'pending'");
+      final rows = await (await testLedger()).rawQuery("SELECT * FROM sync_queue WHERE status = 'pending'");
       expect(rows.length, 1);
       expect(rows.first['table_name'], 'personal_transaction');
       expect(rows.first['operation'], 'UPDATE');
@@ -81,7 +81,7 @@ void main() {
       await cache.enqueue(userId, 'personal_bank_account', 'b1', 'INSERT');
       await cache.enqueue(userId, 'personal_bank_account', 'b1', 'UPDATE');
       await cache.enqueue(userId, 'personal_bank_account', 'b1', 'DELETE');
-      final ops = await DatabaseHelper.rawQuery('SELECT operation FROM sync_queue ORDER BY id');
+      final ops = await (await testLedger()).rawQuery('SELECT operation FROM sync_queue ORDER BY id');
       expect(ops.map((r) => r['operation']), ['INSERT', 'UPDATE', 'DELETE']);
     });
   });

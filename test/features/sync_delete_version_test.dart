@@ -8,6 +8,7 @@ import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:dio/dio.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import '../support/personal_ledger_test_support.dart';
 
 /// Tests that offline DELETE ops carry the correct base_version from
 /// the mirror row's _sync_version, preventing version conflicts that
@@ -33,8 +34,8 @@ void main() {
   }
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
   }
 
   setUp(() async => cleanDb());
@@ -76,7 +77,7 @@ void main() {
       expect(txs.where((t) => t['id'] == 'tx-synced-v3'), isEmpty);
 
       // Verify a DELETE op was staged with baseVersion = 3 (from _sync_version).
-      final ops = await DatabaseHelper.rawQuery(
+      final ops = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_type = 'personal_transaction' "
         "AND entity_id = 'tx-synced-v3' AND operation = 'DELETE'",
       );
@@ -88,7 +89,7 @@ void main() {
       // The bank balance must NOT be staged as an absolute fragment: the
       // server applies balances by replaying the transaction DELETE (or any
       // other exact endpoint) atomically through the operation journal.
-      final bankOps = await DatabaseHelper.rawQuery(
+      final bankOps = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_type = 'personal_bank_account' "
         "AND entity_id = 'acc-1' ORDER BY id DESC LIMIT 1",
       );
@@ -113,7 +114,7 @@ void main() {
       expect(ok, isTrue);
 
       // DELETE op should have baseVersion=0 (fallback).
-      final ops = await DatabaseHelper.rawQuery(
+      final ops = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_type = 'personal_transaction' "
         "AND entity_id = 'tx-old' AND operation = 'DELETE'",
       );
@@ -144,7 +145,7 @@ void main() {
       );
 
       // Verify INSERT is staged.
-      var insertOps = await DatabaseHelper.rawQuery(
+      var insertOps = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_id = 'tx-offline' AND operation = 'INSERT'",
       );
       expect(insertOps.length, 1);
@@ -155,7 +156,7 @@ void main() {
 
       // INSERT should be cancelled, and NO DELETE should be staged
       // (was never synced → nothing to delete server-side).
-      final allOps = await DatabaseHelper.rawQuery(
+      final allOps = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_id = 'tx-offline'",
       );
       expect(allOps, isEmpty,
@@ -198,7 +199,7 @@ void main() {
       final ok = await svc.deleteTransaction('tx-purge-test');
       expect(ok, isTrue);
 
-      final ops = await DatabaseHelper.rawQuery(
+      final ops = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_id = 'tx-purge-test'",
       );
       // Should have only the DELETE, not the stale UPDATE.
@@ -237,7 +238,7 @@ void main() {
           reason: 'offline edit must preserve _sync_version');
 
       // UPDATE op must carry baseVersion=4 (server will see version=5).
-      final ops = await DatabaseHelper.rawQuery(
+      final ops = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_type = 'personal_transaction' "
         "AND entity_id = 'tx-edit-v4' AND operation = 'UPDATE'",
       );
@@ -264,7 +265,7 @@ void main() {
       expect(ok, isTrue);
 
       // The staged UPDATE is purged; DELETE carries version 6.
-      final ops = await DatabaseHelper.rawQuery(
+      final ops = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_id = 'tx-chain'",
       );
       final deletes = ops.where((o) => o['operation'] == 'DELETE').toList();
@@ -302,7 +303,7 @@ void main() {
 
       // Staged op must carry the complete row so the server upsert cannot
       // blank missing fields with defaults.
-      final ops = await DatabaseHelper.rawQuery(
+      final ops = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_type = 'personal_bank_account' "
         "AND entity_id = 'acc-merge' AND operation = 'UPDATE'",
       );
@@ -405,7 +406,7 @@ void main() {
       await svc.contributeToGoal('goal-fx', 3000,
           goalAmount: 800, currency: 'SAR', bankAccountId: 'acc-fx');
 
-      final ops = await DatabaseHelper.rawQuery(
+      final ops = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_type = 'personal_transaction' "
         "AND operation = 'INSERT'",
       );
@@ -449,7 +450,7 @@ void main() {
       expect(id.replaceAll('-', '').length, 32);
 
       // The staged INSERT must reference the same valid id.
-      final ops = await DatabaseHelper.rawQuery(
+      final ops = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_type = 'personal_transaction' "
         "AND operation = 'INSERT'",
       );
@@ -499,7 +500,7 @@ void main() {
       expect(tx['bank_account_id'].toString(), newAccId,
           reason: 'embedded FK reference must follow the remap');
 
-      final ops = await DatabaseHelper.rawQuery(
+      final ops = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_queue WHERE entity_type = 'personal_transaction'",
       );
       expect(ops.length, 1);

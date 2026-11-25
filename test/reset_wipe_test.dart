@@ -7,6 +7,7 @@ import 'package:fyona_flutter/core/database/repositories/sync_outbox.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// Verification for the reset-account wipe (fix 1).
 ///
@@ -24,11 +25,11 @@ void main() {
   const realUserId = 'a47cf941-6376-4df2-81c3-20638e60865b';
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
-    await DatabaseHelper.rawDelete('DELETE FROM personal_transactions');
-    await DatabaseHelper.rawDelete('DELETE FROM personal_bank_accounts');
-    await DatabaseHelper.rawDelete('DELETE FROM savings_goals');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM personal_transactions');
+    await (await testLedger()).rawDelete('DELETE FROM personal_bank_accounts');
+    await (await testLedger()).rawDelete('DELETE FROM savings_goals');
     await DatabaseHelper.rawDelete('DELETE FROM stable_user_ids');
   }
 
@@ -56,7 +57,7 @@ void main() {
       'name': 'G',
       'current_amount': 10.0,
     });
-    await DatabaseHelper.rawInsert(
+    await (await testLedger()).rawInsert(
       'INSERT INTO personal_transactions '
       '(user_id, tx_type, amount, category) VALUES (?, ?, ?, ?)',
       [stableNs, 'expense', 50.0, 'Food'],
@@ -81,15 +82,15 @@ void main() {
     if (fnvNs != stableNs) {
       await repo.resetAllData(fnvNs);
     }
-    await DatabaseHelper.rawDelete(
+    await (await testLedger()).rawDelete(
       'DELETE FROM personal_entity_cache WHERE user_id IN (?, ?)',
       [stableNs, fnvNs],
     );
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
   }
 
   Future<int> tableCount(String table, [String? where]) async {
-    final rows = await DatabaseHelper.rawQuery(
+    final rows = await (await testLedger()).rawQuery(
         'SELECT COUNT(*) AS c FROM $table${where == null ? '' : ' WHERE $where'}');
     return ((rows.first['c'] as num?)?.toInt() ?? 0);
   }
@@ -100,7 +101,7 @@ void main() {
       await seedLiveData();
       final userIdInt =
           int.tryParse(realUserId) ?? realUserId.hashCode.abs();
-      await DatabaseHelper.rawDelete(
+      await (await testLedger()).rawDelete(
         'DELETE FROM personal_entity_cache WHERE user_id = ?',
         [userIdInt],
       );

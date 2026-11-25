@@ -5,6 +5,7 @@ import 'package:fyona_flutter/core/database/database_helper.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/database/repositories/sync_outbox.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'support/personal_ledger_test_support.dart';
 
 /// Long-offline + reconnect scenario for Personal Sync (audit only — no app
 /// code is modified by these tests).
@@ -25,9 +26,9 @@ void main() {
       r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
 
   Future<void> cleanDb() async {
-    await DatabaseHelper.rawDelete('DELETE FROM personal_entity_cache');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_queue');
-    await DatabaseHelper.rawDelete('DELETE FROM sync_operation_log');
+    await (await testLedger()).rawDelete('DELETE FROM personal_entity_cache');
+    await (await testLedger()).rawDelete('DELETE FROM sync_queue');
+    await (await testLedger()).rawDelete('DELETE FROM sync_operation_log');
     await DatabaseHelper.rawDelete('DELETE FROM sync_cursor');
   }
 
@@ -35,7 +36,7 @@ void main() {
   tearDown(() async => cleanDb());
 
   Future<List<Map<String, dynamic>>> queueRows({String? where}) async {
-    return DatabaseHelper.rawQuery(
+    return (await testLedger()).rawQuery(
       'SELECT * FROM sync_queue${where == null ? '' : ' WHERE $where'} ORDER BY id ASC',
     );
   }
@@ -123,7 +124,7 @@ void main() {
       var remaining =
           await queueRows(where: 'id = ${toConfirm.id}');
       expect(remaining, isEmpty, reason: 'confirmed op must leave the queue');
-      final log = await DatabaseHelper.rawQuery(
+      final log = await (await testLedger()).rawQuery(
         "SELECT * FROM sync_operation_log WHERE operation_id = ?",
         [toConfirm.operationId],
       );
@@ -135,7 +136,7 @@ void main() {
       final retryOpId = toRetry.operationId;
       await SyncOutbox.markInProgress(toRetry.id);
       await SyncOutbox.markPending(toRetry.id);
-      final rearmed = await DatabaseHelper.rawQuery(
+      final rearmed = await (await testLedger()).rawQuery(
         'SELECT * FROM sync_queue WHERE id = ?', [toRetry.id]);
       expect(rearmed.length, 1);
       expect(rearmed.first['status'], 'pending');
@@ -229,7 +230,7 @@ void main() {
           reason: 'B must not ship A\'s field');
 
       // Pull protection is per-user: B's pending op never shields A's rows.
-      final pendingA = await DatabaseHelper.rawQuery(
+      final pendingA = await (await testLedger()).rawQuery(
         "SELECT entity_id FROM sync_queue WHERE user_id = ? "
         "AND status IN ('pending','syncing','failed','conflict')",
         [deviceA],
@@ -290,7 +291,7 @@ void main() {
       for (var i = 0; i < 5; i++) {
         await SyncOutbox.markFailed(victim.id, 'transient $i');
       }
-      var row = (await DatabaseHelper.rawQuery(
+      var row = (await (await testLedger()).rawQuery(
           'SELECT * FROM sync_queue WHERE id = ?', [victim.id]))
           .first;
       expect(row['status'], 'pending');
@@ -299,7 +300,7 @@ void main() {
           reason: 'backoff must be scheduled');
 
       await SyncOutbox.markFailed(victim.id, 'transient 5');
-      row = (await DatabaseHelper.rawQuery(
+      row = (await (await testLedger()).rawQuery(
           'SELECT * FROM sync_queue WHERE id = ?', [victim.id]))
           .first;
       expect(row['status'], 'conflict',
@@ -322,11 +323,11 @@ void main() {
           .firstWhere((o) => o.entityId == flakyId);
       await SyncOutbox.markFailed(flaky.id, 'blip');
       await SyncOutbox.resetStaleForRetry(userId: userId);
-      final rearmed = (await DatabaseHelper.rawQuery(
+      final rearmed = (await (await testLedger()).rawQuery(
           'SELECT * FROM sync_queue WHERE id = ?', [flaky.id]))
           .first;
       expect(rearmed['status'], 'pending');
-      final stillConflict = (await DatabaseHelper.rawQuery(
+      final stillConflict = (await (await testLedger()).rawQuery(
           'SELECT * FROM sync_queue WHERE id = ?', [victim.id]))
           .first;
       expect(stillConflict['status'], 'conflict',
