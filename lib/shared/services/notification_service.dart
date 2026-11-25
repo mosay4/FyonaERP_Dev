@@ -540,6 +540,35 @@ class NotificationService {
     return 'paid:$userId:$detail';
   }
 
+  /// Frozen server copy of the activation welcome (backend
+  /// `subscription_welcome.WELCOME_TITLE/BODY`). The FCM push and the poll
+  /// carry exactly these strings, so the dedupe identity is computed from
+  /// them (never from the localized display text).
+  static const String serverWelcomeTitle = 'شركة فيونا';
+
+  /// Android tray tag shared with the server push
+  /// (`subscription_welcome.WELCOME_TRAY_TAG`).
+  static const String welcomeTrayTag = 'fyona_subscription_welcome';
+  static const String serverWelcomeBody =
+      'يا مراحب ، نورتوا فيونا، ونقدر نقول بعد الان حياتكم الماليه بإذن الله بتتغير للأفضل🫡❤️.';
+
+  /// Tray identity of the activation welcome — the SAME key the FCM
+  /// foreground bridge, the background handler and the 60s poll compute for
+  /// the server push (free: payload "notifications"; paid: invoice link).
+  static String welcomeTrayKey({String? deepLink}) {
+    final link = (deepLink ?? '').trim();
+    return trayEventKey(
+      actionPayload: link.startsWith('/') ? link : 'notifications',
+      title: serverWelcomeTitle,
+      body: serverWelcomeBody,
+    );
+  }
+
+  /// Test seam for the tray paint (the plugin has no host implementation in
+  /// unit tests). Null in production.
+  @visibleForTesting
+  static Future<bool> Function({String? deepLink})? debugWelcomePainter;
+
   /// Shows the activation welcome on the device exactly once per scope.
   /// Pass [scopeKey] directly (trial path), or let it be derived from
   /// ([userId], [isFree], [invoiceNo]/[plan]+[start]) for the paid invoice
@@ -570,7 +599,38 @@ class NotificationService {
       }
       final prefs = await SharedPreferences.getInstance();
       if (prefs.getBool('sub_welcome_$scope') == true) return false;
-      await showSubscriptionWelcome(deepLink: deepLink);
+      // The server ALSO pushes this exact welcome (FCM) for the same
+      // activation. Both paths share ONE persisted tray identity, so the
+      // device paints it exactly once — whichever path arrives first wins.
+      // Reload first: the background FCM isolate may have claimed it.
+      try {
+        await prefs.reload();
+      } catch (_) {}
+      final trayKey = welcomeTrayKey(deepLink: deepLink);
+      // The tray identity has no user in it (the push strings are the same
+      // for everyone): a claim recorded for ANOTHER activation scope (e.g. a
+      // second account on this phone) is stale and must not swallow this
+      // activation's only welcome.
+      const ownerKey = 'sub_welcome_tray_owner';
+      final owner = prefs.getString(ownerKey);
+      if (owner != null && owner != scope) {
+        await releaseTrayKey(trayKey);
+      }
+      try {
+        await prefs.setString(ownerKey, scope);
+      } catch (_) {}
+      if (!await tryClaimTrayKey(trayKey)) {
+        // The server push already painted this activation's welcome.
+        try {
+          await prefs.setBool('sub_welcome_$scope', true);
+        } catch (_) {}
+        return false;
+      }
+      final show = debugWelcomePainter ?? showSubscriptionWelcome;
+      final shown = await show(deepLink: deepLink);
+      // A failed paint gives the identity back so the server push / poll
+      // can still deliver this activation's welcome (never lost).
+      if (!shown) await releaseTrayKey(trayKey);
       try {
         await prefs.setBool('sub_welcome_$scope', true);
       } catch (_) {}
@@ -583,13 +643,14 @@ class NotificationService {
   /// Professional activation greeting on the device notification tray.
   /// Tapping it opens [deepLink] (the paid invoice when provided), falling
   /// back to the app home (dashboard per usage mode) for free activations.
-  Future<void> showSubscriptionWelcome({String? deepLink}) async {
+  Future<bool> showSubscriptionWelcome({String? deepLink}) async {
     try {
       if (!_initialized) await init();
       final tapRoute =
           (deepLink ?? '').trim().isNotEmpty ? deepLink!.trim() : 'home';
       final androidDetails = AndroidNotificationDetails(
         'subscription_channel',
+        tag: welcomeTrayTag,
         AppLocalizations.t('notifChannelSubName'),
         channelDescription: AppLocalizations.t('notifChannelSubDesc'),
         importance: Importance.high,
@@ -612,7 +673,9 @@ class NotificationService {
         sound: 'sound_1.mp3',
       );
       await _plugin.show(
-        id: _nextId++,
+        // (tag, 0) = the slot an OS-rendered FCM row with the same tag uses,
+        // so a late background push REPLACES this row instead of stacking.
+        id: 0,
         title: AppLocalizations.t('subWelcomeTitle'),
         body: AppLocalizations.t('subWelcomeBody'),
         notificationDetails: NotificationDetails(
@@ -621,7 +684,10 @@ class NotificationService {
         ),
         payload: tapRoute,
       );
-    } catch (_) {}
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ── Server polling (in-app notifications) ──

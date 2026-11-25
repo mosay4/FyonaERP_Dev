@@ -232,7 +232,7 @@ class InvoicePreviewCard extends StatelessWidget {
               if (doc.branch.isNotEmpty)
                 Text('${L.branch}: ${doc.branch}', style: _t(10)),
               if (doc.cashier.isNotEmpty)
-                Text('${L.cashier}: ${doc.cashier}', style: _t(10)),
+                Text('${L.cashierFor(doc.cashierRole)}: ${doc.cashier}', style: _t(10)),
               if (doc.isReturn && doc.originalInvoice.isNotEmpty)
                 Text('${L.originalInvoice}: ${doc.originalInvoice}', style: _t(10)),
             ]),
@@ -461,7 +461,8 @@ class InvoicePreviewCard extends StatelessWidget {
         row('الوقت',
             '${doc.date?.hour.toString().padLeft(2, '0') ?? ''}:${doc.date?.minute.toString().padLeft(2, '0') ?? ''}'),
         if (doc.branch.isNotEmpty) row('الفرع', doc.branch),
-        if (doc.cashier.isNotEmpty) row('الكاشير', doc.cashier),
+        if (doc.cashier.isNotEmpty)
+          row(const InvoiceLabels(true).cashierFor(doc.cashierRole), doc.cashier),
         if (design.showCustomer && doc.partyName.isNotEmpty)
           row('العميل', doc.partyName),
         if (doc.isReturn && doc.originalInvoice.isNotEmpty)

@@ -2426,56 +2426,258 @@ class PersonalFinanceService {
   }
 
   // ── Spending categories ──
+  //
+  // The server has no category entity: it only derives names from the
+  // user's transactions. Categories the user adds/edits live on the device
+  // in the encrypted Personal mirror (`personal_entity_cache`, entity
+  // [categoryEntityType]) — offline, survive restart, and travel with the
+  // Personal backup/restore (the mirror table is snapshotted and restored
+  // whole). Derived names (transactions) are merged in; a stored category
+  // wins over a derived name it matches.
 
-  /// Pure-local category derivation (no network): distinct categories from
-  /// the locally mirrored transactions. Used for instant page opens and as
-  /// the offline fallback of [getCategories]. Never throws for missing data.
+  static const categoryEntityType = 'personal_category';
+
+  Future<List<SpendingCategory>> _storedCategories() async {
+    final cache = _cache;
+    if (cache == null) return const [];
+    final rows = await cache.getCollection(_userId, categoryEntityType);
+    final list = rows
+        .map(SpendingCategory.fromJson)
+        .where((c) => c.id.isNotEmpty)
+        .toList();
+    list.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    return list;
+  }
+
+  static String _catKey(String s) => s.trim().toLowerCase();
+
+  static bool _catMatches(SpendingCategory c, String value) {
+    final k = _catKey(value);
+    return k.isNotEmpty && (_catKey(c.name) == k || _catKey(c.nameAr) == k);
+  }
+
+  List<SpendingCategory> _mergeCategories(
+      List<SpendingCategory> stored, Iterable<String> derived) {
+    final out = [...stored];
+    final known = <String>{
+      for (final c in stored) ...[_catKey(c.name), _catKey(c.nameAr)],
+    };
+    for (final n in derived) {
+      final name = n.trim();
+      if (name.isEmpty) continue;
+      if (known.add(_catKey(name))) {
+        out.add(SpendingCategory(id: name, name: name, nameAr: name));
+      }
+    }
+    return out;
+  }
+
+  Future<List<String>> _localCategoryNames() async {
+    final cache = _cache;
+    if (cache == null) return const [];
+    final txs = await cache.getCollection(_userId, 'personal_transaction');
+    return [
+      for (final t in txs)
+        if ((t['category'] ?? '').toString().trim().isNotEmpty)
+          (t['category'] ?? '').toString().trim(),
+    ];
+  }
+
+  /// Pure-local categories (no network): the user's stored categories plus
+  /// the distinct categories of the locally mirrored transactions. Used for
+  /// instant page opens and as the offline fallback of [getCategories].
+  /// Never throws for missing data.
   Future<List<SpendingCategory>> getLocalCategories() async {
     try {
-      final cache = _cache;
-      if (cache == null) return const [];
-      final txs = await cache.getCollection(_userId, 'personal_transaction');
-      final names = <String>{};
-      for (final t in txs) {
-        final c = (t['category'] ?? '').toString();
-        if (c.isNotEmpty) names.add(c);
-      }
-      return names
-          .map((n) => SpendingCategory(id: n, name: n, nameAr: n))
-          .toList();
+      return _mergeCategories(
+          await _storedCategories(), await _localCategoryNames());
     } catch (_) {
       return const [];
     }
   }
 
   Future<List<SpendingCategory>> getCategories() async {
+    List<String> server;
     try {
       final raw = await _api.list(ApiEndpoints.personalFinanceCategories);
-      return raw.map((e) {
-        final name = e.toString();
-        return SpendingCategory(
-          id: name,
-          name: name,
-          nameAr: name,
-        );
-      }).toList();
+      server = raw.map((e) => e.toString()).toList();
     } catch (e) {
       // Offline/slow network: derive from the local mirror so category UIs
       // open instantly instead of awaiting (then failing) a network call.
       if (!isConnectivityError(e)) rethrow;
       return getLocalCategories();
     }
+    List<String> local = const [];
+    try {
+      local = await _localCategoryNames();
+    } catch (_) {}
+    List<SpendingCategory> stored = const [];
+    try {
+      stored = await _storedCategories();
+    } catch (_) {}
+    return _mergeCategories(stored, [...server, ...local]);
   }
 
-  Future<void> addCategory(SpendingCategory cat) async {
-    // Categories are derived from transaction categories on the backend.
+  /// How many local transactions and recurring rules use [cat] (by its
+  /// Arabic or English name — transactions store the category name).
+  Future<int> categoryUsageCount(SpendingCategory cat) async {
+    final cache = _cache;
+    if (cache == null) return 0;
+    var n = 0;
+    for (final type in const [
+      'personal_transaction',
+      'personal_recurring_transaction',
+    ]) {
+      for (final row in await cache.getCollection(_userId, type)) {
+        if (_catMatches(cat, (row['category'] ?? '').toString())) n++;
+      }
+    }
+    return n;
   }
 
-  Future<void> updateCategory(SpendingCategory cat) async {
-    // Categories are derived from transaction categories on the backend.
+  void _validateCategory(SpendingCategory cat) {
+    if (cat.name.trim().isEmpty || cat.nameAr.trim().isEmpty) {
+      throw const CategoryException('NAME_REQUIRED',
+          'اسم التصنيف بالعربية والإنجليزية مطلوب', 'Arabic and English names are required');
+    }
   }
 
+  Future<void> _ensureUniqueCategory(SpendingCategory cat, {String? exceptId}) async {
+    final all = await getLocalCategories();
+    for (final c in all) {
+      if (c.id == exceptId) continue;
+      if (_catMatches(c, cat.name) || _catMatches(c, cat.nameAr)) {
+        throw CategoryException('DUPLICATE', 'يوجد تصنيف بهذا الاسم: ${c.nameAr}',
+            'A category with this name already exists: ${c.name}');
+      }
+    }
+  }
+
+  CategoryException _categoryInUse(SpendingCategory cat, int count) =>
+      CategoryException(
+          'CATEGORY_IN_USE',
+          'التصنيف «${cat.nameAr}» مستخدم في $count عملية، لذلك لا يمكن حذفه.',
+          'Category "${cat.name}" is used by $count operations, so it cannot be deleted.');
+
+  Map<String, dynamic> _categoryRow(SpendingCategory cat, String id, {String? createdAt}) => {
+        'id': id,
+        ...cat.toJson(),
+        'name': cat.name.trim(),
+        'name_ar': cat.nameAr.trim(),
+        'created_at': createdAt ?? DateTime.now().toIso8601String(),
+      };
+
+  /// Adds a category on the device. Returns the new category (with id).
+  /// Throws [CategoryException] for empty or duplicate names.
+  Future<SpendingCategory> addCategory(SpendingCategory cat) async {
+    final cache = _cache;
+    if (cache == null) {
+      throw const CategoryException('NO_STORAGE', 'التخزين المحلي غير متاح', 'Local storage is unavailable');
+    }
+    _validateCategory(cat);
+    await _ensureUniqueCategory(cat);
+    final stored = await _storedCategories();
+    final id = 'cat_${_newUuid()}';
+    final row = _categoryRow(
+        SpendingCategory(
+          id: id, name: cat.name, nameAr: cat.nameAr, icon: cat.icon,
+          color: cat.color, isActive: cat.isActive,
+          sortOrder: stored.isEmpty ? 0 : stored.last.sortOrder + 1,
+        ),
+        id);
+    await cache.upsertItem(_userId, categoryEntityType, id, row);
+    return SpendingCategory.fromJson(row);
+  }
+
+  /// Edits a category. A derived category (only a transaction name so far)
+  /// becomes a stored one. A category used by transactions/recurring rules
+  /// must keep the name they reference (renaming would split it).
+  Future<SpendingCategory> updateCategory(SpendingCategory cat) async {
+    final cache = _cache;
+    if (cache == null) {
+      throw const CategoryException('NO_STORAGE', 'التخزين المحلي غير متاح', 'Local storage is unavailable');
+    }
+    _validateCategory(cat);
+    final all = await getLocalCategories();
+    SpendingCategory? existing;
+    for (final c in all) {
+      if (c.id == cat.id) {
+        existing = c;
+        break;
+      }
+    }
+    if (existing == null) {
+      throw const CategoryException('NOT_FOUND', 'التصنيف غير موجود', 'Category not found');
+    }
+    await _ensureUniqueCategory(cat, exceptId: existing.id);
+    final used = await categoryUsageCount(existing);
+    final keepsName = _catMatches(cat, existing.nameAr) || _catMatches(cat, existing.name);
+    if (used > 0 && !keepsName) {
+      throw CategoryException(
+          'CATEGORY_IN_USE',
+          'التصنيف «${existing.nameAr}» مستخدم في $used عملية؛ أبقِ أحد اسميه كما هو.',
+          'Category "${existing.name}" is used by $used operations; keep one of its names.');
+    }
+    final stored = (await _storedCategories()).where((c) => c.id == existing!.id);
+    final isStored = stored.isNotEmpty;
+    final id = isStored ? existing.id : 'cat_${_newUuid()}';
+    String? createdAt;
+    if (isStored) {
+      final rows = await cache.getCollection(_userId, categoryEntityType);
+      for (final r in rows) {
+        if ('${r['id']}' == id) createdAt = r['created_at']?.toString();
+      }
+    }
+    final row = _categoryRow(
+        SpendingCategory(
+          id: id, name: cat.name, nameAr: cat.nameAr, icon: cat.icon,
+          color: cat.color, isActive: cat.isActive,
+          sortOrder: isStored ? stored.first.sortOrder : existing.sortOrder,
+        ),
+        id,
+        createdAt: createdAt);
+    await cache.upsertItem(_userId, categoryEntityType, id, row);
+    return SpendingCategory.fromJson(row);
+  }
+
+  /// Deletes a category. Blocked (CATEGORY_IN_USE) while transactions or
+  /// recurring rules use it — nothing is reassigned silently.
   Future<void> deleteCategory(String id) async {
-    // Categories are derived from transaction categories on the backend.
+    final cache = _cache;
+    if (cache == null) {
+      throw const CategoryException('NO_STORAGE', 'التخزين المحلي غير متاح', 'Local storage is unavailable');
+    }
+    SpendingCategory? existing;
+    for (final c in await getLocalCategories()) {
+      if (c.id == id) {
+        existing = c;
+        break;
+      }
+    }
+    if (existing == null) {
+      throw const CategoryException('NOT_FOUND', 'التصنيف غير موجود', 'Category not found');
+    }
+    final used = await categoryUsageCount(existing);
+    final isStored = (await _storedCategories()).any((c) => c.id == id);
+    if (used > 0) throw _categoryInUse(existing, used);
+    if (!isStored) {
+      // Derived from transactions on the server (not yet on this device).
+      throw CategoryException('CATEGORY_IN_USE',
+          'التصنيف «${existing.nameAr}» مأخوذ من معاملاتك، لذلك لا يمكن حذفه.',
+          'Category "${existing.name}" comes from your transactions, so it cannot be deleted.');
+    }
+    await cache.removeItem(_userId, categoryEntityType, id);
   }
+}
+
+/// Typed failure of a category add/edit/delete. [code] is stable for UI and
+/// Sara; [messageAr]/[messageEn] are user-facing.
+class CategoryException implements Exception {
+  final String code;
+  final String messageAr;
+  final String messageEn;
+  const CategoryException(this.code, this.messageAr, this.messageEn);
+
+  @override
+  String toString() => messageAr;
 }

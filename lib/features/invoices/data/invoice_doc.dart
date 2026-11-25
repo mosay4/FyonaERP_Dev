@@ -23,6 +23,8 @@ class InvoiceDoc {
   final double balance;
   final String notes;
   final String cashier;
+  /// 'owner' (the merchant) | 'employee' (a cashier) | '' (unknown/legacy).
+  final String cashierRole;
   final String status;
   final String originalInvoice;
   final bool isReturn;
@@ -47,6 +49,7 @@ class InvoiceDoc {
     required this.balance,
     required this.notes,
     required this.cashier,
+    this.cashierRole = '',
     required this.status,
     this.originalInvoice = '',
     this.isReturn = false,
@@ -142,7 +145,8 @@ class InvoiceDoc {
       notes: _s(inv['notes']),
       cashier: _s(inv['by_name']).isNotEmpty
           ? _s(inv['by_name'])
-          : _s(inv['cashier_name']),
+          : _s(inv['cashier_name']).trim(),
+      cashierRole: _s(inv['cashier_role']),
       status: _s(inv['status']),
       originalInvoice: _s(inv['original_invoice']),
       isReturn: type.endsWith('_return'),

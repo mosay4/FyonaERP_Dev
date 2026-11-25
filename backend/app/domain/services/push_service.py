@@ -214,6 +214,10 @@ def _build_message(token: str, *, title: str, body: str, data: dict,
     payload = {str(k): str(v) for k, v in dict(data).items()}
     payload.setdefault("title", str(title or ""))
     payload.setdefault("body", str(body or ""))
+    # Optional stable tray tag: the OS-rendered row REPLACES any row with the
+    # same tag (e.g. the app's own local welcome) instead of stacking a
+    # duplicate. Absent → unchanged behaviour.
+    tag = str(payload.get("notif_tag") or "").strip() or None
     return messaging.Message(
         token=token,
         notification=messaging.Notification(title=title, body=body,
@@ -225,8 +229,11 @@ def _build_message(token: str, *, title: str, body: str, data: dict,
                 channel_id=ANDROID_CHANNEL_ID,
                 color="#000000",
                 click_action="FLUTTER_NOTIFICATION_CLICK",
+                **({"tag": tag} if tag else {}),
             ),
         ),
+        **({"apns": messaging.APNSConfig(headers={"apns-collapse-id": tag})}
+           if tag else {}),
     )
 
 
@@ -501,6 +508,42 @@ async def notify_avatar_updated(
         except Exception as exc:  # noqa: BLE001
             logger.warning("fcm_avatar_cleanup_failed", error=str(exc),
                            user_id=str(user_id), type="data_push", at=_utc_ts())
+
+
+SUBSCRIPTION_CHANGED_EVENT = "subscription_changed"
+
+
+async def notify_subscription_changed(db: AsyncSession, org_id) -> dict:
+    """Silent data push: the org's plan/status changed (e.g. by an admin).
+
+    Every active member's devices refresh the subscription snapshot +
+    profile on receipt (badge colour, plan card), without any tray row.
+    Data-only, so the OS never paints anything. Never raises.
+    """
+    empty = {"sent": 0, "failed": 0, "invalid_tokens": []}
+    try:
+        oid = UUID(str(org_id))
+        rows = await db.execute(
+            select(User.id).where(User.organization_id == oid,
+                                  User.status == "active"))
+        user_ids = list(rows.scalars().all())
+        tokens = await tokens_for_users(db, user_ids) if user_ids else []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fcm_subscription_changed_lookup_failed", error=str(exc),
+                       type="data_push", at=_utc_ts())
+        return empty
+    if not tokens:
+        return empty
+    result = await _send_data_push_bounded(
+        tokens, data={"type": SUBSCRIPTION_CHANGED_EVENT, "org_id": str(oid)})
+    try:
+        invalid = (result or {}).get("invalid_tokens") or []
+        if invalid:
+            await deactivate_tokens(db, invalid)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fcm_subscription_changed_cleanup_failed", error=str(exc),
+                       type="data_push", at=_utc_ts())
+    return result
 
 
 async def token_platforms(db: AsyncSession, tokens: Iterable[str]) -> dict:
@@ -791,6 +834,7 @@ async def notify_user(
     action: str = "open_screen",
     action_payload: str = "suggestions",
     image_url: str | None = None,
+    tag: str | None = None,
 ):
     """Push to a single user (e.g. the suggestion owner on an admin reply).
 
@@ -813,7 +857,8 @@ async def notify_user(
                 _push_visible_split_detached(
                     tokens, title=title, body=body,
                     data={**_data_payload(action=action, action_payload=action_payload),
-                          **({'image_url': image_url} if image_url else {})},
+                          **({'image_url': image_url} if image_url else {}),
+                          **({'notif_tag': tag} if tag else {})},
                     log_ctx={"user_id": str(user_id), "type": "push"},
                 )
             )

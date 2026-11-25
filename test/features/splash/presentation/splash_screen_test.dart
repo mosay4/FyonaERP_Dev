@@ -13,6 +13,8 @@ import 'package:fyona_flutter/features/auth/data/models/otp_response.dart';
 import 'package:fyona_flutter/features/auth/data/models/session_model.dart';
 import 'package:fyona_flutter/shared/models/user_model.dart';
 import 'package:fyona_flutter/core/services/audit_service.dart';
+import 'package:fyona_flutter/features/splash/domain/intro_replay_policy.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeFirebaseAuthService implements FirebaseAuthService {
   @override
@@ -227,6 +229,7 @@ Widget createTestApp() {
 
 void main() {
   testWidgets('renders a pure black splash (no logo text, no spinner)', (tester) async {
+    SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(createTestApp());
     await tester.pump();
 
@@ -237,6 +240,22 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('intro played < 72h ago → skipped, goes straight to login', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      IntroReplayPolicy.prefsKey: DateTime.now()
+          .subtract(const Duration(hours: 2))
+          .millisecondsSinceEpoch,
+    });
+    await tester.pumpWidget(createTestApp());
+    // A few short frames only — far less than the video or fade durations.
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(find.text('Login'), findsOneWidget);
     await tester.pumpAndSettle();
   });
 }

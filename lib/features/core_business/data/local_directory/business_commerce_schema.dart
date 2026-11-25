@@ -27,6 +27,40 @@ Future<void> _upgradeUnitImages(DatabaseExecutor db) async {
   await db.execute('ALTER TABLE $_commerceUnits ADD COLUMN image TEXT');
 }
 
+/// Schema v19: every sale/purchase invoice and every return remembers WHO
+/// executed it, as a snapshot taken at creation: `created_by_name` (the
+/// person's display name) and `created_by_role` ('owner' = the merchant,
+/// 'employee' = a cashier). Both nullable — documents made before v19 have
+/// none and simply show no cashier line. Idempotent: a database created at
+/// v19 runs it right after its tables.
+Future<void> _upgradeCashierNames(DatabaseExecutor db) async {
+  for (final table in [_commerceInvoices, _commerceReturns]) {
+    final columns = {
+      for (final c in await db.rawQuery('PRAGMA table_info($table)')) c['name'],
+    };
+    for (final column in const ['created_by_name', 'created_by_role']) {
+      if (columns.contains(column)) continue;
+      await db.execute('ALTER TABLE $table ADD COLUMN $column TEXT');
+    }
+  }
+}
+
+/// The cashier snapshot written on a new invoice/return row. The role comes
+/// from the ledger grant itself (an employee device works with a `member`
+/// scope), never from caller input.
+Map<String, Object?> _cashierColumns(
+  BusinessLedgerAccess access,
+  String? cashierName,
+) {
+  final name = cashierName?.trim();
+  return {
+    'created_by_name': name == null || name.isEmpty
+        ? null
+        : (name.length > 120 ? name.substring(0, 120) : name),
+    'created_by_role': access.directory.member ? 'employee' : 'owner',
+  };
+}
+
 // Branch stock is exact to 0.001 in PostgreSQL. Document lines, lots and
 // movements came from floating-point columns with finer precision. Keep them
 // independently at 0.000001 and reject input that would require rounding.

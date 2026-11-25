@@ -96,6 +96,8 @@ class _ReturnSuccessDialogState extends ConsumerState<ReturnSuccessDialog> {
       'notes': (r['reason'] ?? '').toString(),
       'original_invoice': shortDocumentNumber(r['invoice_number']),
       'status': r['status'],
+      'cashier_name': r['cashier_name'],
+      'cashier_role': r['cashier_role'],
       'items': items,
     };
   }

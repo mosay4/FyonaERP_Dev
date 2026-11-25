@@ -128,6 +128,10 @@ String? saraEntityRoute(Map<String, dynamic> params) {
       return id.isNotEmpty ? '${RouteNames.personalRecurringDetail}?id=${q(id)}' : RouteNames.personalRecurring;
     case 'category':
       return RouteNames.personalCategories;
+    case 'financial_tree':
+      return RouteNames.financialTree;
+    case 'merchant':
+      return RouteNames.personalMerchantAccounts;
     case 'report':
     case 'reports':
       return saraPersonalReportsRoute;

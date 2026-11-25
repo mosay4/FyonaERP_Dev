@@ -430,6 +430,8 @@ Future<void> _requireMainSchema(DatabaseExecutor db) async {
 /// Nullable columns added after a backup format: older backups lack them.
 const _archiveOptionalColumns = <String, Set<String>>{
   _commerceUnits: {'image'},
+  _commerceInvoices: {'created_by_name', 'created_by_role'},
+  _commerceReturns: {'created_by_name', 'created_by_role'},
 };
 
 Future<(int, List<String>)> _requireArchiveSchema(DatabaseExecutor db) async {

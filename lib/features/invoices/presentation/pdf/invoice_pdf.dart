@@ -209,7 +209,7 @@ List<pw.Widget> _paperHeader(InvoiceDoc doc, InvoiceDesignPreset d) {
           kv(L.date, _date(doc.date, doc.dateRaw)),
           kv(L.time, _time(doc.date)),
           if (doc.branch.isNotEmpty) kv(L.branch, doc.branch),
-          if (doc.cashier.isNotEmpty) kv(L.cashier, doc.cashier),
+          if (doc.cashier.isNotEmpty) kv(L.cashierFor(doc.cashierRole), doc.cashier),
           if (doc.isReturn && doc.originalInvoice.isNotEmpty)
             kv(L.originalInvoice, doc.originalInvoice),
         ]),
@@ -640,7 +640,8 @@ pw.Widget _thermal(InvoiceDoc doc, InvoiceDesignPreset d,
       row('التاريخ', _date(doc.date, doc.dateRaw)),
       row('الوقت', _time(doc.date)),
       if (doc.branch.isNotEmpty) row('الفرع', doc.branch),
-      if (doc.cashier.isNotEmpty) row('الكاشير', doc.cashier),
+      if (doc.cashier.isNotEmpty)
+        row(const InvoiceLabels(true).cashierFor(doc.cashierRole), doc.cashier),
       if (d.showCustomer && doc.partyName.isNotEmpty)
         row('العميل', doc.partyName),
       if (doc.isReturn && doc.originalInvoice.isNotEmpty)

@@ -13,6 +13,7 @@ import '../../../shared/services/notification_router.dart';
 import '../../auth/presentation/providers/biometric_provider.dart';
 import '../../auth/domain/services/biometric_service.dart';
 import 'intro_video.dart';
+import '../domain/intro_replay_policy.dart';
 
 /// Production-ready startup flow:
 /// PURE BLACK NATIVE LAUNCH (<1s) → VideoPlayer widget mounted immediately
@@ -35,6 +36,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   bool _hasFaded = false;
   bool _isPausedByLifecycle = false;
   bool _initStarted = false;
+  /// True when the intro motion was skipped (played < 72h ago): the splash
+  /// then stays pure black and hands over with no fade/delay.
+  bool _introSkipped = false;
 
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
@@ -73,8 +77,18 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     // Initialize AFTER the first frame so the video platform is registered
     // (calling initialize in main() before runApp causes the whole pipeline
     // to fail silently — the root cause of the missing intro video).
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted || _hasNavigated) return;
+      // Play the intro motion only on first launch or once 72h have passed
+      // since it last played; otherwise go straight to the next step.
+      final play = await IntroReplayPolicy.shouldPlayNow();
+      if (!mounted || _hasNavigated) return;
+      if (!play) {
+        StartupLogger.log('VIDEO_SKIPPED', 'played < 72h ago');
+        _introSkipped = true;
+        _navigateToApp();
+        return;
+      }
       _startVideoInit();
     });
 
@@ -100,6 +114,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
         try {
           await _controller.play();
           StartupLogger.log('VIDEO_STARTED');
+          unawaited(IntroReplayPolicy.markPlayed());
         } catch (e, st) {
           StartupLogger.error('VIDEO_START_FAILED', e, st);
           _navigateToApp();
@@ -203,6 +218,11 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   void _fadeAndNavigate() {
     if (!mounted || _hasFaded) return;
     _hasFaded = true;
+    if (_introSkipped) {
+      // Nothing was shown — no fade-out, hand over immediately.
+      _finalizeNavigation();
+      return;
+    }
     _overallController
         .animateTo(0.0, duration: _overallFadeDuration, curve: Curves.easeInOut)
         .whenComplete(() {

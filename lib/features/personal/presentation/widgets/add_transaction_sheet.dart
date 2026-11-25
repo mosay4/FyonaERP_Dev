@@ -17,6 +17,8 @@ import '../../../../shared/widgets/receipt/receipt_data.dart';
 import '../../di/personal_providers.dart' show personalFinanceServiceProvider;
 import '../../domain/services/personal_finance_service.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import 'personal_account_choice.dart';
+import '../../../../shared/widgets/account_type_bar.dart' show accountTypeLabel;
 
 const _incomeCategories = ['مرتب', 'بيع', 'هدية', 'إيجار', 'استثمار', 'عمولة', 'عمل حر', 'مكافأة', 'أخرى'];
 const _expenseCategories = ['طعام', 'مواصلات', 'اتصالات', 'صحة', 'تعليم', 'ترفيه', 'إيجار', 'فواتير', 'أخرى'];
@@ -102,6 +104,9 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
   String? _payMethod; // 'cash' | 'bank'
   String? _selBankName; // bank name only (no currency shown)
   String? _selCurrency; // a currency of the selected bank
+  // The exact bank account picked. A bank can hold the same currency twice
+  // (جاري + توفير), so bank + currency alone is ambiguous.
+  String? _selAccountId;
   bool _saving = false;
   PersonalBudget? _selectedBudget;
   BudgetCategory? _selectedBudgetCategory;
@@ -126,6 +131,7 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
       _payMethod = 'bank';
       _selBankName = target.bankName;
       _selCurrency = target.currency;
+      _selAccountId = target.id;
     } else if (target != null) {
       _payMethod = 'cash';
     }
@@ -177,10 +183,12 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
       return null;
     }
     if (_selBankName == null || _selCurrency == null) return null;
-    for (final a in accounts) {
-      if (a.bankName == _selBankName && a.currency == _selCurrency) return a.id;
-    }
-    return null;
+    return resolvePersonalAccount(
+      accounts,
+      accountId: _selAccountId,
+      bankName: _selBankName,
+      currency: _selCurrency,
+    )?.id;
   }
 
   Future<void> _submit(List<PersonalBankAccount> accounts) async {
@@ -284,8 +292,18 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
       double amt, List<PersonalBankAccount> accounts) {
     final l10n = AppLocalizations.of(parent);
     final currency = _selectedCurrency(accounts);
+    final selAcc = _payMethod == 'bank'
+        ? resolvePersonalAccount(accounts,
+            accountId: _selAccountId,
+            bankName: _selBankName,
+            currency: _selCurrency)
+        : null;
+    final typeSuffix = selAcc != null &&
+            personalAccountNeedsTypeTag(accounts, selAcc)
+        ? ' · ${accountTypeLabel(l10n, selAcc.accountType)}'
+        : '';
     final accountDisplay = (_payMethod == 'bank' && _selBankName != null)
-        ? '$_selBankName ($currency)'
+        ? '$_selBankName ($currency$typeSuffix)'
         : '${l10n.translate('payMethodCash')} ($currency)';
     final categoryName =
         _selectedBudgetCategory?.name ?? _selCategory ?? budget.name;
@@ -504,6 +522,7 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
               _payMethod = 'cash';
               _selBankName = null;
               _selCurrency = null;
+              _selAccountId = null;
             }),
           ),
         ),
@@ -652,9 +671,16 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
       ),
     );
     if (chosen != null) setState(() {
-      _selBankName = chosen;
-      if (!_currenciesFor(accounts, chosen).contains(_selCurrency)) {
+      if (_selBankName != chosen) {
+        _selAccountId = null;
         _selCurrency = null;
+      }
+      _selBankName = chosen;
+      // A single-account bank needs no second step.
+      final own = personalBankAccountsOf(accounts, chosen);
+      if (own.length == 1) {
+        _selAccountId = own.first.id;
+        _selCurrency = own.first.currency;
       }
     });
   }
@@ -662,6 +688,12 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
   /// Step 2 (bank): the currency button shows ONLY the currencies of the chosen bank.
   Widget _buildBankCurrencyButton(List<PersonalBankAccount> accounts) {
     final l10n = AppLocalizations.of(context);
+    final selAcc = _payMethod == 'bank'
+        ? resolvePersonalAccount(accounts,
+            accountId: _selAccountId,
+            bankName: _selBankName,
+            currency: _selCurrency)
+        : null;
     return GestureDetector(
       onTap: () => _pickBankCurrency(accounts, _selBankName!),
       child: Container(
@@ -684,6 +716,9 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
                 textAlign: TextAlign.right,
               ),
             ),
+            if (selAcc != null)
+              PersonalAccountTypeTag(accounts: accounts, account: selAcc),
+            SizedBox(width: 6),
             TwoToneIcon(data: TwoToneIcons.arrowDown, size: 18, outlineColor: AppColors.textSecondary),
           ],
         ),
@@ -695,12 +730,14 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
     final l10n = AppLocalizations.of(context);
     // Every currency of this bank with its balance beside it (debts/goals
     // style). Confirming uses that exact currency account.
-    final accs = accounts.where((a) => a.bankName == bankName && !_isCashName(a.bankName)).toList();
-    final byCurrency = <String, double>{};
-    for (final a in accs) {
-      byCurrency[a.currency] = (byCurrency[a.currency] ?? 0) + a.balance;
-    }
-    final currencies = byCurrency.keys.toList();
+    // ONE row per account (never collapsed by currency): the same currency
+    // may exist twice (جاري + توفير); each row shows its own balance + tag.
+    final accs = personalBankAccountsOf(accounts, bankName);
+    final selId = resolvePersonalAccount(accounts,
+            accountId: _selAccountId,
+            bankName: _selBankName,
+            currency: _selCurrency)
+        ?.id;
     final chosen = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppColors.background,
@@ -718,7 +755,7 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
                 child: Text('${l10n.translate('currencyLabel')} - $bankName',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, fontFamily: 'Cairo')),
               ),
-              if (currencies.isEmpty)
+              if (accs.isEmpty)
                 Padding(
                   padding: EdgeInsets.all(20),
                   child: Text(l10n.translate('selectCurrencyFirst'),
@@ -729,17 +766,24 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
                   child: ListView(
                     shrinkWrap: true,
                     children: [
-                      for (final c in currencies)
+                      for (final a in accs)
                         ListTile(
-                          leading: _currencyLeading(c),
-                          title: Text(currencyLabel(c),
-                              style: TextStyle(fontFamily: 'Cairo', color: AppColors.textPrimary)),
-                          subtitle: Text('${fmtNum(byCurrency[c]!)} ${currencyShort(c)}',
+                          leading: _currencyLeading(a.currency),
+                          title: Row(
+                            children: [
+                              Flexible(
+                                child: Text(currencyLabel(a.currency),
+                                    style: TextStyle(fontFamily: 'Cairo', color: AppColors.textPrimary)),
+                              ),
+                              PersonalAccountTypeTag(accounts: accs, account: a),
+                            ],
+                          ),
+                          subtitle: Text('${fmtNum(a.balance)} ${currencyShort(a.currency)}',
                               style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textSecondary)),
-                          trailing: _selCurrency == c
+                          trailing: selId == a.id
                               ? TwoToneIcon(data: TwoToneIcons.check, size: 20, outlineColor: AppColors.primary)
                               : null,
-                          onTap: () => Navigator.pop(ctx, c),
+                          onTap: () => Navigator.pop(ctx, a.id),
                         ),
                     ],
                   ),
@@ -750,7 +794,14 @@ class _AddTransactionSheetState extends ConsumerState<_AddTransactionSheet> {
         ),
       ),
     );
-    if (chosen != null) setState(() => _selCurrency = chosen);
+    if (chosen == null) return;
+    final picked = accs.where((a) => a.id == chosen).firstOrNull;
+    if (picked != null) {
+      setState(() {
+        _selAccountId = picked.id;
+        _selCurrency = picked.currency;
+      });
+    }
   }
 
   Widget _buildCashCurrencyRow(List<PersonalBankAccount> accounts) {

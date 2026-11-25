@@ -13,6 +13,7 @@ import '../providers/personal_providers.dart';
 import '../providers/receipt_design_provider.dart';
 import '../../../../shared/widgets/receipt/receipt_modal.dart';
 import '../../../../shared/widgets/receipt/receipt_data.dart';
+import '../widgets/personal_account_choice.dart';
 
 class PersonalRecurringDetailPage extends ConsumerStatefulWidget {
   final RecurringTransaction? transaction;
@@ -972,8 +973,11 @@ class _ExecuteNowSheetState extends ConsumerState<_ExecuteNowSheet> {
                                 color: selected ? const Color(0xFFD32F2F) : AppColors.textSecondary, size: 22),
                             const SizedBox(width: 12),
                             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(acc.currency, style: TextStyle(fontFamily: 'Cairo', fontSize: 14, fontWeight: FontWeight.w600,
-                                  color: selected ? AppColors.textPrimary : AppColors.textSecondary)),
+                              Row(children: [
+                                Flexible(child: Text(acc.currency, style: TextStyle(fontFamily: 'Cairo', fontSize: 14, fontWeight: FontWeight.w600,
+                                    color: selected ? AppColors.textPrimary : AppColors.textSecondary))),
+                                PersonalAccountTypeTag(accounts: List<PersonalBankAccount>.from(bankAccounts), account: acc),
+                              ]),
                               Text(AppLocalizations.of(context).translate('recurringBalanceIs', params: {'balance': fmtNum(acc.balance)}), style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textSecondary)),
                             ])),
                           ]),

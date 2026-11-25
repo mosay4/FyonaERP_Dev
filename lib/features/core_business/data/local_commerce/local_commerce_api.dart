@@ -10,6 +10,7 @@ import '../../../branches/data/branch_scope.dart';
 import '../../../dashboard/data/business_finance_api.dart';
 import '../../../employees/data/employee_permissions.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
+import '../../../../shared/providers/current_user_provider.dart';
 import '../../../inventory/data/business_inventory_image.dart';
 import '../../../inventory/data/inventory_api.dart';
 import '../../../invoices/data/invoices_api.dart';
@@ -37,11 +38,13 @@ final class LocalCommerceBridge {
     void Function()? operationsChanged,
     bool Function()? fullAccess,
     double? Function(String from, String to)? rate,
+    String? Function()? cashierName,
   }) : _selected = _scope(),
        _bankChanged = bankChanged,
        _operationsChanged = operationsChanged,
        _fullAccess = fullAccess ?? _notAllowed,
-       _falconRate = rate;
+       _falconRate = rate,
+       _cashierName = cashierName;
 
   final DirectoryPilotStore _store;
   final DirectoryAccess? Function() _scope;
@@ -51,6 +54,17 @@ final class LocalCommerceBridge {
   final void Function()? _operationsChanged;
   final bool Function() _fullAccess;
   final double? Function(String from, String to)? _falconRate;
+  /// Display name of the person executing a document right now (the
+  /// merchant or the employee), snapshotted on every invoice and return.
+  final String? Function()? _cashierName;
+
+  String? _cashier() {
+    try {
+      return _cashierName?.call();
+    } catch (_) {
+      return null;
+    }
+  }
 
   static bool _notAllowed() => false;
 
@@ -350,6 +364,7 @@ final class LocalCommerceBridge {
             : BusinessMoney.minor(_decimal(body['tax_rate'] as num? ?? 0)),
         notes: body['notes'] as String?,
         dueDate: body['due_date'] as String?,
+        cashierName: _cashier(),
         lines: [
           for (final item in items)
             CommerceIssueLine(
@@ -967,6 +982,7 @@ final class LocalCommerceBridge {
         rememberAllowNegative: remember,
         expectedRefundMinor: body['expected_refund_minor'] as int?,
         expectedAccountCurrency: body['refund_currency'] as String?,
+        cashierName: _cashier(),
         lines: [
           for (final line
               in (body['lines'] as List? ?? const []).whereType<Map>())
@@ -1214,8 +1230,30 @@ final localCommerceBridgeProvider = Provider<LocalCommerceBridge>((ref) {
         (container.read(employeeWorkspaceCompanyProvider) == null ||
             employeeHasFullAccess(container.read(employeePermissionsProvider))),
     rate: (from, to) => container.read(currencyEngineProvider).getRate(from, to),
+    cashierName: () => slot.alive ? businessCashierName(container) : null,
   );
 });
+
+/// Name of whoever is executing a Business document on this device: an
+/// employee's name in the employer's workspace (from their saved employee
+/// profile when loaded, else their own account name), or the merchant's own
+/// name. Read from in-memory state only — works offline, never waits.
+String? businessCashierName(ProviderContainer container) {
+  String? clean(Object? v) {
+    final s = v?.toString().trim() ?? '';
+    return s.isEmpty ? null : s;
+  }
+
+  final user = container.read(currentUserProvider);
+  final org = BranchScope.organizationId;
+  if (container.read(employeeWorkspaceCompanyProvider) != null && org != null) {
+    final profile = container.read(myEmployeeProfileForProvider(org)).valueOrNull;
+    final employee = profile?['employee'];
+    final name = employee is Map ? clean(employee['full_name']) : null;
+    if (name != null) return name;
+  }
+  return clean(user?.fullName);
+}
 
 const businessOperationPermissions = <String, List<String>>{
   'sale': ['sales.view'],

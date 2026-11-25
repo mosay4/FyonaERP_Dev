@@ -28,7 +28,7 @@ void main() {
       expect(ids, contains(t), reason: 'missing $t');
     }
     // Ensure no duplicate and version bumped
-    expect(contract['contract_version'], '1.6.0');
+    expect(contract['contract_version'], '1.7.0');
     // Ensure every flutter tool is in contract
     final flutterIds = AgentToolRegistry.tools.map((t) => t.name).toSet();
     expect(flutterIds, ids.intersection(flutterIds));

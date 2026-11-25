@@ -30,6 +30,7 @@ import 'shared/services/notification_service.dart';
 import 'features/personal/data/chat_background_upload.dart';
 import 'features/subscription/presentation/providers/subscription_providers.dart';
 import 'features/branches/data/branch_scope.dart';
+import 'features/personal/services/smart_insights/sara_smart_coordinator.dart';
 import 'features/core_business/data/local_directory/directory_pilot.dart'
     show DeviceLedgerOrganizations;
 import 'package:image_picker_android/image_picker_android.dart';
@@ -361,6 +362,8 @@ class _AppWithSyncState extends ConsumerState<_AppWithSync>
       });
       try { ref.read(syncEngineProvider).init(); } catch (_) {}
       try { ref.read(fcmServiceProvider).init(); } catch (_) {}
+      // Sara smart notifications: silent on-device planner (no AI calls).
+      try { ref.read(saraSmartCoordinatorProvider).start(); } catch (_) {}
     });
   }
 
@@ -437,6 +440,9 @@ class _AppWithSyncState extends ConsumerState<_AppWithSync>
       } catch (_) {}
       try {
         AlarmTapBridge.consumeAndRoute();
+      } catch (_) {}
+      try {
+        ref.read(saraSmartCoordinatorProvider).onResume();
       } catch (_) {}
       Future.delayed(const Duration(milliseconds: 800), () {
         if (mounted) DebtReminderService.checkAndShowAlarms(() => rootNavigatorKey.currentContext);

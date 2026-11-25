@@ -19,6 +19,11 @@ class InvoiceLabels {
   String get time => ar ? 'الوقت' : 'Time';
   String get branch => ar ? 'الفرع' : 'Branch';
   String get cashier => ar ? 'الكاشير' : 'Cashier';
+  String get merchant => ar ? 'التاجر' : 'Merchant';
+
+  /// «التاجر» when the account owner executed the document, «الكاشير» for
+  /// an employee (and for documents whose role is unknown).
+  String cashierFor(String role) => role == 'owner' ? merchant : cashier;
   String get originalInvoice => ar ? 'الفاتورة الأصلية' : 'Original invoice';
 
   String get colNum => '#';

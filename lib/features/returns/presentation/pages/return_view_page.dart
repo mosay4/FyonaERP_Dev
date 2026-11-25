@@ -129,6 +129,9 @@ class _ReturnViewPageState extends ConsumerState<ReturnViewPage> {
       'notes': (r['reason'] ?? '').toString(),
       'original_invoice': shortDocumentNumber(r['invoice_number']),
       'status': r['status'],
+      // Who executed the return (absent on returns made before v19).
+      'cashier_name': r['cashier_name'],
+      'cashier_role': r['cashier_role'],
       'items': items,
     };
   }

@@ -11,6 +11,9 @@ import 'sara_currency_names.dart';
 import 'param_normalizer.dart';
 import 'sara_money.dart';
 import 'verification_gateway.dart';
+import 'sara_personal_extra_tools.dart';
+import '../../../personal/data/merchant_api.dart';
+import '../../../personal/data/repositories/financial_tree_storage.dart';
 import '../../../personal/domain/services/personal_finance_service.dart';
 import '../../../personal/data/models/personal_models.dart';
 
@@ -130,21 +133,44 @@ class ToolExecutor {
   /// Tools the Personal screens put behind [verifySensitiveAction].
   static const identityGatedTools = {'delete_bank', 'delete_bank_account'};
 
+  /// Categories, financial tree and merchant links (by name, screen rules).
+  final SaraPersonalExtraTools _extra;
+
   ToolExecutor(
-    this._service, {
+    PersonalFinanceService service, {
     SaraVerificationGateway? verify,
     ApiClient? apiClient,
     CurrencyEngine? fxEngine,
     bool Function(String featureRoute)? maintenanceBlocked,
     Future<bool> Function(String tool)? identityGate,
+    FinancialTreeStorage? treeStorage,
+    MerchantApi? merchantApi,
+    Future<void> Function()? onTreesChanged,
+  }) : this._(
+          service,
+          verify ?? SaraVerificationGateway.forService(service, apiClient: apiClient),
+          fxEngine: fxEngine,
+          maintenanceBlocked: maintenanceBlocked,
+          identityGate: identityGate,
+          treeStorage: treeStorage,
+          merchantApi: merchantApi,
+          onTreesChanged: onTreesChanged,
+        );
+
+  ToolExecutor._(
+    this._service,
+    this._verify, {
+    CurrencyEngine? fxEngine,
+    bool Function(String featureRoute)? maintenanceBlocked,
+    Future<bool> Function(String tool)? identityGate,
+    FinancialTreeStorage? treeStorage,
+    MerchantApi? merchantApi,
+    Future<void> Function()? onTreesChanged,
   })  : _fxEngine = fxEngine,
         _maintenanceBlocked = maintenanceBlocked,
         _identityGate = identityGate,
-        _verify = verify ??
-            SaraVerificationGateway.forService(
-              _service,
-              apiClient: apiClient,
-            );
+        _extra = SaraPersonalExtraTools(_service, _verify,
+            treeStorage: treeStorage, merchantApi: merchantApi, onTreesChanged: onTreesChanged);
 
   /// Maps a gateway verdict to the tool result contract. The ONLY place
   /// where success/message/tone are derived — tool methods must not invent
@@ -222,6 +248,8 @@ class ToolExecutor {
 
   /// Feature route of each write tool (the screen whose buttons do it).
   static String? _featureOf(String tool) {
+    final extra = SaraPersonalExtraTools.routeOf(tool);
+    if (extra != null) return extra;
     if (tool.contains('debt')) return '/personal/debts';
     if (tool.contains('goal')) return '/personal/savings';
     if (tool.contains('budget')) return '/personal/budget';
@@ -244,7 +272,8 @@ class ToolExecutor {
         tool: tool, success: false, messageAr: ar, messageEn: en, errorCode: code, verified: false);
     final isWrite = tool.startsWith('create_') || tool.startsWith('update_') || tool.startsWith('delete_') ||
         tool.startsWith('add_') || const {'pay_debt', 'contribute_to_goal', 'execute_recurring_now',
-          'activate_recurring', 'deactivate_recurring', 'skip_recurring', 'postpone_recurring'}.contains(tool);
+          'activate_recurring', 'deactivate_recurring', 'skip_recurring', 'postpone_recurring',
+          ...SaraPersonalExtraTools.merchantTools}.contains(tool);
     if (!isWrite) return null;
     final feature = _featureOf(tool);
     if (feature != null && (_maintenanceBlocked?.call(feature) ?? false)) {
@@ -294,7 +323,8 @@ class ToolExecutor {
     try {
       final refused = await _buttonGuard(toolName, params);
       if (refused != null) return refused;
-      if (const {'create_transaction', 'create_transfer', 'create_bank_account', 'create_debt', 'pay_debt', 'contribute_to_goal', 'create_recurring', 'create_budget', 'create_savings_goal'}.contains(toolName)) {
+      if (const {'create_transaction', 'create_transfer', 'create_bank_account', 'create_debt', 'pay_debt', 'contribute_to_goal', 'create_recurring', 'create_budget', 'create_savings_goal',
+          'create_financial_tree', 'update_financial_tree', 'add_tree_node', 'update_tree_node'}.contains(toolName)) {
         final enabled = await loadEnabledCurrencies(_service.currentUserId.toString());
         final requested = params.entries.where((e) => e.key == 'currency' || e.key.endsWith('_currency'))
             .map((e) => saraCurrencyId('${e.value}')).where((c) => c.isNotEmpty).toSet();
@@ -352,7 +382,19 @@ class ToolExecutor {
     }
   }
 
+  /// Entity type of the extra tools' reply button (saraEntityRoute).
+  static String _extraEntityType(String tool) {
+    if (SaraPersonalExtraTools.categoryTools.contains(tool)) return 'category';
+    if (SaraPersonalExtraTools.treeTools.contains(tool)) return 'financial_tree';
+    return 'merchant';
+  }
+
   Future<ToolExecutionResult> _executeTool(String name, Map<String, dynamic> p) async {
+    if (SaraPersonalExtraTools.all.contains(name)) {
+      final v = await _extra.run(name, p);
+      return _adapt(v, tool: name, entityType: _extraEntityType(name),
+          route: SaraPersonalExtraTools.routeOf(name));
+    }
     switch (name) {
       // ═══════ READ TOOLS ═══════
       case 'get_balance': return _getBalance(p);
@@ -915,26 +957,26 @@ class ToolExecutor {
     final groupRows = banks
         .where((b) => b.bankName.trim() == target.bankName.trim())
         .toList();
-    final groupCurrencies = <String>[];
-    final rowByCurrency = <String, PersonalBankAccount>{};
-    for (final b in groupRows) {
-      final c = b.currency.trim().toUpperCase();
-      if (c.isEmpty || c == requested) continue;
-      if (!rowByCurrency.containsKey(c)) {
-        rowByCurrency[c] = b;
-        groupCurrencies.add(c);
-      }
-    }
+    // One option per ACCOUNT (never collapsed by currency): the same bank
+    // may hold a currency twice (جاري + توفير), each with its own id.
+    final optionRows = <PersonalBankAccount>[
+      for (final b in groupRows)
+        if (b.currency.trim().isNotEmpty &&
+            b.currency.trim().toUpperCase() != requested)
+          b
+    ];
     // FX options: real engine rates only; unavailable pairs are omitted
     // (never rate=1 between different currencies, never invented).
     final fxOptions = <Map<String, dynamic>>[];
-    for (final c in groupCurrencies) {
+    for (final b in optionRows) {
+      final c = b.currency.trim().toUpperCase();
       final rate = _fxEngine?.getRate(requested, c);
       if (rate == null || rate <= 0 || !rate.isFinite) continue;
       fxOptions.add({
         'currency': c,
-        'account_id': rowByCurrency[c]!.id,
-        'account_name': rowByCurrency[c]!.bankName,
+        'account_id': b.id,
+        'account_name': b.bankName,
+        'account_type': b.accountType,
         'rate': rate,
         'converted': amount * rate,
       });
@@ -947,6 +989,7 @@ class ToolExecutor {
       siblings.add({
         'account_id': b.id,
         'account_name': b.bankName,
+        'account_type': b.accountType,
         'currency': b.currency.trim().toUpperCase(),
       });
     }
@@ -1168,6 +1211,10 @@ class ToolExecutor {
     final bankName = p['bank_name'] as String? ?? '';
     final currency = p['currency'] as String? ?? 'SAR';
     final openingBalance = _toDouble(p['opening_balance']) ?? 0;
+    // Same bank + currency may legitimately exist twice as جاري AND توفير
+    // (the banks screen allows it); only the same TYPE is a duplicate.
+    final rawType = '${p['account_type'] ?? ''}'.trim().toLowerCase();
+    final accountType = rawType == 'savings' ? 'savings' : 'checking';
 
     if (bankName.isEmpty) {
       return ToolExecutionResult(
@@ -1180,9 +1227,11 @@ class ToolExecutor {
 
     // Duplicate check: same bank name + same currency
     final existing = await _service.getBankAccounts();
+    final existingIds = {for (final a in existing) a.id};
     final duplicate = existing.where((a) =>
       a.bankName.toLowerCase() == bankName.toLowerCase() &&
-      a.currency.toUpperCase() == currency.toUpperCase()
+      a.currency.toUpperCase() == currency.toUpperCase() &&
+      (a.accountType == 'savings' ? 'savings' : 'checking') == accountType
     ).firstOrNull;
     if (duplicate != null) {
       return ToolExecutionResult(
@@ -1198,11 +1247,13 @@ class ToolExecutor {
       opKey: SaraVerificationGateway.opKeyFor('create_bank_account', {
         'bank_name': bankName, 'currency': currency,
         'opening_balance': openingBalance,
+        if (accountType != 'checking') 'account_type': accountType,
       }),
       run: () async {
         try {
           await _service.addBankAccount(
             bankName: bankName, currency: currency, openingBalance: openingBalance,
+            accountType: accountType,
           );
         } catch (e) {
           return SaraVerificationResult(
@@ -1220,6 +1271,7 @@ class ToolExecutor {
           resolveId: () => _resolveCreatedId(
             () => _service.getBankAccounts(),
             (m) =>
+                !existingIds.contains(m['id']?.toString()) &&
                 (m['bank_name']?.toString() ?? '').toLowerCase() ==
                     bankName.toLowerCase() &&
                 (m['currency']?.toString() ?? '').toUpperCase() ==
@@ -2499,13 +2551,13 @@ class ToolExecutor {
             state: SaraVerificationState.failed,
             tool: 'execute_recurring_now',
             queueEntityType: 'personal_recurring_transaction',
-            messageAr: 'من أي حساب أنفذ «${target.name}»؟ اختر البنك والعملة.',
+            messageAr: 'من أي حساب أنفذ «${target.name}»؟ اختر البنك والعملة (ونوع الحساب جاري/توفير إن تكررت العملة).',
             messageEn: 'Which account should "${target.name}" run from? Pick the bank and currency.',
             errorCode: 'NEEDS_ACCOUNT',
             data: {
               'accounts': [
                 for (final a in accounts)
-                  {'id': a.id, 'bank_name': a.bankName, 'currency': saraCurrencyId(a.currency), 'balance': a.balance},
+                  {'id': a.id, 'bank_name': a.bankName, 'currency': saraCurrencyId(a.currency), 'balance': a.balance, 'type': a.accountType},
               ],
             },
           );

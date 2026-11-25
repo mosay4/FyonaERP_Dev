@@ -25,12 +25,24 @@ const saraFieldLabels = <String, String>{
   'target_amount': 'المبلغ المستهدف', 'current_amount': 'المبلغ الحالي', 'due_date': 'الاستحقاق',
   'person_name': 'الطرف', 'bank_account_id': 'الحساب البنكي', 'bank_name': 'البنك',
   'account_name': 'اسم الحساب', 'category': 'التصنيف', 'date': 'التاريخ',
+  'category_name': 'التصنيف', 'tree_name': 'الشجرة', 'node_name': 'البند', 'merchant_name': 'التاجر',
+  'parent_name': 'تحت البند', 'new_parent_name': 'نقله تحت', 'client_name': 'العميل',
+  'new_name': 'الاسم الجديد', 'name_ar': 'الاسم بالعربية', 'name_en': 'الاسم بالإنجليزية',
+  'new_name_ar': 'الاسم العربي الجديد', 'new_name_en': 'الاسم الإنجليزي الجديد',
+  'base_amount': 'المبلغ الأساسي', 'node_type': 'نوع البند',
+};
+
+/// `*_name` params that name what the operation acts on (always shown;
+/// other `*_name` keys only label their `*_id`).
+const _shownNames = {
+  'person_name', 'bank_name', 'account_name', 'category_name', 'tree_name', 'node_name',
+  'merchant_name', 'parent_name', 'new_parent_name', 'client_name',
 };
 
 List<MapEntry<String, String>> saraDetailRows(Map<String, dynamic> params, {required bool arabic}) {
   final rows = <MapEntry<String, String>>[];
   for (final e in params.entries) {
-    if (e.value == null || e.key == 'token' || e.key == 'idempotency_key' || e.key.endsWith('_name') && e.key != 'person_name' && e.key != 'bank_name' && e.key != 'account_name') continue;
+    if (e.value == null || e.key == 'token' || e.key == 'idempotency_key' || e.key.endsWith('_name') && !_shownNames.contains(e.key)) continue;
     var value = e.value.toString();
     if (e.key.endsWith('_id')) {
       value = '${params[e.key.replaceFirst(RegExp(r'_id$'), '_name')] ?? (arabic ? 'محدد في حسابك' : 'Selected account')}';

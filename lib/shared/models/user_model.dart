@@ -1,4 +1,5 @@
-﻿import 'package:equatable/equatable.dart';
+﻿import '../../core/utils/subscription_identity.dart' show subscriptionIdentityLevel;
+import 'package:equatable/equatable.dart';
 
 class UserModel extends Equatable {
   final String id;
@@ -220,21 +221,7 @@ class UserModel extends Equatable {
   /// Plan-based verification level — follows the plan identity:
   /// 0 = none, 1 = personal (blue check), 2 = business (red check),
   /// 3 = premium/أعمال + شخصي (gold check).
-  int get verificationLevel {
-    switch (subscriptionPlan) {
-      case 'personal':
-      case 'باقة شخصية':
-        return 1;
-      case 'business':
-      case 'باقة أعمال':
-        return 2;
-      case 'premium':
-      case 'باقة أعمال + شخصي':
-        return 3;
-      default:
-        return 0;
-    }
-  }
+  int get verificationLevel => subscriptionIdentityLevel(subscriptionPlan);
 
   /// Whether the user is entitled to a plan-based verification badge.
   bool get isPlanVerified => verificationLevel > 0;

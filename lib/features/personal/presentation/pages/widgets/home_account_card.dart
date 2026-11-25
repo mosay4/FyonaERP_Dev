@@ -12,6 +12,17 @@ import '../../../../../shared/widgets/app_icon_badge.dart';
 import '../../../../../shared/widgets/account_type_bar.dart';
 import '../../../domain/services/personal_finance_service.dart';
 
+/// Display-dedup key of the Personal home card. Cash collapses per bucket
+/// (YER_NEW shares YER's); a bank account is keyed by currency AND type, so
+/// USD جاري and USD توفير in one bank are two entries, never one.
+String homeAccountLogicalKey(PersonalBankAccount a) {
+  final cur = a.currency.trim().toUpperCase();
+  final name = a.bankName.trim();
+  final isCash = name == 'كاش' || name == 'Cash' || name == 'CASH';
+  if (isCash) return cur == 'YER_NEW' ? 'YER' : cur;
+  return '$cur|${a.accountType}';
+}
+
 class HomeAccountCard extends StatefulWidget {
   final List<PersonalBankAccount> accounts;
   final void Function(PersonalBankAccount account)? onAccountTap;
@@ -106,13 +117,8 @@ class _HomeAccountCardState extends State<HomeAccountCard> {
   /// uses the exact code otherwise — read-only, no engine change. Restore
   /// merge keeps the source clean; this keeps the card truthful even when
   /// historical duplicate rows exist.
-  static String _logicalCurrencyKey(PersonalBankAccount a) {
-    final cur = a.currency.trim().toUpperCase();
-    final name = a.bankName.trim();
-    final isCash = name == 'كاش' || name == 'Cash' || name == 'CASH';
-    if (isCash) return cur == 'YER_NEW' ? 'YER' : cur;
-    return cur;
-  }
+  static String _logicalCurrencyKey(PersonalBankAccount a) =>
+      homeAccountLogicalKey(a);
 
   List<_BankGroup> get _grouped {
     final map = <String, List<PersonalBankAccount>>{};

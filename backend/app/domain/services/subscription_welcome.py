@@ -27,7 +27,7 @@ import uuid as uuid_lib
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +39,10 @@ logger = get_logger("subscription_welcome")
 
 WELCOME_TITLE = "شركة فيونا"
 WELCOME_BODY = "يا مراحب ، نورتوا فيونا، ونقدر نقول بعد الان حياتكم الماليه بإذن الله بتتغير للأفضل🫡❤️."
+# Stable OS tray tag shared with the app's local welcome
+# (NotificationService.welcomeTrayTag): an OS-rendered push replaces the
+# local row instead of stacking a second identical welcome.
+WELCOME_TRAY_TAG = "fyona_subscription_welcome"
 
 
 def welcome_source_id(user_id, event: str) -> uuid_lib.UUID:
@@ -122,12 +126,17 @@ async def send_subscription_welcome(
     payload = _invoice_payload(invoice_no) if is_paid else "notifications"
 
     # Idempotency first: same event already welcomed → no second row, no push.
+    # The key embeds the user id, so it doubles as a persisted per-user
+    # "welcome sent" flag: matching on the user as well (not only the org)
+    # keeps a user from being greeted twice for the same event even when the
+    # activation is replayed under another organization row.
     try:
         existing = (await db.execute(
             select(AppNotification).where(
-                AppNotification.organization_id == oid,
+                or_(AppNotification.organization_id == oid,
+                    AppNotification.user_id == uid),
                 AppNotification.source_notif_id == source_id,
-            )
+            ).limit(1)
         )).scalar_one_or_none()
     except Exception as exc:  # noqa: BLE001
         logger.warning("subscription_welcome_dedup_check_failed", error=str(exc),
@@ -207,6 +216,7 @@ async def send_subscription_welcome(
             body=WELCOME_BODY,
             action="open_screen",
             action_payload=payload,
+            tag=WELCOME_TRAY_TAG,
         )
     except Exception as exc:  # noqa: BLE001 - push never breaks activation
         logger.warning("subscription_welcome_push_failed", error=str(exc),

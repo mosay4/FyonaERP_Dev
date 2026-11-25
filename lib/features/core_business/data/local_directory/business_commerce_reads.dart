@@ -81,6 +81,9 @@ extension BusinessCommerceReads on BusinessLedger {
         'tax_type': header['tax_type'],
         'notes': header['notes'],
         'terms': header['terms'],
+        // Who executed it (snapshot at creation; absent on older documents).
+        'cashier_name': header['created_by_name'],
+        'cashier_role': header['created_by_role'],
         for (final (name, column) in [
           ('subtotal', 'subtotal_minor'),
           ('discount_value', 'discount_value_2'),
@@ -208,6 +211,8 @@ extension BusinessCommerceReads on BusinessLedger {
           'created_at': _commerceDate(row['created_us']),
           'status': row['status'],
           'reason': row['reason'],
+          'cashier_name': row['created_by_name'],
+          'cashier_role': row['created_by_role'],
           'party': row['party_name'],
           'total': total,
           'currency': row['invoice_currency'],

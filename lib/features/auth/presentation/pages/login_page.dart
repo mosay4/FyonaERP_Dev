@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemUiOverlayStyle;
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/config/directory_pilot_build.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
@@ -14,7 +16,6 @@ import '../../../../shared/widgets/connectivity_widgets.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../shared/providers/locale_provider.dart';
 import '../../../../shared/widgets/language_transition_overlay.dart';
-import '../../../../shared/providers/theme_provider.dart';
 import '../../di/auth_providers.dart' show authLocalDataSourceProvider;
 import '../providers/auth_provider.dart';
 import '../../../../shared/widgets/two_tone_icon.dart';
@@ -261,14 +262,17 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     });
 
     final l10n = AppLocalizations.of(context);
-    final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
-    // Light theme: transparent-background logo with no frame at all.
-    // Dark theme: unchanged.
-    final logoAsset = isDark
-        ? 'assets/images/fyona_logo_light.png'
-        : 'assets/images/fyona_logo_dark.png';
+    // The login page is ALWAYS dark (see AuthForcedDark): the app root swaps
+    // the effective theme + palette for this route, and the page also pins a
+    // local dark Theme and light status-bar icons. The saved preference is
+    // never changed.
+    const logoAsset = 'assets/images/fyona_logo_light.png';
 
-    return Scaffold(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Theme(
+      data: AppTheme.darkTheme,
+      child: Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: Stack(
@@ -285,26 +289,17 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       // address editor (auto-discovery handles LAN silently).
                       GestureDetector(
                         onLongPress: _showServerDialog,
-                        child: isDark
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(28),
-                                child: Image.asset(
-                                  logoAsset,
-                                  width: 120,
-                                  height: 120,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) =>
-                                      _logoFallback(context),
-                                ),
-                              )
-                            : Image.asset(
-                                logoAsset,
-                                width: 130,
-                                height: 130,
-                                fit: BoxFit.contain,
-                                errorBuilder: (_, _, _) =>
-                                    _logoFallback(context),
-                              ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(28),
+                          child: Image.asset(
+                            logoAsset,
+                            width: 120,
+                            height: 120,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) =>
+                                _logoFallback(context),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 24),
                       Text(
@@ -504,6 +499,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           ),
         ],
       ),
+    ),
+    ),
     ),
     );
   }

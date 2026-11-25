@@ -2511,6 +2511,8 @@ async def update_org(org_id: str, body: OrgUpdate, db: AsyncSession = Depends(ge
     if body.plan is not None:
         org.subscription_plan = body.plan
     await db.commit()
+    if body.plan is not None:
+        await _signal_subscription_changed(db, org.id)
     return ok(_org_dict(org))
 
 
@@ -2600,7 +2602,20 @@ async def manage_org_subscription(
         raise HTTPException(status_code=400, detail=str(exc))
     await db.commit()
     await db.refresh(org)
+    # The member devices recolour the badge / plan card right away.
+    await _signal_subscription_changed(db, org.id)
     return ok(_org_dict(org))
+
+
+async def _signal_subscription_changed(db: AsyncSession, org_id) -> None:
+    """Best-effort silent `subscription_changed` push after an admin plan
+    change (no tray row). Never breaks the admin request."""
+    try:
+        from app.domain.services import push_service as _push
+        await _push.notify_subscription_changed(db, org_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("subscription_changed_signal_failed org=%s error=%s",
+                       org_id, exc)
 
 
 @router.delete("/admin/orgs/{org_id}")

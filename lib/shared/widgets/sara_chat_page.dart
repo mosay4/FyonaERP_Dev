@@ -38,6 +38,8 @@ import '../../features/profile/presentation/providers/avatar_provider.dart';
 import '../../features/personal/di/personal_providers.dart';
 import '../../features/personal/presentation/providers/personal_providers.dart' as personal_ui;
 import '../../features/personal/domain/services/personal_finance_service.dart';
+import '../../features/personal/data/merchant_api.dart' show MerchantApi, merchantApiProvider;
+import '../../features/personal/presentation/providers/financial_tree_provider.dart' show financialTreeProvider;
 import '../../features/ai/domain/agent/tool_executor.dart';
 import '../../features/ai/domain/agent/agent_context.dart';
 import '../../features/ai/domain/agent/param_normalizer.dart';
@@ -406,7 +408,19 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     try {
       container = ProviderScope.containerOf(context, listen: false);
     } catch (_) {}
+    MerchantApi? merchants;
+    try {
+      merchants = ref.read(merchantApiProvider);
+    } catch (_) {}
     return ToolExecutor(financeService, apiClient: api, fxEngine: fx,
+        merchantApi: merchants,
+        // The tree screens hold their nodes in memory: reload after Sara.
+        onTreesChanged: () async {
+          final trees = container?.read(financialTreeProvider.notifier);
+          if (trees == null) return;
+          final open = container?.read(financialTreeProvider).currentTreeId;
+          await (open != null ? trees.openTree(open) : trees.refresh());
+        },
         maintenanceBlocked: (feature) {
           try {
             final controls = container?.read(platformControlsProvider).valueOrNull;
@@ -2012,6 +2026,9 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     }
     if (tool.contains('transaction')) return en ? 'Transaction' : 'المعاملة';
     if (tool.contains('transfer')) return en ? 'Transfer' : 'التحويل';
+    if (tool.contains('category')) return en ? 'Categories' : 'التصنيفات';
+    if (tool.contains('tree')) return en ? 'Financial tree' : 'الشجرة المالية';
+    if (tool.contains('merchant')) return en ? 'Merchant accounts' : 'حسابات التجار';
     return en ? 'Item' : 'العنصر';
   }
 

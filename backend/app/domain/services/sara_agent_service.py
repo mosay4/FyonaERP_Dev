@@ -165,6 +165,25 @@ KNOWN_SCREENS_EN = {
 #  TOOLS / FUNCTIONS for OpenAI Function Calling
 # ═══════════════════════════════════════════════════════════════
 
+_NUM = {"type": "number", "description": "المبلغ (0 أو أكثر)"}
+_NODE_TYPE = {"type": "string", "enum": ["income", "expense", "asset", "investment", "debt", "liability",
+                                         "transfer", "saving", "payment", "receivable", "custom"],
+              "description": "نوع البند"}
+
+
+def _device_tools(specs):
+    """Compact schemas for device-executed Personal tools: (name,
+    description, {param: description-or-schema}, required)."""
+    out = []
+    for name, desc, props, required in specs:
+        out.append({"type": "function", "function": {
+            "name": name, "description": desc,
+            "parameters": {"type": "object", "properties": {
+                k: (v if isinstance(v, dict) else {"type": "string", "description": v})
+                for k, v in props.items()}, "required": required}}})
+    return out
+
+
 APP_TOOLS = [
     {
         "type": "function",
@@ -595,6 +614,7 @@ APP_TOOLS = [
                     "balance": {"type": "number", "description": "الرصيد الابتدائي (افتراضي 0)"},
                     "currency": {"type": "string", "description": "العملة (SAR, USD, EUR, GBP, YER_OLD, YER_NEW, AED, EGP) — اليمني القديم والجديد عملتان مختلفتان", "default": "SAR"},
                     "notes": {"type": "string", "description": "ملاحظات (اختياري)"},
+                    "account_type": {"type": "string", "enum": ["checking", "savings"], "description": "نوع الحساب: checking=جاري (افتراضي)، savings=توفير. نفس البنك قد يحمل نفس العملة مرتين (جاري وتوفير)"},
                 },
                 "required": ["bank_name", "currency"],
             },
@@ -954,6 +974,40 @@ APP_TOOLS = [
             },
         },
     },
+    # Categories / financial tree / merchant links: executed on the device
+    # by NAME (the device lists the choices when a name is unknown).
+    *_device_tools([
+        ("add_category", "إضافة تصنيف مصروفات (الاسمان مطلوبان).",
+         {"name_ar": "الاسم بالعربية", "name_en": "الاسم بالإنجليزية"}, ["name_ar", "name_en"]),
+        ("update_category", "تعديل اسم تصنيف.",
+         {"category_name": "اسم التصنيف الحالي", "new_name_ar": "الاسم العربي الجديد",
+          "new_name_en": "الاسم الإنجليزي الجديد"}, ["category_name"]),
+        ("delete_category", "حذف تصنيف غير مستخدم في معاملات (كرت تأكيد).",
+         {"category_name": "اسم التصنيف"}, ["category_name"]),
+        ("create_financial_tree", "إنشاء شجرة مالية.",
+         {"name": "اسم الشجرة", "client_name": "اسم العميل", "base_amount": _NUM,
+          "currency": "العملة", "notes": "ملاحظات"}, ["name"]),
+        ("update_financial_tree", "تعديل بيانات شجرة مالية (tree_name اختياري إن كانت شجرة واحدة).",
+         {"tree_name": "اسم الشجرة", "new_name": "الاسم الجديد", "client_name": "اسم العميل",
+          "base_amount": _NUM, "currency": "العملة", "notes": "ملاحظات"}, []),
+        ("delete_financial_tree", "حذف شجرة مالية بكل بنودها (كرت تأكيد).",
+         {"tree_name": "اسم الشجرة"}, ["tree_name"]),
+        ("add_tree_node", "إضافة بند لشجرة مالية (الأب افتراضياً الجذر).",
+         {"name": "اسم البند", "node_type": _NODE_TYPE, "amount": _NUM, "tree_name": "اسم الشجرة",
+          "parent_name": "البند الأب", "currency": "العملة", "notes": "ملاحظات"}, ["name"]),
+        ("update_tree_node", "تعديل بند في الشجرة أو نقله تحت بند آخر.",
+         {"node_name": "اسم البند", "tree_name": "اسم الشجرة", "new_name": "الاسم الجديد",
+          "node_type": _NODE_TYPE, "amount": _NUM, "currency": "العملة", "notes": "ملاحظات",
+          "new_parent_name": "نقله تحت بند"}, ["node_name"]),
+        ("delete_tree_node", "حذف بند من الشجرة مع فروعه (كرت تأكيد).",
+         {"node_name": "اسم البند", "tree_name": "اسم الشجرة"}, ["node_name"]),
+        ("accept_merchant_invite", "قبول طلب ربط من تاجر (كرت تأكيد).",
+         {"merchant_name": "اسم التاجر"}, []),
+        ("reject_merchant_invite", "رفض طلب ربط من تاجر.",
+         {"merchant_name": "اسم التاجر"}, []),
+        ("unlink_merchant", "فك الربط مع تاجر، الديون تبقى (كرت تأكيد).",
+         {"merchant_name": "اسم التاجر"}, ["merchant_name"]),
+    ]),
 ]
 
 
@@ -2708,6 +2762,10 @@ class ToolExecutor:
                         conv = None
                 except Exception:
                     pass
+            if not (args.get("bank_account_id") or args.get("account_id")):
+                _rows = _same_currency_rows(accounts, acc.bank_name, acc.currency)
+                if len(_rows) > 1:
+                    return _needs_account_error(_rows, acc.bank_name, acc.currency, self._is_en)
             acc.balance = Decimal(str(acc.balance)) + eff_amount
             tx = PersonalTransaction(
                 user_id=self._user_id,
@@ -2753,6 +2811,10 @@ class ToolExecutor:
                         conv = None
                 except Exception:
                     pass
+            if not (args.get("bank_account_id") or args.get("account_id")):
+                _rows = _same_currency_rows(accounts, acc.bank_name, acc.currency)
+                if len(_rows) > 1:
+                    return _needs_account_error(_rows, acc.bank_name, acc.currency, self._is_en)
             if Decimal(str(acc.balance)) < eff_amount:
                 return {"error": (f"Insufficient balance in account {acc.bank_name}. Current balance: {acc.balance}" if self._is_en else f"الرصيد غير كافٍ في حساب {acc.bank_name}. الرصيد الحالي: {acc.balance}")}
             acc.balance = Decimal(str(acc.balance)) - eff_amount
@@ -2915,6 +2977,14 @@ class ToolExecutor:
 
             if from_acc is None or to_acc is None:
                 return {"error": (f"Could not resolve transfer accounts. Your accounts: {names}" if self._is_en else f"تعذر تحديد حسابي التحويل. حساباتك: {names}")}
+            # Name-resolved side whose bank holds the same currency twice
+            # (جاري + توفير): ask which one instead of using the first row.
+            for _raw_id, _acc in ((from_id_raw, from_acc), (to_id_raw, to_acc)):
+                if _raw_id:
+                    continue
+                _rows = _same_currency_rows(accounts, _acc.bank_name, _acc.currency)
+                if len(_rows) > 1:
+                    return _needs_account_error(_rows, _acc.bank_name, _acc.currency, self._is_en)
             if from_acc.id == to_acc.id:
                 return {"error": ("You cannot transfer to the same account" if self._is_en else "لا يمكن التحويل إلى نفس الحساب")}
             # Determine effective debit amount in source account currency
@@ -3004,6 +3074,54 @@ class _NoopAnalytics:
         pass
 
 
+def _same_currency_rows(accounts, bank_name, currency) -> list:
+    """Every account of [bank_name] holding [currency].
+
+    One bank may hold the SAME currency more than once (e.g. «الكريمي» USD
+    جاري + USD توفير). When this returns more than one row, bank + currency
+    does not identify the account and Sara must ask (NEEDS_ACCOUNT) instead of
+    silently picking the first row.
+    """
+    def _get(a, key, attr):
+        if isinstance(a, dict):
+            return a.get(key)
+        return getattr(a, attr, None)
+    bn = str(bank_name or "").strip().casefold()
+    cur = str(currency or "").strip().upper()
+    return [a for a in accounts
+            if str(_get(a, "name", "bank_name") or "").strip().casefold() == bn
+            and str(_get(a, "currency", "currency") or "").strip().upper() == cur]
+
+
+def _needs_account_error(rows, bank_name, currency, is_en: bool = False) -> dict:
+    """NEEDS_ACCOUNT answer listing the same-currency accounts to choose from."""
+    def _get(a, key, attr):
+        if isinstance(a, dict):
+            return a.get(key)
+        return getattr(a, attr, None)
+    options = [{
+        "id": str(_get(a, "id", "id")),
+        "bank_name": str(_get(a, "name", "bank_name") or ""),
+        "currency": str(_get(a, "currency", "currency") or "").strip().upper(),
+        "balance": str(_get(a, "balance", "balance")),
+        **({"account_type": _get(a, "account_type", "account_type")}
+           if _get(a, "account_type", "account_type") else {}),
+    } for a in rows]
+    cur = str(currency or "").strip().upper()
+    lines = "\n".join(
+        f"• {o['bank_name']} {o['currency']} — {o['balance']}"
+        + (f" ({o['account_type']})" if o.get("account_type") else "")
+        for o in options)
+    return {
+        "error": (
+            f"Bank {bank_name} has {len(options)} accounts in {cur} (e.g. current and savings). Ask the user which account to use, then pass its bank_account_id:\n{lines}"
+            if is_en else
+            f"لدى بنك {bank_name} أكثر من حساب بعملة {cur} (مثل جاري وتوفير). اسأل المستخدم أي حساب يقصد ثم مرّر bank_account_id الخاص به:\n{lines}"),
+        "error_code": "NEEDS_ACCOUNT",
+        "accounts": options,
+    }
+
+
 async def prepare_personal_banking(executor, args):
     """Resolve exact owned accounts and quote FX without writing money."""
     accounts = await SaraContextBuilder(executor._db, executor._org_id, executor._user_id)._get_banking_summary()
@@ -3013,7 +3131,10 @@ async def prepare_personal_banking(executor, args):
         currency = str(args.get(currency_key) or '').strip().upper()
         rows = [a for a in accounts if (a['id'] == wanted if wanted else a['name'].strip().casefold() == name)
                 and (not currency or a['currency'] == currency)]
+        if not wanted and currency and len(rows) > 1:
+            ambiguous.append(_needs_account_error(rows, rows[0]['name'], currency))
         return rows[0] if len(rows) == 1 else None
+    ambiguous: list = []
     operation = args.get('operation')
     try:
         amount = Decimal(str(args.get('amount', 0)))
@@ -3024,6 +3145,8 @@ async def prepare_personal_banking(executor, args):
     if operation == 'transfer':
         source = account('from_account_id', 'from_account_name', 'from_currency')
         target = account('to_account_id', 'to_account_name', 'to_currency')
+        if ambiguous:
+            return ambiguous[0]
         if not source or not target:
             return {'error': 'حدد حساب المصدر والوجهة وعملة كل حساب بدقة.', 'accounts': accounts}
         if source['id'] == target['id']:
@@ -3042,6 +3165,8 @@ async def prepare_personal_banking(executor, args):
             'destination_amount': float(amount * Decimal(str(rate)))}}
     if operation in ('deposit', 'withdraw'):
         row = account('bank_account_id', 'account_name', 'currency')
+        if ambiguous:
+            return ambiguous[0]
         if not row:
             return {'error': 'حدد الحساب وعملته بدقة.', 'accounts': accounts}
         return {'tool': 'create_transaction', 'params': {

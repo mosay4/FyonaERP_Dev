@@ -90,6 +90,7 @@ extension BusinessCommerceSales on BusinessLedger {
     String? dueDate,
     required List<CommerceIssueLine> lines,
     List<CommerceIssuePayment> payments = const [],
+    String? cashierName,
   }) {
     final supplier = kind == BusinessInvoiceKind.purchase;
     final branch = _branch(access, BusinessLedgerAction.issueDocument);
@@ -290,6 +291,7 @@ extension BusinessCommerceSales on BusinessLedger {
           'notes': notes,
           'idempotency_key': commandId,
           'created_by': access.directory.workspace.accountId,
+          ..._cashierColumns(access, cashierName),
           'created_us': now.toUtc().microsecondsSinceEpoch,
           'confirmed_us': now.toUtc().microsecondsSinceEpoch,
         });
@@ -430,6 +432,7 @@ extension BusinessCommerceSales on BusinessLedger {
     bool rememberAllowNegative = false,
     int? expectedRefundMinor,
     String? expectedAccountCurrency,
+    String? cashierName,
   }) {
     final supplier = kind == BusinessInvoiceKind.purchase;
     final branch = _branch(access, BusinessLedgerAction.confirmReturn);
@@ -627,6 +630,7 @@ extension BusinessCommerceSales on BusinessLedger {
           'total_minor': total,
           'reason': reason,
           'created_by': access.directory.workspace.accountId,
+          ..._cashierColumns(access, cashierName),
           'created_us': now.toUtc().microsecondsSinceEpoch,
         });
 

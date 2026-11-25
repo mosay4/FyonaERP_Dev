@@ -72,7 +72,7 @@ void main() {
   group('contract parity: registry matches single source of truth', () {
     test('version is pinned and gateway states are frozen', () {
       final c = _loadContract();
-      expect(c['contract_version'], '1.6.0');
+      expect(c['contract_version'], '1.7.0');
       expect((c['gateway_states'] as List).cast<String>(), [
         'confirmed', 'local_pending', 'failed',
         'unverifiable', 'not_found', 'sync_failed',
@@ -125,6 +125,7 @@ void main() {
         'delete_transaction', 'delete_bank_account', 'delete_savings_goal',
         'delete_debt', 'delete_budget', 'delete_recurring',
         'delete_currency', 'delete_category', 'delete_bank',
+        'delete_financial_tree', 'delete_tree_node', 'unlink_merchant',
       };
       const financialWrite = {
         'create_transaction', 'create_transfer',
@@ -157,7 +158,10 @@ void main() {
           expect(entry['verification'], 'gateway', reason: def.name);
           expect(entry['idempotency'], 'opkey', reason: def.name);
         }
-        expect(entry['offline'], 'supported', reason: def.name);
+        // Merchant links live on the server: they refuse honestly offline.
+        expect(entry['offline'],
+            def.name.contains('merchant') ? 'unavailable' : 'supported',
+            reason: def.name);
       }
     });
 

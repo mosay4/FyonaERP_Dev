@@ -45,7 +45,10 @@ class _PersonalCategoryFormPageState extends ConsumerState<PersonalCategoryFormP
     super.dispose();
   }
 
-  void _submit() {
+  bool _saving = false;
+
+  Future<void> _submit() async {
+    if (_saving) return;
     final l10n = AppLocalizations.of(context);
     final name = _nameCtrl.text.trim();
     final nameAr = _nameArCtrl.text.trim();
@@ -59,7 +62,17 @@ class _PersonalCategoryFormPageState extends ConsumerState<PersonalCategoryFormP
     HapticFeedback.lightImpact();
     final cat = SpendingCategory(id: _editId, name: name, nameAr: nameAr);
     final notifier = ref.read(categoryProvider.notifier);
-    if (_isEdit) { notifier.update(cat); } else { notifier.add(cat); }
+    _saving = true;
+    final err = _isEdit ? await notifier.update(cat) : await notifier.add(cat);
+    _saving = false;
+    if (!mounted) return;
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(err, style: TextStyle(fontFamily: 'Cairo')),
+        backgroundColor: AppColors.danger, behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
     context.pop();
   }
 

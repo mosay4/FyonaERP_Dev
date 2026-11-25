@@ -66,3 +66,14 @@ int subscriptionIdentityLevel(String? plan) {
     _ => 0,
   };
 }
+
+/// Badge level that follows the LIVE subscription snapshot (`plan_name` of
+/// `/subscription/status`, refreshed on resume / poll / plan-change push), so
+/// a paid upgrade or an admin plan change recolours the badge without a
+/// reinstall: personal → blue (1), business → red (2), premium → gold (3).
+/// Falls back to [cachedLevel] (the cached profile) when the snapshot has no
+/// recognisable paid plan (offline, loading, trial).
+int liveSubscriptionIdentityLevel(String? livePlan, {int cachedLevel = 0}) {
+  final live = subscriptionIdentityLevel(livePlan);
+  return live > 0 ? live : cachedLevel;
+}

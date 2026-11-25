@@ -120,6 +120,7 @@ import '../../features/personal/presentation/providers/receipt_design_models.dar
 import '../../features/personal/presentation/pages/personal_banks_page.dart';
 import '../../features/personal/presentation/pages/personal_debts_page.dart';
 import '../../features/personal/presentation/pages/personal_transactions_page.dart';
+import '../../features/personal/presentation/pages/sara_quick_add_page.dart';
 import '../../features/personal/presentation/pages/reports/personal_reports_page.dart';
 import '../../features/personal/presentation/pages/reports/personal_report_view_page.dart';
 import '../../features/personal/presentation/pages/personal_ai_page.dart';
@@ -1424,6 +1425,16 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               final initialTab = state.extra as int? ?? 0;
               return PersonalTransactionsPage(initialTab: initialTab);
             },
+          ),
+          // Sara's "log today's transactions" notification deep-link.
+          GoRoute(
+            path: '/personal/quick-add',
+            name: 'personalSaraQuickAdd',
+            builder: (_, state) => SaraQuickAddPage(
+              type: SaraQuickAddPage.normalizeType(
+                state.uri.queryParameters['type'],
+              ),
+            ),
           ),
           GoRoute(
             path: RouteNames.personalReportsCenter,

@@ -26,6 +26,13 @@ class _PersonalCategoriesPageState extends ConsumerState<PersonalCategoriesPage>
     WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(categoryProvider.notifier).load());
   }
 
+  void _snack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, style: TextStyle(fontFamily: 'Cairo')),
+      backgroundColor: AppColors.danger, behavior: SnackBarBehavior.floating,
+    ));
+  }
+
   void _confirmDelete(SpendingCategory c) {
     final l10n = AppLocalizations.of(context);
     HapticFeedback.lightImpact();
@@ -36,7 +43,7 @@ class _PersonalCategoriesPageState extends ConsumerState<PersonalCategoriesPage>
       content: Text(l10n.translate('confirmDeleteCategory', params: {'name': c.nameAr}), style: TextStyle(fontFamily: 'Cairo', color: AppColors.textSecondary)),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: Text(l10n.translate('cancel'), style: TextStyle(fontFamily: 'Cairo', color: AppColors.textSecondary))),
-        TextButton(onPressed: () { Navigator.pop(ctx); ref.read(categoryProvider.notifier).delete(c.id); }, child: Text(l10n.translate('delete'), style: TextStyle(fontFamily: 'Cairo', color: AppColors.danger, fontWeight: FontWeight.w700))),
+        TextButton(onPressed: () async { Navigator.pop(ctx); final err = await ref.read(categoryProvider.notifier).delete(c.id); if (err != null && mounted) _snack(err); }, child: Text(l10n.translate('delete'), style: TextStyle(fontFamily: 'Cairo', color: AppColors.danger, fontWeight: FontWeight.w700))),
       ],
     ));
   }

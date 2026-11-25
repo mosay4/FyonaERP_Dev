@@ -11,6 +11,7 @@ import '../../core/utils/server_image_url.dart';
 import '../../core/router/route_names.dart';
 import '../providers/current_user_provider.dart';
 import '../../shared/models/user_model.dart';
+import '../../core/utils/subscription_identity.dart' show liveSubscriptionIdentityLevel;
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/subscription/domain/section_access.dart';
 import '../../features/subscription/domain/personal_offline_access.dart';
@@ -190,6 +191,18 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
   }
 
   // ── Header ──
+  /// Badge level from the LIVE subscription snapshot (falls back to the
+  /// cached profile offline) — same rule as the profile header, so a plan
+  /// change recolours both the moment the status refreshes.
+  int _planLevel(UserModel? user) {
+    final live = ref
+        .watch(subscriptionStatusProvider)
+        .valueOrNull?['plan_name']
+        ?.toString();
+    return liveSubscriptionIdentityLevel(live,
+        cachedLevel: user?.verificationLevel ?? 0);
+  }
+
   Widget _buildHeader() {
     ref.watch(branchEpochProvider);
     final l10n = AppLocalizations.of(context);
@@ -315,10 +328,10 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
                         ),
                       ),
                     ),
-                    if ((user?.verificationLevel ?? 0) > 0) ...[
+                    if (_planLevel(user) > 0) ...[
                       const SizedBox(width: 4),
                       PlanVerificationBadge(
-                        level: user!.verificationLevel,
+                        level: _planLevel(user),
                         size: 18,
                       ),
                     ],
@@ -549,11 +562,11 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
                         ),
                       ),
                     ),
-                    if ((user?.verificationLevel ?? 0) > 0) ...[
+                    if (_planLevel(user) > 0) ...[
                       const SizedBox(width: 4),
                       profileTap(
                         child: PlanVerificationBadge(
-                          level: user?.verificationLevel ?? 0,
+                          level: _planLevel(user),
                           size: 18,
                         ),
                       ),
@@ -636,10 +649,10 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
                     ),
                   ),
                 ),
-                if ((widget.user?.verificationLevel ?? 0) > 0) ...[
+                if (_planLevel(widget.user) > 0) ...[
                   const SizedBox(width: 4),
                   PlanVerificationBadge(
-                    level: widget.user!.verificationLevel,
+                    level: _planLevel(widget.user),
                     size: 18,
                   ),
                 ],

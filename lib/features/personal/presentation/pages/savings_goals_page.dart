@@ -22,6 +22,7 @@ import 'package:fyona_flutter/shared/providers/current_user_provider.dart';
 import '../../../../core/localization/app_localizations.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../widgets/personal_account_choice.dart';
 
 
 
@@ -154,9 +155,10 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
       if (_selCurrencyForGoal != null && resolved.currency != _selCurrencyForGoal) {
         final bankName = resolved.bankName;
         final wantCur = _selCurrencyForGoal;
-        final exact = st.bankAccounts
-            .where((a) => a.bankName == bankName && a.currency == wantCur)
-            .firstOrNull;
+        // Only an unambiguous bank+currency match; with two same-currency
+        // accounts (جاري + توفير) the picker pins the id instead.
+        final exact = resolvePersonalAccount(st.bankAccounts,
+            bankName: bankName, currency: wantCur);
         if (exact == null) { _snack(l10n.translate('accountNotFound')); return; }
         resolved = exact;
       }
@@ -737,8 +739,12 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
     final acc = allAccounts.where((a) => a.id == _bankId).firstOrNull;
     if (acc == null) return SizedBox.shrink();
     final bankName = acc.bankName;
-    final currencies = allAccounts.where((a) => a.bankName == bankName && !_isCashName(a.bankName)).map((a) => a.currency).toSet().toList();
-    if (currencies.length <= 1) {
+    // One entry per ACCOUNT: the same currency may exist twice in one bank
+    // (جاري + توفير), so the picker stays visible whenever the bank holds
+    // more than one account, not only more than one currency.
+    final bankAccs = personalBankAccountsOf(allAccounts, bankName);
+    final currencies = bankAccs.map((a) => a.currency).toSet().toList();
+    if (bankAccs.length <= 1) {
       // Auto-select the only currency
       if (currencies.length == 1 && _selCurrencyForGoal == null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -748,6 +754,7 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
       return SizedBox.shrink();
     }
     final display = _selCurrencyForGoal ?? l10n.translate('selectCurrencyFirst');
+    final showTag = _selCurrencyForGoal != null && acc.currency == _selCurrencyForGoal;
     return GestureDetector(
       onTap: () => _pickGoalCurrencyForBank(bankName),
       child: Container(
@@ -775,6 +782,8 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
                 textAlign: TextAlign.right,
               ),
             ),
+            if (showTag) PersonalAccountTypeTag(accounts: bankAccs, account: acc),
+            SizedBox(width: 6),
             TwoToneIcon(data: TwoToneIcons.arrowDown, size: 18, outlineColor: AppColors.textSecondary),
           ],
         ),
@@ -967,7 +976,10 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
         ? PersonalFinanceService.canonicalCashAccounts(rawAccs)
         : rawAccs;
     if (accs.isEmpty) return;
-    final pre = accs.length == 1 ? accs.first.currency : _selCurrencyForGoal;
+    // Pre-selection is by account id (the same currency may appear twice).
+    final preId = accs.length == 1
+        ? accs.first.id
+        : accs.where((a) => a.id == _bankId).firstOrNull?.id;
     final chosen = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -1008,13 +1020,10 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
                   shrinkWrap: true,
                   children: [
                     ...accs.map((a) {
-                      final dupes = accs.where((x) => x.currency == a.currency).length;
-                      final title = dupes > 1
-                          ? '${a.currency} (${_shortGoalAccountType(a.accountType)})'
-                          : a.currency;
-                      final selected = pre == a.currency;
+                      final title = a.currency;
+                      final selected = preId == a.id;
                       return InkWell(
-                        onTap: () => Navigator.pop(ctx, a.currency),
+                        onTap: () => Navigator.pop(ctx, a.id),
                         child: Container(
                           padding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                           decoration: BoxDecoration(
@@ -1037,8 +1046,15 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(title,
-                                        style: TextStyle(fontFamily: 'Cairo', fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(title,
+                                              style: TextStyle(fontFamily: 'Cairo', fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                                        ),
+                                        PersonalAccountTypeTag(accounts: accs, account: a),
+                                      ],
+                                    ),
                                     SizedBox(height: 2),
                                     Text(currencyName(a.currency),
                                         style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textSecondary)),
@@ -1064,30 +1080,14 @@ class _SavingsGoalsPageState extends ConsumerState<SavingsGoalsPage> {
         ),
       ),
     );
-    final cur = chosen ?? (accs.length == 1 ? accs.first.currency : null);
-    if (cur == null) return;
-    final exact = accs.where((a) => a.currency == cur).firstOrNull ?? accs.first;
+    final pickedId = chosen ?? (accs.length == 1 ? accs.first.id : null);
+    if (pickedId == null) return;
+    final exact = accs.where((a) => a.id == pickedId).firstOrNull;
+    if (exact == null) return;
     setState(() {
       _bankId = exact.id;
-      _selCurrencyForGoal = cur;
+      _selCurrencyForGoal = exact.currency;
     });
-  }
-
-  String _shortGoalAccountType(String type) {
-    final l10n = AppLocalizations.of(context);
-    switch (type) {
-      case 'savings':
-        return l10n.translate('accountTypeSavings');
-      case 'credit':
-        return l10n.translate('accountTypeCredit');
-      case 'wallet':
-        return l10n.translate('accountTypeWallet');
-      case 'cash':
-        return l10n.translate('accountTypeCash');
-      case 'checking':
-      default:
-        return l10n.translate('accountTypeChecking');
-    }
   }
 
   Widget _emptyState() {

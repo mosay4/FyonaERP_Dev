@@ -5,8 +5,9 @@ import 'package:fyona_flutter/features/personal/data/models/personal_models.dart
 import 'package:fyona_flutter/features/personal/presentation/pages/widgets/home_account_card.dart';
 
 /// The Business home card must keep a currency that exists as BOTH جاري and
-/// توفير as two independent entries (issue #4). Personal behavior (default)
-/// stays collapsed to one row per currency.
+/// توفير as two independent entries (issue #4). Personal (default) now does
+/// the same: «الكريمي» USD جاري + USD توفير are two real accounts and the
+/// home card must show both balances (no collapse by currency).
 void main() {
   List<PersonalBankAccount> twoTypes() => [
         PersonalBankAccount(
@@ -47,10 +48,10 @@ void main() {
     expect(find.text('حساب جاري'), findsOneWidget);
   });
 
-  testWidgets('personal default: same currency collapses to one entry',
+  testWidgets('personal default: same currency جاري + توفير → 2 entries',
       (tester) async {
     await pump(tester, distinct: false);
-    expect(find.text('2 عملات'), findsNothing);
+    expect(find.text('2 عملات'), findsOneWidget);
     expect(find.text('حساب جاري'), findsOneWidget);
   });
 }

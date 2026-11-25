@@ -16,6 +16,7 @@ import '../providers/personal_providers.dart';
 import '../providers/receipt_design_provider.dart';
 import 'package:fyona_flutter/core/responsive/r_api.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import '../widgets/personal_account_choice.dart';
 
 class PersonalTransferPage extends ConsumerStatefulWidget {
   const PersonalTransferPage({super.key});
@@ -146,6 +147,10 @@ class _PersonalTransferPageState extends ConsumerState<PersonalTransferPage> {
                 ],
               ),
             ),
+            if (account != null)
+              PersonalAccountTypeTag(
+                  accounts: ref.read(personalFinanceProvider).bankAccounts,
+                  account: account),
             if (account != null)
               Text(
                 fmtNum(account.balance),
@@ -538,8 +543,15 @@ class _AccountPickerSheetState extends State<_AccountPickerSheet> {
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Text(currencyName(a.currency),
-                                            style: TextStyle(fontFamily: 'Cairo', fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                                          Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(currencyName(a.currency),
+                                                  style: TextStyle(fontFamily: 'Cairo', fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                                              ),
+                                              PersonalAccountTypeTag(accounts: currencies, account: a),
+                                            ],
+                                          ),
                                           const SizedBox(height: 3),
                                           Text('${widget.l10n.translate('balance')}: ${fmtNum(a.balance)}',
                                             style: TextStyle(fontFamily: 'Cairo', fontSize: 12, color: AppColors.textSecondary)),

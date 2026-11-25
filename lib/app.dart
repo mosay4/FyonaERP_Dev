@@ -26,6 +26,7 @@ import 'features/personal/services/recurring_reminder_service.dart';
 import 'core/services/fcm_service.dart';
 import 'features/personal/presentation/providers/merchant_unread_provider.dart';
 import 'features/employees/presentation/widgets/employee_presence_host.dart';
+import 'features/auth/presentation/auth_forced_dark.dart';
 
 class FYONAApp extends ConsumerWidget {
   const FYONAApp({super.key});
@@ -34,6 +35,7 @@ class FYONAApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     final locale = ref.watch(localeProvider);
+    final router = ref.watch(goRouterProvider);
     AppColors.setLightMode(themeMode == ThemeMode.light);
 
     return Listener(
@@ -41,12 +43,19 @@ class FYONAApp extends ConsumerWidget {
       onPointerDown: (_) {
         ref.read(sessionTimeoutProvider.notifier).recordActivity();
       },
-      child: ValueListenableBuilder<int>(
+      // The sign-in flow is always dark: swap only the EFFECTIVE mode while
+      // a login-flow route is on screen; the saved preference is untouched.
+      child: ValueListenableBuilder<bool>(
+        valueListenable: AuthForcedDark.listenable(router),
+        builder: (_, forceDark, _) {
+        final effectiveMode = forceDark ? ThemeMode.dark : themeMode;
+        AppColors.setLightMode(effectiveMode == ThemeMode.light);
+        return ValueListenableBuilder<int>(
         valueListenable: moneyFormatRevision,
         builder: (_, __, ___) => MaterialApp.router(
         title: 'FYONA ERP',
         debugShowCheckedModeBanner: false,
-        themeMode: themeMode,
+        themeMode: effectiveMode,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         locale: locale,
@@ -69,8 +78,10 @@ class FYONAApp extends ConsumerWidget {
             ),
            ))),
         ),
-        routerConfig: ref.watch(goRouterProvider),
-      )),
+        routerConfig: router,
+      ));
+        },
+      ),
     );
   }
 }
@@ -248,6 +259,13 @@ class _AppLockOverlayState extends ConsumerState<_AppLockOverlay>
     // stop after a token rotation, reinstall or long background.
     try {
       ref.read(fcmServiceProvider).syncToken();
+    } catch (_) {}
+    // A plan changed while away (admin / payment on another device): the
+    // profile behind the badge refreshes too, not only the status snapshot.
+    try {
+      if (ref.read(authProvider).isAuthenticated) {
+        unawaited(ref.read(fcmServiceProvider).refreshSubscriptionState());
+      }
     } catch (_) {}
     try {
       ref.invalidate(debtUnreadProvider('personal'));

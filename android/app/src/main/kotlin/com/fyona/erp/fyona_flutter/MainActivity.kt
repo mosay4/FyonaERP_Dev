@@ -59,6 +59,9 @@ import kotlin.system.exitProcess
 internal object ReminderAlarmScheduler {
     const val DEBT_CHANNEL_ID = "debt_alarm_channel_v2"
     const val RECURRING_CHANNEL_ID = "recurring_channel"
+    // Sara smart daily notifications — the SAME channel id/sound Dart
+    // creates at startup (NotificationChannels.sara, sound_1).
+    const val SARA_CHANNEL_ID = "sara_channel"
 
     fun scheduleExact(
         context: Context,
@@ -75,7 +78,11 @@ internal object ReminderAlarmScheduler {
         // this schedule call is the first native code to run (boot re-arm).
         try {
             migrateStaleChannelsOnce(context)
-            if (kind == "recurring") ensureRecurringChannel(context) else ensureDebtChannel(context)
+            when (kind) {
+                "recurring" -> ensureRecurringChannel(context)
+                "sara" -> ensureSaraChannel(context)
+                else -> ensureDebtChannel(context)
+            }
         } catch (_: Exception) {}
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val intent = Intent(context, AlarmReceiver::class.java).apply {
@@ -99,7 +106,18 @@ internal object ReminderAlarmScheduler {
         // previous debt-only logic. WAKE_LOCK permission stays declared;
         // RTC_WAKEUP wakes the device, no explicit wake lock needed.
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (kind == "sara") {
+                // Sara's daily tip is not an alarm clock: no status-bar alarm
+                // icon / "next alarm" on the lock screen. Exact while idle
+                // when permitted, otherwise a Doze-friendly inexact alarm.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
+                    am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, millis, pi)
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, millis, pi)
+                } else {
+                    am.setExact(AlarmManager.RTC_WAKEUP, millis, pi)
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 if (am.canScheduleExactAlarms()) {
                     val clockInfo = AlarmManager.AlarmClockInfo(millis, pi)
                     am.setAlarmClock(clockInfo, pi)
@@ -139,6 +157,38 @@ internal object ReminderAlarmScheduler {
 
     fun soundUri(context: Context): Uri =
         Uri.parse("android.resource://${context.packageName}/raw/sound_2")
+
+    fun saraSoundUri(context: Context): Uri =
+        Uri.parse("android.resource://${context.packageName}/raw/sound_1")
+
+    /**
+     * Sara channel (smart daily notifications): HIGH + sound_1. Normally
+     * created by Dart at startup; ensured natively only when missing so an
+     * alarm can still post when the app was killed. Never reset here.
+     */
+    fun ensureSaraChannel(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return
+        try {
+            if (nm.getNotificationChannel(SARA_CHANNEL_ID) != null) return
+        } catch (_: Exception) {}
+        val audioAttr = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        val channel = NotificationChannel(
+            SARA_CHANNEL_ID,
+            "سارة",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "نصائح وتذكيرات سارة"
+            enableVibration(true)
+            setSound(saraSoundUri(context), audioAttr)
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            setShowBadge(true)
+        }
+        try { nm.createNotificationChannel(channel) } catch (_: Exception) {}
+    }
 
     /**
      * Debt channel — same config as before (sound_2, vibration, DND bypass,
@@ -500,7 +550,11 @@ class MainActivity : FlutterFragmentActivity() {
                     val refId = (args?.get("refId") as? String) ?: ""
                     val requestCode = numberArg(args, "requestCode", 0L).toInt()
                     val route = (args?.get("route") as? String) ?: ""
-                    val safeKind = if (kind == "debt") "debt" else "recurring"
+                    val safeKind = when (kind) {
+                        "debt" -> "debt"
+                        "sara" -> "sara"
+                        else -> "recurring"
+                    }
                     ReminderAlarmScheduler.scheduleExact(this, millis, title, body, safeKind, refId, requestCode, route)
                     result.success(true)
                 }
@@ -1988,7 +2042,11 @@ class MainActivity : FlutterFragmentActivity() {
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val rawKind = (intent.getStringExtra("kind") ?: "debt").lowercase()
-        val kind = if (rawKind == "recurring") "recurring" else "debt"
+        val kind = when (rawKind) {
+            "recurring" -> "recurring"
+            "sara" -> "sara"
+            else -> "debt"
+        }
         val title = intent.getStringExtra("title")
             ?: if (kind == "debt") "تنبيه استحقاق الدين" else "تذكير"
         val body = intent.getStringExtra("body")
@@ -2005,7 +2063,10 @@ class AlarmReceiver : BroadcastReceiver() {
             0
         }.let { rc -> if (rc != 0) rc else (refId.hashCode() and 0x7fffffff) }
 
-        val channelId = if (kind == "recurring") {
+        val channelId = if (kind == "sara") {
+            ReminderAlarmScheduler.ensureSaraChannel(context)
+            ReminderAlarmScheduler.SARA_CHANNEL_ID
+        } else if (kind == "recurring") {
             ReminderAlarmScheduler.migrateStaleChannelsOnce(context)
             ReminderAlarmScheduler.ensureRecurringChannel(context)
             ReminderAlarmScheduler.RECURRING_CHANNEL_ID
@@ -2035,14 +2096,18 @@ class AlarmReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val soundUri = ReminderAlarmScheduler.soundUri(context)
+        val soundUri = if (kind == "sara") {
+            ReminderAlarmScheduler.saraSoundUri(context)
+        } else {
+            ReminderAlarmScheduler.soundUri(context)
+        }
 
-        val notification = NotificationCompat.Builder(context, channelId)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(body)
             .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(if (kind == "recurring") NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_ALARM)
+            .setCategory(if (kind == "recurring" || kind == "sara") NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
@@ -2050,7 +2115,12 @@ class AlarmReceiver : BroadcastReceiver() {
             .setSound(soundUri)
             .setVibrate(longArrayOf(0, 500, 200, 500, 200, 500))
             .setColor(0xFF000000.toInt())
-            .build()
+        if (kind == "sara") {
+            // Sara's digest is two short lines — readable when expanded.
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            builder.setVibrate(longArrayOf(0, 300, 150, 300))
+        }
+        val notification = builder.build()
 
         try {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -2078,6 +2148,37 @@ class BootReceiver : BroadcastReceiver() {
         ) return
         try { rearmDebtStore(context) } catch (_: Exception) {}
         try { rearmRecurringStore(context) } catch (_: Exception) {}
+        try { rearmSaraStore(context) } catch (_: Exception) {}
+    }
+
+    /** Sara smart digests: flutter.sara_smart_reminders_v1 (same entry shape). */
+    private fun rearmSaraStore(context: Context) {
+        val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val raw = prefs.getString("flutter.sara_smart_reminders_v1", null) ?: return
+        if (raw.isEmpty() || raw == "{}") return
+        val json = JSONObject(raw)
+        val now = System.currentTimeMillis()
+        val it = json.keys()
+        while (it.hasNext()) {
+            val key = it.next() as String
+            val obj = json.optJSONObject(key) ?: continue
+            val millis = obj.optLong("millis", 0L)
+            if (millis == 0L || millis < now) continue
+            val requestCode = obj.optLong("requestCode", 0L).toInt()
+            if (requestCode == 0) continue
+            try {
+                ReminderAlarmScheduler.scheduleExact(
+                    context,
+                    millis,
+                    obj.optString("title", "سارة"),
+                    obj.optString("body", ""),
+                    "sara",
+                    obj.optString("refId", key),
+                    requestCode,
+                    obj.optString("route", "")
+                )
+            } catch (_: Exception) {}
+        }
     }
 
     private fun rearmDebtStore(context: Context) {

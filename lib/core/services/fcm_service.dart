@@ -156,6 +156,19 @@ class FcmService {
     } catch (_) {}
   }
 
+  /// Silent data event sent by the backend after an admin plan change.
+  static const String subscriptionChangedEvent = 'subscription_changed';
+
+  /// Pulls the fresh plan everywhere it is shown: status snapshot (profile
+  /// card + badges read `plan_name`), plans/invoices, and the cached profile
+  /// (`subscriptionPlan` → drawer badge offline fallback). Never throws.
+  Future<void> refreshSubscriptionState() async {
+    invalidateSubscriptionProviders();
+    try {
+      await _ref.read(authStateProvider.notifier).refreshProfile();
+    } catch (_) {}
+  }
+
   Future<void> _registerToken(String token) async {
     try {
       final api = _ref.read(apiClientProvider);
@@ -222,6 +235,11 @@ class FcmService {
       final data = message.data;
       if ((data['type']?.toString() ?? '') == 'avatar_updated') {
         await _applyAvatarEvent(data);
+        return;
+      }
+      // Admin changed the plan: recolour badge / plan card now (silent).
+      if ((data['type']?.toString() ?? '') == subscriptionChangedEvent) {
+        await refreshSubscriptionState();
         return;
       }
     } catch (_) {}
@@ -300,6 +318,11 @@ class FcmService {
       // Painted on the tray while foregrounded — the 60s poll must not
       // buzz the same event a second time (see noteBridged).
       NotificationService.noteBridged(actionPayload);
+      // Plan approved / cancelled / renewed: the badge and the plan card
+      // follow immediately instead of on the next poll.
+      if (actionPayload.startsWith('/subscription')) {
+        unawaited(refreshSubscriptionState());
+      }
       // Instant in-app refresh: the center + bell show the event NOW,
       // never waiting for the next 60s poll tick.
       try {

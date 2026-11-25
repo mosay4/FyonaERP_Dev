@@ -15,6 +15,7 @@ import '../../../personal/domain/services/exchange_rate_service.dart';
 import '../../data/models/personal_models.dart';
 import '../providers/personal_providers.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
+import '../widgets/personal_account_choice.dart';
 
 class PersonalRecurringFormPage extends ConsumerStatefulWidget {
   const PersonalRecurringFormPage({super.key});
@@ -730,8 +731,11 @@ class _PersonalRecurringFormPageState extends ConsumerState<PersonalRecurringFor
                         color: selected ? const Color(0xFFD32F2F) : AppColors.textSecondary, size: 22),
                     const SizedBox(width: 12),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(acc.currency, style: TextStyle(fontFamily: 'Cairo', fontSize: 14, fontWeight: FontWeight.w600,
-                          color: selected ? AppColors.textPrimary : AppColors.textSecondary)),
+                      Row(children: [
+                        Flexible(child: Text(acc.currency, style: TextStyle(fontFamily: 'Cairo', fontSize: 14, fontWeight: FontWeight.w600,
+                            color: selected ? AppColors.textPrimary : AppColors.textSecondary))),
+                        PersonalAccountTypeTag(accounts: List<PersonalBankAccount>.from(bankAccounts), account: acc),
+                      ]),
                       Text(AppLocalizations.of(context).translate('recurringBalanceIs', params: {'balance': fmtNum(acc.balance)}), style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textSecondary)),
                     ])),
                   ]),

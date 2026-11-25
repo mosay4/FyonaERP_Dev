@@ -856,6 +856,7 @@ class PersonalFinanceNotifier extends StateNotifier<PersonalFinanceState> {
     if (_guardMaintenance('personal/banks')) return;
     try {
       final service = _ref.read(personalFinanceServiceProvider);
+      final knownIds = {for (final a in state.bankAccounts) a.id};
       await service.addBankAccount(
         bankName: bankName,
         currency: currency,
@@ -866,10 +867,18 @@ class PersonalFinanceNotifier extends StateNotifier<PersonalFinanceState> {
       final accounts = await service.getBankAccounts();
       final localTypes = await _AccountTypesStore.load();
       final patchedAccounts = _AccountTypesStore.apply(accounts, localTypes);
+      // The same bank may already hold this currency (e.g. USD جاري + USD
+      // توفير): identify the NEW row by id, never by bank + currency, so the
+      // chosen type is never stamped onto the existing sibling account.
+      final sameBankCur = [
+        for (final a in patchedAccounts)
+          if (a.bankName == bankName && a.currency == currency) a
+      ];
       PersonalBankAccount? newAcc;
-      for (final a in patchedAccounts.reversed) {
-        if (a.bankName == bankName && a.currency == currency) { newAcc = a; break; }
+      for (final a in sameBankCur.reversed) {
+        if (!knownIds.contains(a.id)) { newAcc = a; break; }
       }
+      if (newAcc == null && sameBankCur.length == 1) newAcc = sameBankCur.first;
       if (newAcc != null) {
         await _AccountTypesStore.save(newAcc.id, accountType);
       }
@@ -1630,20 +1639,32 @@ class CategoryNotifier extends StateNotifier<CategoryState> {
     }
   }
 
-  Future<void> add(SpendingCategory cat) async {
-    try { await _ref.read(personalFinanceServiceProvider).addCategory(cat); await load(); _notifyBackup(); }
-    catch (_) { state = state.copyWith(error: AppLocalizations.t('personalErrAddCategory')); }
+  /// Category writes return null on success, or the user-facing reason
+  /// (duplicate name, category in use...) shown by the screen.
+  Future<String?> _write(Future<void> Function(PersonalFinanceService s) op, String fallbackKey) async {
+    try {
+      await op(_ref.read(personalFinanceServiceProvider));
+      // Saved on the device already: the list refreshes (local first, then
+      // the server's derived names) without the screen waiting on network.
+      unawaited(load());
+      _notifyBackup();
+      return null;
+    } on CategoryException catch (e) {
+      final msg = AppLocalizations.currentLanguage == 'en' ? e.messageEn : e.messageAr;
+      state = state.copyWith(error: msg);
+      return msg;
+    } catch (_) {
+      final msg = AppLocalizations.t(fallbackKey);
+      state = state.copyWith(error: msg);
+      return msg;
+    }
   }
 
-  Future<void> update(SpendingCategory cat) async {
-    try { await _ref.read(personalFinanceServiceProvider).updateCategory(cat); await load(); _notifyBackup(); }
-    catch (_) { state = state.copyWith(error: AppLocalizations.t('personalErrUpdateCategory')); }
-  }
+  Future<String?> add(SpendingCategory cat) => _write((s) => s.addCategory(cat), 'personalErrAddCategory');
 
-  Future<void> delete(String id) async {
-    try { await _ref.read(personalFinanceServiceProvider).deleteCategory(id); await load(); _notifyBackup(); }
-    catch (_) { state = state.copyWith(error: AppLocalizations.t('personalErrDeleteCategory')); }
-  }
+  Future<String?> update(SpendingCategory cat) => _write((s) => s.updateCategory(cat), 'personalErrUpdateCategory');
+
+  Future<String?> delete(String id) => _write((s) => s.deleteCategory(id), 'personalErrDeleteCategory');
 }
 
 final categoryProvider = StateNotifierProvider<CategoryNotifier, CategoryState>((ref) {

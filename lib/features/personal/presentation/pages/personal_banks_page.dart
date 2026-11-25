@@ -31,6 +31,7 @@ import 'package:fyona_flutter/features/auth/presentation/providers/biometric_pro
 import 'package:fyona_flutter/features/auth/presentation/widgets/app_pin_sheet.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_refresh.dart';
+import '../widgets/personal_account_choice.dart';
 
 const _accountTypes = {
   'checking': 'accountTypeChecking',
@@ -695,6 +696,7 @@ class _PersonalBanksPageState extends ConsumerState<PersonalBanksPage> {
                 ? Text('${selected.bankName} - ${selected.currency} (${fmtNum(selected.balance)})', style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), color: AppColors.textPrimary))
                 : Text(label, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 12), color: AppColors.textDisabled)),
           ),
+          if (selected != null) PersonalAccountTypeTag(accounts: accounts, account: selected),
           Icon(Icons.chevron_left_rounded, color: AppColors.textDisabled, size: 20),
         ]),
       ),
@@ -825,8 +827,15 @@ class _TransferAccountPickerSheetState extends State<_TransferAccountPickerSheet
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(currencyName(a.currency),
-                                        style: TextStyle(fontFamily: 'Cairo', fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                                      Row(
+                                        children: [
+                                          Flexible(
+                                            child: Text(currencyName(a.currency),
+                                              style: TextStyle(fontFamily: 'Cairo', fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                                          ),
+                                          PersonalAccountTypeTag(accounts: currencies, account: a),
+                                        ],
+                                      ),
                                       const SizedBox(height: 3),
                                       Text('${widget.l10n.translate('balance')}: ${fmtNum(a.balance)}',
                                         style: TextStyle(fontFamily: 'Cairo', fontSize: 12, color: AppColors.textSecondary)),

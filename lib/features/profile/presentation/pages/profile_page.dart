@@ -71,6 +71,7 @@ import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import 'package:fyona_flutter/features/branches/data/branch_epoch.dart';
 import '../../../employees/presentation/widgets/employee_avatar.dart';
 import '../../../core_business/data/project_settings_api.dart';
+import '../../../personal/presentation/widgets/sara_smart_notifications_tile.dart';
 
 class ProfilePage extends ConsumerStatefulWidget {
   /// true → the Business profile (Business-only tiles; Personal untouched).
@@ -1793,6 +1794,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           _settingsDivider(),
           _buildLanguageTile(),
           _settingsDivider(),
+          // Personal only: Sara's smart daily notifications (+ daily time).
+          if (!widget.business && !_employee) ...[
+            const SaraSmartNotificationsTile(),
+            _settingsDivider(),
+          ],
           if (!_limitedEmployee) ...[
             _settingsTile(
               HugeIcons.strokeRoundedDocumentAttachment,

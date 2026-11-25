@@ -14,6 +14,7 @@ import 'package:fyona_flutter/core/router/shell_keys.dart';
 import 'package:fyona_flutter/core/services/section_scope.dart';
 import 'package:fyona_flutter/features/branches/data/branch_scope.dart';
 import 'package:fyona_flutter/features/branches/data/branch_epoch.dart';
+import 'package:fyona_flutter/features/branches/presentation/widgets/business_branch_chip.dart';
 import 'package:fyona_flutter/features/employees/presentation/providers/employee_providers.dart';
 import 'package:fyona_flutter/features/employees/presentation/widgets/employee_avatar.dart';
 import 'package:fyona_flutter/shared/widgets/two_tone_icon.dart';
@@ -95,12 +96,20 @@ class HomeHeader extends ConsumerWidget {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                AppLocalizations.of(context).translate(
-                    isPersonal ? 'headerSectionPersonal' : 'headerSectionBusiness'),
-                style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 17), fontWeight: FontWeight.w700, color: AppColors.textPrimary, height: 1.3),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      AppLocalizations.of(context).translate(
+                          isPersonal ? 'headerSectionPersonal' : 'headerSectionBusiness'),
+                      style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 17), fontWeight: FontWeight.w700, color: AppColors.textPrimary, height: 1.3),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  // Current branch — only when the merchant has 2+ branches.
+                  if (!isPersonal) const Flexible(child: BusinessBranchChip()),
+                ],
               ),
             ),
             ConnectivityIndicator(online: ref.watch(connectivityServiceProvider).isOnline, size: 18),

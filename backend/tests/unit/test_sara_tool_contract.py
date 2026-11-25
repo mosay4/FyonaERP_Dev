@@ -29,8 +29,8 @@ def _svc_mod():
 
 def test_contract_version_and_states_frozen():
     mod = _contract_mod()
-    assert mod.CONTRACT_VERSION == "1.6.0"
-    assert mod.CONTRACT["contract_version"] == "1.6.0"
+    assert mod.CONTRACT_VERSION == "1.7.0"
+    assert mod.CONTRACT["contract_version"] == "1.7.0"
     # Gateway states must never be renamed/redefined (P0 freeze).
     assert mod.GATEWAY_STATES == [
         "confirmed", "local_pending", "failed",
@@ -68,6 +68,11 @@ def test_pending_set_is_single_sourced_and_stable():
         "add_currency", "delete_currency", "add_exchange_rate", "update_exchange_rate",
         # Round 15: whole-bank delete + recurring skip/postpone (screen parity).
         "delete_bank", "skip_recurring", "postpone_recurring",
+        # Contract 1.7.0: categories, financial tree, merchant links (by name).
+        "add_category", "update_category", "delete_category",
+        "create_financial_tree", "update_financial_tree", "delete_financial_tree",
+        "add_tree_node", "update_tree_node", "delete_tree_node",
+        "accept_merchant_invite", "reject_merchant_invite", "unlink_merchant",
     }
     assert cmod.PENDING_MUTATION_TOOLS == expected
     # And the agent loop consumes the contract set (no second hardcoded list).
