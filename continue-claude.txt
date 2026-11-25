@@ -255,3 +255,6 @@ Round 16: Sara smart Personal notifications (lib/features/personal/services/smar
 
 ## 24. Round 17 (2026-11-25)
 Commit e5dcfe1, backend release business-6193-relay.525902d6 (not built per owner). Network quality monitor (lib/core/services/network_quality_monitor.dart), Personal Sara online-only, Sara notif engine v2 + largeIcon sara_avatar_notif, brand entry view/handoff, fresh_invoice_scroll, biz_currency_items, bank account_type server column (migration 122 + init_db missing-column list). Flaky under -j2: income_provider_race, instant_paint, sara_currency_exchange (pass alone).
+
+## 25. Round 18 (2026-11-25)
+Commit a18fc9e, backend business-6193-relay.194a6734, APK 35,646,282 bytes. RULE: user data never stored on server (memory fyona-local-only-data). Account type via /peer-relay/self-push (delete after delivery), app lock overlay in app.dart, token refresh only expires on 400/401/403. QA DB still has an unused empty personal_bank_accounts.account_type column from round 17 init_db.
