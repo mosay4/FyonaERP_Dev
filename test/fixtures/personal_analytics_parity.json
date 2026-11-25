@@ -1,0 +1,2153 @@
+{
+ "_comment": "Shared Python/Dart parity fixture for Personal Sara analytics. expected = backend build_financial_analytics (sqlite run, normalized to PostgreSQL output). Regenerate: SARA_PARITY_WRITE=1 pytest backend/tests/unit/test_sara_personal_analytics_parity.py",
+ "accounts": [
+  {
+   "id": "a1000000-0000-4000-8000-000000000001",
+   "bank_name": "بنك الراجحي",
+   "currency": "SAR",
+   "balance": "5200.50"
+  },
+  {
+   "id": "a1000000-0000-4000-8000-000000000002",
+   "bank_name": "كاش",
+   "currency": "USD",
+   "balance": "300.00"
+  }
+ ],
+ "transactions": [
+  {
+   "id": "e1000000-0000-4000-8000-000000000099",
+   "tx_type": "expense",
+   "amount": "40.00",
+   "currency": "SAR",
+   "category": "food",
+   "description": "مطعم",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-07-10T10:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000001",
+   "tx_type": "expense",
+   "amount": "40.00",
+   "currency": "SAR",
+   "category": "food",
+   "description": "مطعم",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-09-05T10:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000002",
+   "tx_type": "expense",
+   "amount": "50.00",
+   "currency": "SAR",
+   "category": "food",
+   "description": "مطعم",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-09-20T10:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000003",
+   "tx_type": "expense",
+   "amount": "60.00",
+   "currency": "SAR",
+   "category": "food",
+   "description": "مطعم",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-10-10T10:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000004",
+   "tx_type": "expense",
+   "amount": "10.00",
+   "currency": "SAR",
+   "category": "coffee",
+   "description": "قهوة",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-09-01T07:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000005",
+   "tx_type": "expense",
+   "amount": "10.00",
+   "currency": "SAR",
+   "category": "coffee",
+   "description": "قهوة",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-09-15T07:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000006",
+   "tx_type": "expense",
+   "amount": "15.00",
+   "currency": "SAR",
+   "category": "coffee",
+   "description": "قهوة",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-10-20T07:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000007",
+   "tx_type": "income",
+   "amount": "7500.00",
+   "currency": "SAR",
+   "category": "salary",
+   "description": "راتب",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-10-02T06:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000008",
+   "tx_type": "expense",
+   "amount": "300.00",
+   "currency": "SAR",
+   "category": "ادخار",
+   "description": "هدف السفر",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": "c1000000-0000-4000-8000-000000000001",
+   "goal_amount": "300.00",
+   "date": "2026-10-15T08:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000009",
+   "tx_type": "income",
+   "amount": "8000.00",
+   "currency": "SAR",
+   "category": "salary",
+   "description": "راتب",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-11-01T06:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000010",
+   "tx_type": "expense",
+   "amount": "200.00",
+   "currency": "SAR",
+   "category": "food",
+   "description": "مطعم كبير",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": "b1000000-0000-4000-8000-000000000001",
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-11-03T18:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000011",
+   "tx_type": "expense",
+   "amount": "30.00",
+   "currency": "SAR",
+   "category": "food",
+   "description": "مطعم",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": "b1000000-0000-4000-8000-000000000001",
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-11-04T12:30:15.250000+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000012",
+   "tx_type": "expense",
+   "amount": "70.00",
+   "currency": "SAR",
+   "category": "transport",
+   "description": "تاكسي",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-11-05T09:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000013",
+   "tx_type": "expense",
+   "amount": "25.50",
+   "currency": "USD",
+   "category": "food",
+   "description": "Burger",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000002",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-11-06T13:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000014",
+   "tx_type": "expense",
+   "amount": "36.00",
+   "currency": "SAR",
+   "category": "coffee",
+   "description": "قهوة مختصة",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-11-06T20:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000015",
+   "tx_type": "expense",
+   "amount": "100.00",
+   "currency": "SAR",
+   "category": "تحويل",
+   "description": "تحويل إلى كاش",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-11-07T10:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000016",
+   "tx_type": "income",
+   "amount": "26.67",
+   "currency": "USD",
+   "category": "تحويل",
+   "description": "تحويل من البنك",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000002",
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-11-07T10:00:01+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000017",
+   "tx_type": "expense",
+   "amount": "15.00",
+   "currency": "SAR",
+   "category": "misc",
+   "description": "نقدي",
+   "bank_account_id": null,
+   "budget_id": null,
+   "goal_id": null,
+   "goal_amount": null,
+   "date": "2026-11-08T11:00:00+00:00"
+  },
+  {
+   "id": "e1000000-0000-4000-8000-000000000018",
+   "tx_type": "expense",
+   "amount": "500.00",
+   "currency": "SAR",
+   "category": "ادخار",
+   "description": "هدف السفر",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "budget_id": null,
+   "goal_id": "c1000000-0000-4000-8000-000000000001",
+   "goal_amount": "500.00",
+   "date": "2026-11-09T08:00:00+00:00"
+  }
+ ],
+ "budgets": [
+  {
+   "id": "b1000000-0000-4000-8000-000000000001",
+   "name": "ميزانية نوفمبر",
+   "currency": "SAR",
+   "total_amount": "2000.00",
+   "spent": "230.00",
+   "period_type": "monthly",
+   "categories": [
+    {
+     "id": "b2000000-0000-4000-8000-000000000001",
+     "name": "food",
+     "type": "expense",
+     "allocated_amount": "1000.00",
+     "spent_amount": "230.00",
+     "currency": "SAR"
+    },
+    {
+     "id": "b2000000-0000-4000-8000-000000000002",
+     "name": "سفر",
+     "type": "goal",
+     "allocated_amount": "500.00",
+     "spent_amount": "0.00",
+     "currency": "SAR"
+    }
+   ]
+  }
+ ],
+ "goals": [
+  {
+   "id": "c1000000-0000-4000-8000-000000000001",
+   "name": "سفر",
+   "currency": "SAR",
+   "target_amount": "10000.00",
+   "current_amount": "800.00",
+   "deadline": "2027-06-01",
+   "is_completed": false
+  },
+  {
+   "id": "c1000000-0000-4000-8000-000000000002",
+   "name": "طوارئ",
+   "currency": "USD",
+   "target_amount": "1000.00",
+   "current_amount": "0.00",
+   "deadline": null,
+   "is_completed": false
+  }
+ ],
+ "debts": [
+  {
+   "id": "d1000000-0000-4000-8000-000000000001",
+   "person_name": "أحمد",
+   "debt_type": "payable",
+   "currency": "SAR",
+   "amount": "1000.00",
+   "due_date": "2026-12-15",
+   "is_paid": false,
+   "payments": [
+    {
+     "id": "d2000000-0000-4000-8000-000000000001",
+     "amount": "200.00",
+     "currency": "SAR",
+     "payment_date": "2026-11-02T10:00:00+00:00"
+    },
+    {
+     "id": "d2000000-0000-4000-8000-000000000002",
+     "amount": "150.00",
+     "currency": "SAR",
+     "payment_date": "2026-10-05T10:00:00+00:00"
+    }
+   ]
+  },
+  {
+   "id": "d1000000-0000-4000-8000-000000000002",
+   "person_name": "سارة",
+   "debt_type": "receivable",
+   "currency": "USD",
+   "amount": "50.00",
+   "due_date": null,
+   "is_paid": false,
+   "payments": []
+  }
+ ],
+ "recurring": [
+  {
+   "id": "f1000000-0000-4000-8000-000000000001",
+   "name": "نتفليكس",
+   "currency": "SAR",
+   "amount": "45.00",
+   "tx_type": "expense",
+   "frequency": "monthly",
+   "interval_value": 1,
+   "category": "اشتراكات",
+   "bank_account_id": "a1000000-0000-4000-8000-000000000001",
+   "last_executed_at": "2026-10-05T09:00:00+00:00",
+   "next_run_date": "2026-12-05",
+   "is_active": false
+  },
+  {
+   "id": "f1000000-0000-4000-8000-000000000002",
+   "name": "راتب",
+   "currency": "SAR",
+   "amount": "8000.00",
+   "tx_type": "income",
+   "frequency": "monthly",
+   "interval_value": 1,
+   "category": "salary",
+   "bank_account_id": null,
+   "last_executed_at": null,
+   "next_run_date": "2026-12-01",
+   "is_active": true
+  }
+ ],
+ "cases": [
+  {
+   "name": "this_month_riyadh",
+   "period": "this_month",
+   "tz": "Asia/Riyadh",
+   "now": "2026-11-20T12:00:00+00:00",
+   "expected": {
+    "meta": {
+     "period": "this_month",
+     "period_start": "2026-10-31T21:00:00+00:00",
+     "period_end": "2026-11-30T21:00:00+00:00",
+     "prev_start": "2026-10-01T21:00:00+00:00",
+     "prev_end": "2026-10-31T21:00:00+00:00",
+     "timezone": "Asia/Riyadh"
+    },
+    "facts": {
+     "money_by_currency": [
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "income": "8000.00",
+       "expense": "951.00",
+       "net": "7049.00",
+       "income_count": 1,
+       "expense_count": 7
+      },
+      {
+       "currency_id": "USD",
+       "currency": "USD",
+       "income": "26.67",
+       "expense": "25.50",
+       "net": "1.17",
+       "income_count": 1,
+       "expense_count": 1
+      }
+     ],
+     "transfers": [
+      {
+       "direction": "expense",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "100.00",
+       "count": 1
+      },
+      {
+       "direction": "income",
+       "currency_id": "USD",
+       "currency": "USD",
+       "total": "26.67",
+       "count": 1
+      }
+     ],
+     "top_expense_categories": [
+      {
+       "category": "ادخار",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "500.00",
+       "tx_count": 1
+      },
+      {
+       "category": "food",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "230.00",
+       "tx_count": 2
+      },
+      {
+       "category": "تحويل",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "100.00",
+       "tx_count": 1
+      },
+      {
+       "category": "transport",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "70.00",
+       "tx_count": 1
+      },
+      {
+       "category": "coffee",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "36.00",
+       "tx_count": 1
+      }
+     ],
+     "income_sources": [
+      {
+       "category": "salary",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "8000.00",
+       "tx_count": 1
+      },
+      {
+       "category": "تحويل",
+       "currency_id": "USD",
+       "currency": "USD",
+       "total": "26.67",
+       "tx_count": 1
+      }
+     ],
+     "banks": [
+      {
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "balance": "5200.50",
+       "period_in": {
+        "SAR": {
+         "total": "8000.00",
+         "count": 1
+        }
+       },
+       "period_out": {
+        "SAR": {
+         "total": "936.00",
+         "count": 6
+        }
+       }
+      },
+      {
+       "account_id": "a1000000-0000-4000-8000-000000000002",
+       "account_name": "كاش",
+       "currency_id": "USD",
+       "currency": "USD",
+       "balance": "300.00",
+       "period_in": {
+        "USD": {
+         "total": "26.67",
+         "count": 1
+        }
+       },
+       "period_out": {
+        "USD": {
+         "total": "25.50",
+         "count": 1
+        }
+       }
+      },
+      {
+       "account_id": null,
+       "account_name": null,
+       "unassigned": true,
+       "period_in": {},
+       "period_out": {
+        "SAR": {
+         "total": "15.00",
+         "count": 1
+        }
+       }
+      }
+     ],
+     "budgets": [
+      {
+       "budget_id": "b1000000-0000-4000-8000-000000000001",
+       "name": "ميزانية نوفمبر",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "2000.00",
+       "spent": "230.00",
+       "remaining": "1770.00",
+       "used_pct": "11.5",
+       "used_num": "230.00",
+       "used_den": "2000.00",
+       "period": "monthly",
+       "categories": [
+        {
+         "category_id": "b2000000-0000-4000-8000-000000000001",
+         "name": "food",
+         "type": "expense",
+         "currency_id": "SAR",
+         "currency": "SAR",
+         "allocated": "1000.00",
+         "spent": "230.00",
+         "remaining": "770.00"
+        },
+        {
+         "category_id": "b2000000-0000-4000-8000-000000000002",
+         "name": "سفر",
+         "type": "goal",
+         "currency_id": "SAR",
+         "currency": "SAR",
+         "allocated": "500.00",
+         "spent": "0.00",
+         "remaining": "500.00"
+        }
+       ],
+       "linked_expense_count": 2
+      }
+     ],
+     "goals": [
+      {
+       "goal_id": "c1000000-0000-4000-8000-000000000001",
+       "name": "سفر",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "target": "10000.00",
+       "current": "800.00",
+       "remaining": "9200.00",
+       "progress_pct": "8.0",
+       "progress_num": "800.00",
+       "progress_den": "10000.00",
+       "deadline": "2027-06-01",
+       "is_completed": false,
+       "recent_contributions": [
+        {
+         "tx_id": "e1000000-0000-4000-8000-000000000018",
+         "amount": "500.00",
+         "tx_currency_id": "SAR",
+         "date": "2026-11-09T08:00:00+00:00"
+        },
+        {
+         "tx_id": "e1000000-0000-4000-8000-000000000008",
+         "amount": "300.00",
+         "tx_currency_id": "SAR",
+         "date": "2026-10-15T08:00:00+00:00"
+        }
+       ]
+      },
+      {
+       "goal_id": "c1000000-0000-4000-8000-000000000002",
+       "name": "طوارئ",
+       "currency_id": "USD",
+       "currency": "USD",
+       "target": "1000.00",
+       "current": "0.00",
+       "remaining": "1000.00",
+       "progress_pct": "0.0",
+       "progress_num": "0.00",
+       "progress_den": "1000.00",
+       "deadline": "",
+       "is_completed": false,
+       "recent_contributions": []
+      }
+     ],
+     "debts": [
+      {
+       "debt_id": "d1000000-0000-4000-8000-000000000001",
+       "name": "أحمد",
+       "debt_type": "payable",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "original": "1000.00",
+       "paid": "350.00",
+       "remaining": "650.00",
+       "payment_count": 2,
+       "due_date": "2026-12-15",
+       "is_paid": false,
+       "recent_payments": [
+        {
+         "payment_id": "d2000000-0000-4000-8000-000000000001",
+         "amount": "200.00",
+         "currency_id": "SAR",
+         "date": "2026-11-02T10:00:00+00:00"
+        },
+        {
+         "payment_id": "d2000000-0000-4000-8000-000000000002",
+         "amount": "150.00",
+         "currency_id": "SAR",
+         "date": "2026-10-05T10:00:00+00:00"
+        }
+       ]
+      },
+      {
+       "debt_id": "d1000000-0000-4000-8000-000000000002",
+       "name": "سارة",
+       "debt_type": "receivable",
+       "currency_id": "USD",
+       "currency": "USD",
+       "original": "50.00",
+       "paid": "0",
+       "remaining": "50.00",
+       "payment_count": 0,
+       "due_date": "",
+       "is_paid": false,
+       "recent_payments": []
+      }
+     ],
+     "recurring": [
+      {
+       "recurring_id": "f1000000-0000-4000-8000-000000000002",
+       "name": "راتب",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "amount": "8000.00",
+       "tx_type": "income",
+       "frequency": "monthly",
+       "interval": 1,
+       "category": "salary",
+       "account_id": null,
+       "account_name": null,
+       "last_run": "",
+       "next_run": "2026-12-01",
+       "is_active": true
+      },
+      {
+       "recurring_id": "f1000000-0000-4000-8000-000000000001",
+       "name": "نتفليكس",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "amount": "45.00",
+       "tx_type": "expense",
+       "frequency": "monthly",
+       "interval": 1,
+       "category": "اشتراكات",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "last_run": "2026-10-05 09:00:00+00:00",
+       "next_run": "2026-12-05",
+       "is_active": false
+      }
+     ]
+    },
+    "comparisons": {
+     "per_currency": [
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "metric": "income",
+       "current": "8000.00",
+       "previous": "7500.00",
+       "delta": "500.00",
+       "delta_pct": "6.7",
+       "delta_num": "500.00",
+       "delta_den": "7500.00",
+       "trend": "up"
+      },
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "metric": "expense",
+       "current": "951.00",
+       "previous": "375.00",
+       "delta": "576.00",
+       "delta_pct": "153.6",
+       "delta_num": "576.00",
+       "delta_den": "375.00",
+       "trend": "up"
+      },
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "metric": "net",
+       "current": "7049.00",
+       "previous": "7125.00",
+       "delta": "-76.00",
+       "delta_pct": "-1.1",
+       "delta_num": "-76.00",
+       "delta_den": "7125.00",
+       "trend": "down"
+      },
+      {
+       "currency_id": "USD",
+       "currency": "USD",
+       "metric": "income",
+       "current": "26.67",
+       "previous": "0",
+       "delta": "26.67",
+       "delta_pct": null,
+       "delta_num": "26.67",
+       "delta_den": "0",
+       "trend": "new"
+      },
+      {
+       "currency_id": "USD",
+       "currency": "USD",
+       "metric": "expense",
+       "current": "25.50",
+       "previous": "0",
+       "delta": "25.50",
+       "delta_pct": null,
+       "delta_num": "25.50",
+       "delta_den": "0",
+       "trend": "new"
+      },
+      {
+       "currency_id": "USD",
+       "currency": "USD",
+       "metric": "net",
+       "current": "1.17",
+       "previous": "0",
+       "delta": "1.17",
+       "delta_pct": null,
+       "delta_num": "1.17",
+       "delta_den": "0",
+       "trend": "new"
+      }
+     ],
+     "category_movers": [
+      {
+       "category": "ادخار",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "500.00",
+       "previous": "300.00",
+       "delta": "200.00",
+       "delta_pct": "66.7",
+       "trend": "up"
+      },
+      {
+       "category": "food",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "230.00",
+       "previous": "60.00",
+       "delta": "170.00",
+       "delta_pct": "283.3",
+       "trend": "up"
+      },
+      {
+       "category": "تحويل",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "100.00",
+       "previous": "0",
+       "delta": "100.00",
+       "delta_pct": null,
+       "trend": "new"
+      },
+      {
+       "category": "transport",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "70.00",
+       "previous": "0",
+       "delta": "70.00",
+       "delta_pct": null,
+       "trend": "new"
+      },
+      {
+       "category": "food",
+       "currency_id": "USD",
+       "currency": "USD",
+       "current": "25.50",
+       "previous": "0",
+       "delta": "25.50",
+       "delta_pct": null,
+       "trend": "new"
+      }
+     ]
+    },
+    "detections": {
+     "rule": "expense >= 3x its (category, currency) 90-day mean with >= 3 base transactions",
+     "anomalies": [
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000010",
+       "name": "مطعم كبير",
+       "amount": "200.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "category": "food",
+       "category_mean_90d": "50.00",
+       "base_tx_count": 3,
+       "ratio": "4.0",
+       "rule": "amount >= 3x category mean (90d, n=3)",
+       "date": "2026-11-03T18:00:00+00:00"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000014",
+       "name": "قهوة مختصة",
+       "amount": "36.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "category": "coffee",
+       "category_mean_90d": "11.66666666666666666666666667",
+       "base_tx_count": 3,
+       "ratio": "3.1",
+       "rule": "amount >= 3x category mean (90d, n=3)",
+       "date": "2026-11-06T20:00:00+00:00"
+      }
+     ],
+     "insufficient_history": [
+      {
+       "category": "food",
+       "currency_id": "USD",
+       "base_tx_count": 0
+      },
+      {
+       "category": "misc",
+       "currency_id": "SAR",
+       "base_tx_count": 0
+      },
+      {
+       "category": "transport",
+       "currency_id": "SAR",
+       "base_tx_count": 0
+      },
+      {
+       "category": "ادخار",
+       "currency_id": "SAR",
+       "base_tx_count": 1
+      },
+      {
+       "category": "تحويل",
+       "currency_id": "SAR",
+       "base_tx_count": 0
+      }
+     ]
+    },
+    "details": {
+     "top_expenses": [
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000018",
+       "name": "هدف السفر",
+       "amount": "500.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-09T08:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "ادخار",
+       "notes": "هدف السفر"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000010",
+       "name": "مطعم كبير",
+       "amount": "200.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-03T18:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "food",
+       "notes": "مطعم كبير"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000015",
+       "name": "تحويل إلى كاش",
+       "amount": "100.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-07T10:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "تحويل",
+       "notes": "تحويل إلى كاش"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000012",
+       "name": "تاكسي",
+       "amount": "70.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-05T09:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "transport",
+       "notes": "تاكسي"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000014",
+       "name": "قهوة مختصة",
+       "amount": "36.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-06T20:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "coffee",
+       "notes": "قهوة مختصة"
+      }
+     ],
+     "recent_transactions": [
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000018",
+       "name": "هدف السفر",
+       "amount": "500.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-09T08:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "ادخار",
+       "notes": "هدف السفر"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000017",
+       "name": "نقدي",
+       "amount": "15.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-08T11:00:00+00:00",
+       "account_id": null,
+       "account_name": null,
+       "category": "misc",
+       "notes": "نقدي"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000016",
+       "name": "تحويل من البنك",
+       "amount": "26.67",
+       "currency_id": "USD",
+       "currency": "USD",
+       "tx_type": "income",
+       "date": "2026-11-07T10:00:01+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000002",
+       "account_name": "كاش",
+       "category": "تحويل",
+       "notes": "تحويل من البنك"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000015",
+       "name": "تحويل إلى كاش",
+       "amount": "100.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-07T10:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "تحويل",
+       "notes": "تحويل إلى كاش"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000014",
+       "name": "قهوة مختصة",
+       "amount": "36.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-06T20:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "coffee",
+       "notes": "قهوة مختصة"
+      }
+     ],
+     "frequent_descriptions_90d": [
+      {
+       "name": "مطعم",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "occurrences_90d": 4,
+       "total_90d": "180.00"
+      },
+      {
+       "name": "قهوة",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "occurrences_90d": 3,
+       "total_90d": "35.00"
+      }
+     ]
+    },
+    "missing": [],
+    "conversion": {
+     "status": "not_requested"
+    }
+   }
+  },
+  {
+   "name": "last_month_utc",
+   "period": "last_month",
+   "tz": "UTC",
+   "now": "2026-11-20T12:00:00+00:00",
+   "expected": {
+    "meta": {
+     "period": "last_month",
+     "period_start": "2026-10-01T00:00:00+00:00",
+     "period_end": "2026-11-01T00:00:00+00:00",
+     "prev_start": "2026-08-31T00:00:00+00:00",
+     "prev_end": "2026-10-01T00:00:00+00:00",
+     "timezone": "UTC"
+    },
+    "facts": {
+     "money_by_currency": [
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "income": "7500.00",
+       "expense": "375.00",
+       "net": "7125.00",
+       "income_count": 1,
+       "expense_count": 3
+      }
+     ],
+     "transfers": [],
+     "top_expense_categories": [
+      {
+       "category": "ادخار",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "300.00",
+       "tx_count": 1
+      },
+      {
+       "category": "food",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "60.00",
+       "tx_count": 1
+      },
+      {
+       "category": "coffee",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "15.00",
+       "tx_count": 1
+      }
+     ],
+     "income_sources": [
+      {
+       "category": "salary",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "7500.00",
+       "tx_count": 1
+      }
+     ],
+     "banks": [
+      {
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "balance": "5200.50",
+       "period_in": {
+        "SAR": {
+         "total": "7500.00",
+         "count": 1
+        }
+       },
+       "period_out": {
+        "SAR": {
+         "total": "375.00",
+         "count": 3
+        }
+       }
+      },
+      {
+       "account_id": "a1000000-0000-4000-8000-000000000002",
+       "account_name": "كاش",
+       "currency_id": "USD",
+       "currency": "USD",
+       "balance": "300.00",
+       "period_in": {},
+       "period_out": {}
+      }
+     ],
+     "budgets": [
+      {
+       "budget_id": "b1000000-0000-4000-8000-000000000001",
+       "name": "ميزانية نوفمبر",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "2000.00",
+       "spent": "230.00",
+       "remaining": "1770.00",
+       "used_pct": "11.5",
+       "used_num": "230.00",
+       "used_den": "2000.00",
+       "period": "monthly",
+       "categories": [
+        {
+         "category_id": "b2000000-0000-4000-8000-000000000001",
+         "name": "food",
+         "type": "expense",
+         "currency_id": "SAR",
+         "currency": "SAR",
+         "allocated": "1000.00",
+         "spent": "230.00",
+         "remaining": "770.00"
+        },
+        {
+         "category_id": "b2000000-0000-4000-8000-000000000002",
+         "name": "سفر",
+         "type": "goal",
+         "currency_id": "SAR",
+         "currency": "SAR",
+         "allocated": "500.00",
+         "spent": "0.00",
+         "remaining": "500.00"
+        }
+       ],
+       "linked_expense_count": 0
+      }
+     ],
+     "goals": [
+      {
+       "goal_id": "c1000000-0000-4000-8000-000000000001",
+       "name": "سفر",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "target": "10000.00",
+       "current": "800.00",
+       "remaining": "9200.00",
+       "progress_pct": "8.0",
+       "progress_num": "800.00",
+       "progress_den": "10000.00",
+       "deadline": "2027-06-01",
+       "is_completed": false,
+       "recent_contributions": [
+        {
+         "tx_id": "e1000000-0000-4000-8000-000000000018",
+         "amount": "500.00",
+         "tx_currency_id": "SAR",
+         "date": "2026-11-09T08:00:00+00:00"
+        },
+        {
+         "tx_id": "e1000000-0000-4000-8000-000000000008",
+         "amount": "300.00",
+         "tx_currency_id": "SAR",
+         "date": "2026-10-15T08:00:00+00:00"
+        }
+       ]
+      },
+      {
+       "goal_id": "c1000000-0000-4000-8000-000000000002",
+       "name": "طوارئ",
+       "currency_id": "USD",
+       "currency": "USD",
+       "target": "1000.00",
+       "current": "0.00",
+       "remaining": "1000.00",
+       "progress_pct": "0.0",
+       "progress_num": "0.00",
+       "progress_den": "1000.00",
+       "deadline": "",
+       "is_completed": false,
+       "recent_contributions": []
+      }
+     ],
+     "debts": [
+      {
+       "debt_id": "d1000000-0000-4000-8000-000000000001",
+       "name": "أحمد",
+       "debt_type": "payable",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "original": "1000.00",
+       "paid": "350.00",
+       "remaining": "650.00",
+       "payment_count": 2,
+       "due_date": "2026-12-15",
+       "is_paid": false,
+       "recent_payments": [
+        {
+         "payment_id": "d2000000-0000-4000-8000-000000000001",
+         "amount": "200.00",
+         "currency_id": "SAR",
+         "date": "2026-11-02T10:00:00+00:00"
+        },
+        {
+         "payment_id": "d2000000-0000-4000-8000-000000000002",
+         "amount": "150.00",
+         "currency_id": "SAR",
+         "date": "2026-10-05T10:00:00+00:00"
+        }
+       ]
+      },
+      {
+       "debt_id": "d1000000-0000-4000-8000-000000000002",
+       "name": "سارة",
+       "debt_type": "receivable",
+       "currency_id": "USD",
+       "currency": "USD",
+       "original": "50.00",
+       "paid": "0",
+       "remaining": "50.00",
+       "payment_count": 0,
+       "due_date": "",
+       "is_paid": false,
+       "recent_payments": []
+      }
+     ],
+     "recurring": [
+      {
+       "recurring_id": "f1000000-0000-4000-8000-000000000002",
+       "name": "راتب",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "amount": "8000.00",
+       "tx_type": "income",
+       "frequency": "monthly",
+       "interval": 1,
+       "category": "salary",
+       "account_id": null,
+       "account_name": null,
+       "last_run": "",
+       "next_run": "2026-12-01",
+       "is_active": true
+      },
+      {
+       "recurring_id": "f1000000-0000-4000-8000-000000000001",
+       "name": "نتفليكس",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "amount": "45.00",
+       "tx_type": "expense",
+       "frequency": "monthly",
+       "interval": 1,
+       "category": "اشتراكات",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "last_run": "2026-10-05 09:00:00+00:00",
+       "next_run": "2026-12-05",
+       "is_active": false
+      }
+     ]
+    },
+    "comparisons": {
+     "per_currency": [
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "metric": "income",
+       "current": "7500.00",
+       "previous": "0",
+       "delta": "7500.00",
+       "delta_pct": null,
+       "delta_num": "7500.00",
+       "delta_den": "0",
+       "trend": "new"
+      },
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "metric": "expense",
+       "current": "375.00",
+       "previous": "110.00",
+       "delta": "265.00",
+       "delta_pct": "240.9",
+       "delta_num": "265.00",
+       "delta_den": "110.00",
+       "trend": "up"
+      },
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "metric": "net",
+       "current": "7125.00",
+       "previous": "-110.00",
+       "delta": "7235.00",
+       "delta_pct": "-6577.3",
+       "delta_num": "7235.00",
+       "delta_den": "-110.00",
+       "trend": "up"
+      }
+     ],
+     "category_movers": [
+      {
+       "category": "ادخار",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "300.00",
+       "previous": "0",
+       "delta": "300.00",
+       "delta_pct": null,
+       "trend": "new"
+      },
+      {
+       "category": "food",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "60.00",
+       "previous": "90.00",
+       "delta": "-30.00",
+       "delta_pct": "-33.3",
+       "trend": "down"
+      },
+      {
+       "category": "coffee",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "15.00",
+       "previous": "20.00",
+       "delta": "-5.00",
+       "delta_pct": "-25.0",
+       "trend": "down"
+      }
+     ]
+    },
+    "detections": {
+     "rule": "expense >= 3x its (category, currency) 90-day mean with >= 3 base transactions",
+     "anomalies": [],
+     "insufficient_history": [
+      {
+       "category": "coffee",
+       "currency_id": "SAR",
+       "base_tx_count": 2
+      },
+      {
+       "category": "ادخار",
+       "currency_id": "SAR",
+       "base_tx_count": 0
+      }
+     ]
+    },
+    "details": {
+     "top_expenses": [
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000008",
+       "name": "هدف السفر",
+       "amount": "300.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-10-15T08:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "ادخار",
+       "notes": "هدف السفر"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000003",
+       "name": "مطعم",
+       "amount": "60.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-10-10T10:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "food",
+       "notes": "مطعم"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000006",
+       "name": "قهوة",
+       "amount": "15.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-10-20T07:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "coffee",
+       "notes": "قهوة"
+      }
+     ],
+     "recent_transactions": [
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000006",
+       "name": "قهوة",
+       "amount": "15.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-10-20T07:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "coffee",
+       "notes": "قهوة"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000008",
+       "name": "هدف السفر",
+       "amount": "300.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-10-15T08:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "ادخار",
+       "notes": "هدف السفر"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000003",
+       "name": "مطعم",
+       "amount": "60.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-10-10T10:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "food",
+       "notes": "مطعم"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000007",
+       "name": "راتب",
+       "amount": "7500.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "income",
+       "date": "2026-10-02T06:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "salary",
+       "notes": "راتب"
+      }
+     ],
+     "frequent_descriptions_90d": [
+      {
+       "name": "مطعم",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "occurrences_90d": 4,
+       "total_90d": "190.00"
+      },
+      {
+       "name": "قهوة",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "occurrences_90d": 3,
+       "total_90d": "35.00"
+      }
+     ]
+    },
+    "missing": [
+     {
+      "block": "anomalies",
+      "reason": "no_anomaly_by_rule_or_thin_history"
+     }
+    ],
+    "conversion": {
+     "status": "not_requested"
+    }
+   }
+  },
+  {
+   "name": "this_year_riyadh",
+   "period": "this_year",
+   "tz": "Asia/Riyadh",
+   "now": "2026-11-20T12:00:00+00:00",
+   "expected": {
+    "meta": {
+     "period": "this_year",
+     "period_start": "2025-12-31T21:00:00+00:00",
+     "period_end": "2026-12-31T21:00:00+00:00",
+     "prev_start": "2024-12-31T21:00:00+00:00",
+     "prev_end": "2025-12-31T21:00:00+00:00",
+     "timezone": "Asia/Riyadh"
+    },
+    "facts": {
+     "money_by_currency": [
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "income": "15500.00",
+       "expense": "1476.00",
+       "net": "14024.00",
+       "income_count": 2,
+       "expense_count": 15
+      },
+      {
+       "currency_id": "USD",
+       "currency": "USD",
+       "income": "26.67",
+       "expense": "25.50",
+       "net": "1.17",
+       "income_count": 1,
+       "expense_count": 1
+      }
+     ],
+     "transfers": [
+      {
+       "direction": "expense",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "100.00",
+       "count": 1
+      },
+      {
+       "direction": "income",
+       "currency_id": "USD",
+       "currency": "USD",
+       "total": "26.67",
+       "count": 1
+      }
+     ],
+     "top_expense_categories": [
+      {
+       "category": "ادخار",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "800.00",
+       "tx_count": 2
+      },
+      {
+       "category": "food",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "420.00",
+       "tx_count": 6
+      },
+      {
+       "category": "تحويل",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "100.00",
+       "tx_count": 1
+      },
+      {
+       "category": "coffee",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "71.00",
+       "tx_count": 4
+      },
+      {
+       "category": "transport",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "70.00",
+       "tx_count": 1
+      }
+     ],
+     "income_sources": [
+      {
+       "category": "salary",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "15500.00",
+       "tx_count": 2
+      },
+      {
+       "category": "تحويل",
+       "currency_id": "USD",
+       "currency": "USD",
+       "total": "26.67",
+       "tx_count": 1
+      }
+     ],
+     "banks": [
+      {
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "balance": "5200.50",
+       "period_in": {
+        "SAR": {
+         "total": "15500.00",
+         "count": 2
+        }
+       },
+       "period_out": {
+        "SAR": {
+         "total": "1461.00",
+         "count": 14
+        }
+       }
+      },
+      {
+       "account_id": "a1000000-0000-4000-8000-000000000002",
+       "account_name": "كاش",
+       "currency_id": "USD",
+       "currency": "USD",
+       "balance": "300.00",
+       "period_in": {
+        "USD": {
+         "total": "26.67",
+         "count": 1
+        }
+       },
+       "period_out": {
+        "USD": {
+         "total": "25.50",
+         "count": 1
+        }
+       }
+      },
+      {
+       "account_id": null,
+       "account_name": null,
+       "unassigned": true,
+       "period_in": {},
+       "period_out": {
+        "SAR": {
+         "total": "15.00",
+         "count": 1
+        }
+       }
+      }
+     ],
+     "budgets": [
+      {
+       "budget_id": "b1000000-0000-4000-8000-000000000001",
+       "name": "ميزانية نوفمبر",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "total": "2000.00",
+       "spent": "230.00",
+       "remaining": "1770.00",
+       "used_pct": "11.5",
+       "used_num": "230.00",
+       "used_den": "2000.00",
+       "period": "monthly",
+       "categories": [
+        {
+         "category_id": "b2000000-0000-4000-8000-000000000001",
+         "name": "food",
+         "type": "expense",
+         "currency_id": "SAR",
+         "currency": "SAR",
+         "allocated": "1000.00",
+         "spent": "230.00",
+         "remaining": "770.00"
+        },
+        {
+         "category_id": "b2000000-0000-4000-8000-000000000002",
+         "name": "سفر",
+         "type": "goal",
+         "currency_id": "SAR",
+         "currency": "SAR",
+         "allocated": "500.00",
+         "spent": "0.00",
+         "remaining": "500.00"
+        }
+       ],
+       "linked_expense_count": 2
+      }
+     ],
+     "goals": [
+      {
+       "goal_id": "c1000000-0000-4000-8000-000000000001",
+       "name": "سفر",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "target": "10000.00",
+       "current": "800.00",
+       "remaining": "9200.00",
+       "progress_pct": "8.0",
+       "progress_num": "800.00",
+       "progress_den": "10000.00",
+       "deadline": "2027-06-01",
+       "is_completed": false,
+       "recent_contributions": [
+        {
+         "tx_id": "e1000000-0000-4000-8000-000000000018",
+         "amount": "500.00",
+         "tx_currency_id": "SAR",
+         "date": "2026-11-09T08:00:00+00:00"
+        },
+        {
+         "tx_id": "e1000000-0000-4000-8000-000000000008",
+         "amount": "300.00",
+         "tx_currency_id": "SAR",
+         "date": "2026-10-15T08:00:00+00:00"
+        }
+       ]
+      },
+      {
+       "goal_id": "c1000000-0000-4000-8000-000000000002",
+       "name": "طوارئ",
+       "currency_id": "USD",
+       "currency": "USD",
+       "target": "1000.00",
+       "current": "0.00",
+       "remaining": "1000.00",
+       "progress_pct": "0.0",
+       "progress_num": "0.00",
+       "progress_den": "1000.00",
+       "deadline": "",
+       "is_completed": false,
+       "recent_contributions": []
+      }
+     ],
+     "debts": [
+      {
+       "debt_id": "d1000000-0000-4000-8000-000000000001",
+       "name": "أحمد",
+       "debt_type": "payable",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "original": "1000.00",
+       "paid": "350.00",
+       "remaining": "650.00",
+       "payment_count": 2,
+       "due_date": "2026-12-15",
+       "is_paid": false,
+       "recent_payments": [
+        {
+         "payment_id": "d2000000-0000-4000-8000-000000000001",
+         "amount": "200.00",
+         "currency_id": "SAR",
+         "date": "2026-11-02T10:00:00+00:00"
+        },
+        {
+         "payment_id": "d2000000-0000-4000-8000-000000000002",
+         "amount": "150.00",
+         "currency_id": "SAR",
+         "date": "2026-10-05T10:00:00+00:00"
+        }
+       ]
+      },
+      {
+       "debt_id": "d1000000-0000-4000-8000-000000000002",
+       "name": "سارة",
+       "debt_type": "receivable",
+       "currency_id": "USD",
+       "currency": "USD",
+       "original": "50.00",
+       "paid": "0",
+       "remaining": "50.00",
+       "payment_count": 0,
+       "due_date": "",
+       "is_paid": false,
+       "recent_payments": []
+      }
+     ],
+     "recurring": [
+      {
+       "recurring_id": "f1000000-0000-4000-8000-000000000002",
+       "name": "راتب",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "amount": "8000.00",
+       "tx_type": "income",
+       "frequency": "monthly",
+       "interval": 1,
+       "category": "salary",
+       "account_id": null,
+       "account_name": null,
+       "last_run": "",
+       "next_run": "2026-12-01",
+       "is_active": true
+      },
+      {
+       "recurring_id": "f1000000-0000-4000-8000-000000000001",
+       "name": "نتفليكس",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "amount": "45.00",
+       "tx_type": "expense",
+       "frequency": "monthly",
+       "interval": 1,
+       "category": "اشتراكات",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "last_run": "2026-10-05 09:00:00+00:00",
+       "next_run": "2026-12-05",
+       "is_active": false
+      }
+     ]
+    },
+    "comparisons": {
+     "per_currency": [
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "metric": "income",
+       "current": "15500.00",
+       "previous": "0",
+       "delta": "15500.00",
+       "delta_pct": null,
+       "delta_num": "15500.00",
+       "delta_den": "0",
+       "trend": "new"
+      },
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "metric": "expense",
+       "current": "1476.00",
+       "previous": "0",
+       "delta": "1476.00",
+       "delta_pct": null,
+       "delta_num": "1476.00",
+       "delta_den": "0",
+       "trend": "new"
+      },
+      {
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "metric": "net",
+       "current": "14024.00",
+       "previous": "0",
+       "delta": "14024.00",
+       "delta_pct": null,
+       "delta_num": "14024.00",
+       "delta_den": "0",
+       "trend": "new"
+      },
+      {
+       "currency_id": "USD",
+       "currency": "USD",
+       "metric": "income",
+       "current": "26.67",
+       "previous": "0",
+       "delta": "26.67",
+       "delta_pct": null,
+       "delta_num": "26.67",
+       "delta_den": "0",
+       "trend": "new"
+      },
+      {
+       "currency_id": "USD",
+       "currency": "USD",
+       "metric": "expense",
+       "current": "25.50",
+       "previous": "0",
+       "delta": "25.50",
+       "delta_pct": null,
+       "delta_num": "25.50",
+       "delta_den": "0",
+       "trend": "new"
+      },
+      {
+       "currency_id": "USD",
+       "currency": "USD",
+       "metric": "net",
+       "current": "1.17",
+       "previous": "0",
+       "delta": "1.17",
+       "delta_pct": null,
+       "delta_num": "1.17",
+       "delta_den": "0",
+       "trend": "new"
+      }
+     ],
+     "category_movers": [
+      {
+       "category": "ادخار",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "800.00",
+       "previous": "0",
+       "delta": "800.00",
+       "delta_pct": null,
+       "trend": "new"
+      },
+      {
+       "category": "food",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "420.00",
+       "previous": "0",
+       "delta": "420.00",
+       "delta_pct": null,
+       "trend": "new"
+      },
+      {
+       "category": "تحويل",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "100.00",
+       "previous": "0",
+       "delta": "100.00",
+       "delta_pct": null,
+       "trend": "new"
+      },
+      {
+       "category": "coffee",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "71.00",
+       "previous": "0",
+       "delta": "71.00",
+       "delta_pct": null,
+       "trend": "new"
+      },
+      {
+       "category": "transport",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "current": "70.00",
+       "previous": "0",
+       "delta": "70.00",
+       "delta_pct": null,
+       "trend": "new"
+      }
+     ]
+    },
+    "detections": {
+     "rule": "expense >= 3x its (category, currency) 90-day mean with >= 3 base transactions",
+     "anomalies": [],
+     "insufficient_history": [
+      {
+       "category": "coffee",
+       "currency_id": "SAR",
+       "base_tx_count": 0
+      },
+      {
+       "category": "food",
+       "currency_id": "SAR",
+       "base_tx_count": 0
+      },
+      {
+       "category": "food",
+       "currency_id": "USD",
+       "base_tx_count": 0
+      },
+      {
+       "category": "misc",
+       "currency_id": "SAR",
+       "base_tx_count": 0
+      },
+      {
+       "category": "transport",
+       "currency_id": "SAR",
+       "base_tx_count": 0
+      },
+      {
+       "category": "ادخار",
+       "currency_id": "SAR",
+       "base_tx_count": 0
+      },
+      {
+       "category": "تحويل",
+       "currency_id": "SAR",
+       "base_tx_count": 0
+      }
+     ]
+    },
+    "details": {
+     "top_expenses": [
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000018",
+       "name": "هدف السفر",
+       "amount": "500.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-09T08:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "ادخار",
+       "notes": "هدف السفر"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000008",
+       "name": "هدف السفر",
+       "amount": "300.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-10-15T08:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "ادخار",
+       "notes": "هدف السفر"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000010",
+       "name": "مطعم كبير",
+       "amount": "200.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-03T18:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "food",
+       "notes": "مطعم كبير"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000015",
+       "name": "تحويل إلى كاش",
+       "amount": "100.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-07T10:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "تحويل",
+       "notes": "تحويل إلى كاش"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000012",
+       "name": "تاكسي",
+       "amount": "70.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-05T09:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "transport",
+       "notes": "تاكسي"
+      }
+     ],
+     "recent_transactions": [
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000018",
+       "name": "هدف السفر",
+       "amount": "500.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-09T08:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "ادخار",
+       "notes": "هدف السفر"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000017",
+       "name": "نقدي",
+       "amount": "15.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-08T11:00:00+00:00",
+       "account_id": null,
+       "account_name": null,
+       "category": "misc",
+       "notes": "نقدي"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000016",
+       "name": "تحويل من البنك",
+       "amount": "26.67",
+       "currency_id": "USD",
+       "currency": "USD",
+       "tx_type": "income",
+       "date": "2026-11-07T10:00:01+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000002",
+       "account_name": "كاش",
+       "category": "تحويل",
+       "notes": "تحويل من البنك"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000015",
+       "name": "تحويل إلى كاش",
+       "amount": "100.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-07T10:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "تحويل",
+       "notes": "تحويل إلى كاش"
+      },
+      {
+       "tx_id": "e1000000-0000-4000-8000-000000000014",
+       "name": "قهوة مختصة",
+       "amount": "36.00",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "tx_type": "expense",
+       "date": "2026-11-06T20:00:00+00:00",
+       "account_id": "a1000000-0000-4000-8000-000000000001",
+       "account_name": "بنك الراجحي",
+       "category": "coffee",
+       "notes": "قهوة مختصة"
+      }
+     ],
+     "frequent_descriptions_90d": [
+      {
+       "name": "مطعم",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "occurrences_90d": 5,
+       "total_90d": "220.00"
+      },
+      {
+       "name": "قهوة",
+       "currency_id": "SAR",
+       "currency": "SAR",
+       "occurrences_90d": 3,
+       "total_90d": "35.00"
+      }
+     ]
+    },
+    "missing": [
+     {
+      "block": "anomalies",
+      "reason": "no_anomaly_by_rule_or_thin_history"
+     }
+    ],
+    "conversion": {
+     "status": "not_requested"
+    }
+   }
+  }
+ ]
+}

@@ -11,6 +11,7 @@ import '../../../../core/database/repositories/personal_cache_repository.dart';
 import 'personal_ledger_database.dart';
 import 'personal_ledger_keys.dart';
 import 'personal_ledger_migration.dart';
+import 'personal_relay_store.dart';
 
 export 'personal_ledger_database.dart'
     show PersonalLedgerDatabase, PersonalLedgerKeyStore, PersonalLedgerUnavailable;
@@ -302,12 +303,46 @@ final class PersonalLedgerKv {
     return v != null && v.type == 'bool' ? v.value == 'true' : null;
   }
 
+  static Future<void> _insert(
+    DatabaseExecutor tx,
+    String key,
+    String type,
+    String value,
+  ) => tx.rawInsert(
+    'INSERT OR REPLACE INTO ${PersonalLedgerDatabase.kv} (key, type, value, updated_us) VALUES (?, ?, ?, ?)',
+    [key, type, value, DateTime.now().toUtc().microsecondsSinceEpoch],
+  );
+
+  /// One entry; user data keys (trees) also go to the user's other devices,
+  /// in the same transaction.
   static Future<void> _write(String key, String type, String value) async {
     final db = await _db();
-    await db.rawInsert(
-      'INSERT OR REPLACE INTO ${PersonalLedgerDatabase.kv} (key, type, value, updated_us) VALUES (?, ?, ?, ?)',
-      [key, type, value, DateTime.now().toUtc().microsecondsSinceEpoch],
-    );
+    final cap = PersonalRelayCapture.begin();
+    await db.transaction((tx) async {
+      await _insert(tx, key, type, value);
+      cap?.kv(key, type: type, value: value);
+      await cap?.seal(tx);
+    });
+  }
+
+  /// Several string entries in one transaction. [relay] adds what travels to
+  /// the user's other devices (e.g. an account type choice).
+  static Future<void> setStrings(
+    Map<String, String> values, {
+    void Function(PersonalRelayCapture cap)? relay,
+  }) async {
+    final db = await _db();
+    final cap = PersonalRelayCapture.begin();
+    await db.transaction((tx) async {
+      for (final e in values.entries) {
+        await _insert(tx, e.key, 'string', e.value);
+        cap?.kv(e.key, type: 'string', value: e.value);
+      }
+      if (cap != null) {
+        relay?.call(cap);
+        await cap.seal(tx);
+      }
+    });
   }
 
   static Future<void> setString(String key, String value) =>
@@ -318,10 +353,15 @@ final class PersonalLedgerKv {
 
   static Future<void> remove(String key) async {
     final db = await _db();
-    await db.rawDelete(
-      'DELETE FROM ${PersonalLedgerDatabase.kv} WHERE key = ?',
-      [key],
-    );
+    final cap = PersonalRelayCapture.begin();
+    await db.transaction((tx) async {
+      final n = await tx.rawDelete(
+        'DELETE FROM ${PersonalLedgerDatabase.kv} WHERE key = ?',
+        [key],
+      );
+      if (n > 0) cap?.kv(key);
+      await cap?.seal(tx);
+    });
   }
 
   /// Every entry, typed like SharedPreferences values (backup export).

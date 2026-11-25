@@ -772,60 +772,7 @@ async def build_financial_analytics(
     # ── conversion: explicit target only, real engine or unavailable ────────
     conversion: Dict[str, Any] = {"status": "not_requested"}
     if target_currency:
-        target = target_currency.strip().upper()
-        if fx_get_rate is None:
-            try:
-                from app.domain.services.currency_service import CurrencyService
-                fx_get_rate = CurrencyService.get_instance().get_rate
-            except Exception:
-                fx_get_rate = None
-        if fx_get_rate is None:
-            conversion = {"status": "unavailable",
-                          "reason": "fx_engine_unreachable",
-                          "target_currency": target}
-        else:
-            codes = sorted({m["currency_id"] for m in facts_money})
-            lines, gone = [], []
-            try:
-                for code in codes:
-                    if code == target:
-                        amt = next(m for m in facts_money
-                                   if m["currency_id"] == code)
-                        lines.append({
-                            "from_currency": code, "target_currency": target,
-                            "amount": amt["net"], "converted": amt["net"],
-                            "rate": "1", "rate_source": "identity",
-                            "freshness": "fresh"})
-                        continue
-                    meta = await fx_get_rate(code, target)
-                    rate = (meta or {}).get("rate")
-                    fresh = (meta or {}).get("freshness", "")
-                    if rate and fresh in ("fresh", "stale"):
-                        amt = next(m for m in facts_money
-                                   if m["currency_id"] == code)
-                        conv = (_d(amt["net"]) * _d(rate)).quantize(
-                            Decimal("0.01"))
-                        lines.append({
-                            "from_currency": code, "target_currency": target,
-                            "amount": amt["net"], "converted": str(conv),
-                            "rate": str(_d(rate)),
-                            "rate_source": (meta or {}).get("source", "unknown"),
-                            "freshness": fresh})
-                    else:
-                        gone.append(code)
-            except Exception:
-                conversion = {"status": "unavailable",
-                              "reason": "fx_lookup_failed",
-                              "target_currency": target}
-            else:
-                if gone:
-                    conversion = {"status": "unavailable",
-                                  "reason": "no_valid_rate",
-                                  "target_currency": target,
-                                  "missing_currencies": sorted(gone)}
-                else:
-                    conversion = {"status": "ok", "target_currency": target,
-                                  "lines": lines}
+        conversion = await convert_net_totals(facts_money, target_currency, fx_get_rate)
 
     meta = {
         "period": label,
@@ -848,3 +795,66 @@ async def build_financial_analytics(
         "missing": missing,
         "conversion": conversion,
     }
+
+
+async def convert_net_totals(facts_money, target_currency: str, fx_get_rate=None) -> Dict[str, Any]:
+    """Explicit cross-currency total of the per-currency nets: the real FX
+    engine (fresh/stale rates) or "unavailable" — never guessed. Shared by
+    the server analytics and Personal device-mode analytics."""
+    conversion: Dict[str, Any] = {"status": "not_requested"}
+    target = target_currency.strip().upper()
+    if fx_get_rate is None:
+        try:
+            from app.domain.services.currency_service import CurrencyService
+            fx_get_rate = CurrencyService.get_instance().get_rate
+        except Exception:
+            fx_get_rate = None
+    if fx_get_rate is None:
+        conversion = {"status": "unavailable",
+                      "reason": "fx_engine_unreachable",
+                      "target_currency": target}
+    else:
+        codes = sorted({m["currency_id"] for m in facts_money})
+        lines, gone = [], []
+        try:
+            for code in codes:
+                if code == target:
+                    amt = next(m for m in facts_money
+                               if m["currency_id"] == code)
+                    lines.append({
+                        "from_currency": code, "target_currency": target,
+                        "amount": amt["net"], "converted": amt["net"],
+                        "rate": "1", "rate_source": "identity",
+                        "freshness": "fresh"})
+                    continue
+                meta = await fx_get_rate(code, target)
+                rate = (meta or {}).get("rate")
+                fresh = (meta or {}).get("freshness", "")
+                if rate and fresh in ("fresh", "stale"):
+                    amt = next(m for m in facts_money
+                               if m["currency_id"] == code)
+                    conv = (_d(amt["net"]) * _d(rate)).quantize(
+                        Decimal("0.01"))
+                    lines.append({
+                        "from_currency": code, "target_currency": target,
+                        "amount": amt["net"], "converted": str(conv),
+                        "rate": str(_d(rate)),
+                        "rate_source": (meta or {}).get("source", "unknown"),
+                        "freshness": fresh})
+                else:
+                    gone.append(code)
+        except Exception:
+            conversion = {"status": "unavailable",
+                          "reason": "fx_lookup_failed",
+                          "target_currency": target}
+        else:
+            if gone:
+                conversion = {"status": "unavailable",
+                              "reason": "no_valid_rate",
+                              "target_currency": target,
+                              "missing_currencies": sorted(gone)}
+            else:
+                conversion = {"status": "ok", "target_currency": target,
+                              "lines": lines}
+
+    return conversion

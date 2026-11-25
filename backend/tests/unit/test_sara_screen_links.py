@@ -47,7 +47,8 @@ def test_dialect_words_are_not_misread():
 def test_agent_loop_attaches_the_missing_action():
     import inspect
     from app.domain.services import sara_agent_service as smod
-    src = inspect.getsource(smod.SaraAgentService.process)
+    # The loop lives in _run (process prepares it; device mode resumes it).
+    src = inspect.getsource(smod.SaraAgentService.process) + inspect.getsource(smod.SaraAgentService._run)
     assert "missing_open_action(query, answer, actions)" in src
     assert "SCREEN_BUTTON_RULE_AR" in src
 

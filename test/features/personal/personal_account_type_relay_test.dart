@@ -1,5 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'dart:convert';
+
 import 'package:fyona_flutter/features/personal/data/account_type_store.dart';
+import 'package:fyona_flutter/features/personal/data/ledger/personal_ledger.dart';
+import 'package:fyona_flutter/features/personal/data/ledger/personal_relay_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -15,7 +19,11 @@ void main() {
     await resetPersonalLedger();
   });
 
+  tearDown(() => PersonalRelayConfig.enabled = PersonalRelayConfig.build);
+
   test('a choice is kept on the device and marked for the other devices', () async {
+    // Builds without the device relay: the old peer-relay push.
+    PersonalRelayConfig.enabled = false;
     PersonalAccountTypeStore.now = () => 100;
     await PersonalAccountTypeStore.save('a1', 'savings');
     expect(await PersonalAccountTypeStore.load(), {'a1': 'savings'});
@@ -24,6 +32,24 @@ void main() {
     expect((await PersonalAccountTypeStore.snapshot())['types'], {
       'a1': {'t': 'savings', 'at': 100},
     });
+  });
+
+  test('with the device relay a choice rides it (one op), no peer-relay push', () async {
+    PersonalRelayConfig.enabled = true;
+    PersonalAccountTypeStore.now = () => 100;
+    await PersonalAccountTypeStore.save('a1', 'savings');
+    expect(await PersonalAccountTypeStore.load(), {'a1': 'savings'});
+    expect(await PersonalAccountTypeStore.takePending(), isFalse);
+    final db = await PersonalLedger.active();
+    final ops = await db.rawQuery('SELECT payload FROM personal_relay_outbox');
+    expect(ops, hasLength(1));
+    final changes = (jsonDecode(ops.single['payload'] as String) as Map)['c'] as List;
+    expect(changes, [
+      {'t': '_acct', 'id': 'a1', 'k': 'u', 'data': {'t': 'savings', 'at': 100}},
+    ]);
+    // An older device's request is still answered through the peer relay.
+    await PersonalAccountTypeStore.markPending();
+    expect(await PersonalAccountTypeStore.takePending(), isTrue);
   });
 
   test('a fresh install takes the other device types; newer choice wins', () async {

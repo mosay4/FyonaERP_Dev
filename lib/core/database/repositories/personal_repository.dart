@@ -1,6 +1,7 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart' show Transaction;
 
 import '../../../features/personal/data/ledger/personal_ledger.dart';
+import '../../../features/personal/data/ledger/personal_relay_store.dart';
 
 /// Same calls as [DatabaseHelper], routed to the active user's encrypted
 /// Personal ledger (these tables no longer live in the plain app database).
@@ -47,8 +48,18 @@ final class _Ledger {
   static Future<int> rawDelete(String sql, [List<dynamic>? args]) async =>
       (await _db).rawDelete(sql, args);
 
-  static Future<T> transaction<T>(Future<T> Function(Transaction tx) fn) async =>
-      (await _db).transaction(fn);
+  /// A transaction whose user-data changes also go to the user's other
+  /// devices (one relay operation, same transaction).
+  static Future<T> relayed<T>(
+    Future<T> Function(Transaction tx, PersonalRelayCapture? cap) fn,
+  ) async {
+    final cap = PersonalRelayCapture.begin();
+    return (await _db).transaction((tx) async {
+      final result = await fn(tx, cap);
+      await cap?.seal(tx);
+      return result;
+    });
+  }
 }
 
 class PersonalRepository {
@@ -259,7 +270,13 @@ class PersonalRepository {
 
   // ── Personal Exchange Rates ──
   Future<int> insertExchangeRate(Map<String, dynamic> data) async {
-    return await _Ledger.insert('personal_exchange_rates', data);
+    return _Ledger.relayed((tx, cap) async {
+      final id = await tx.insert('personal_exchange_rates', data);
+      final rate = data['rate'];
+      cap?.rate('${data['from_currency']}', '${data['to_currency']}',
+          rate is num ? rate.toDouble() : 1.0);
+      return id;
+    });
   }
 
   Future<List<Map<String, dynamic>>> getExchangeRates(int userId) async {
@@ -272,11 +289,25 @@ class PersonalRepository {
   }
 
   Future<int> updateExchangeRate(int id, double rate) async {
-    return await _Ledger.update('personal_exchange_rates', {'rate': rate, 'updated_at': DateTime.now().toIso8601String()}, 'id = ?', [id]);
+    return _Ledger.relayed((tx, cap) async {
+      final row = await tx.query('personal_exchange_rates', where: 'id = ?', whereArgs: [id]);
+      final n = await tx.update('personal_exchange_rates', {'rate': rate, 'updated_at': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [id]);
+      if (n > 0 && row.isNotEmpty) {
+        cap?.rate('${row.first['from_currency']}', '${row.first['to_currency']}', rate);
+      }
+      return n;
+    });
   }
 
   Future<int> deleteExchangeRate(int id) async {
-    return await _Ledger.delete('personal_exchange_rates', 'id = ?', [id]);
+    return _Ledger.relayed((tx, cap) async {
+      final row = await tx.query('personal_exchange_rates', where: 'id = ?', whereArgs: [id]);
+      final n = await tx.delete('personal_exchange_rates', where: 'id = ?', whereArgs: [id]);
+      if (n > 0 && row.isNotEmpty) {
+        cap?.rate('${row.first['from_currency']}', '${row.first['to_currency']}', null);
+      }
+      return n;
+    });
   }
 
   // ── Recurring Transactions ──
@@ -338,7 +369,11 @@ class PersonalRepository {
   /// user-scoped. Never touches sync engine tables, other users, backup
   /// files, or auth/session state.
   Future<void> resetAllData(int userId) async {
-    await _Ledger.transaction((tx) async {
+    await _Ledger.relayed((tx, cap) async {
+      // Rates are user data on every device: the reset removes them there too.
+      for (final r in await tx.query('personal_exchange_rates', where: 'user_id = ?', whereArgs: [userId])) {
+        cap?.rate('${r['from_currency']}', '${r['to_currency']}', null);
+      }
       // Children / link tables first (parents still present for subselects).
       await tx.rawDelete(
           'DELETE FROM personal_bank_transactions WHERE account_id IN (SELECT id FROM personal_bank_accounts WHERE user_id = ?)',

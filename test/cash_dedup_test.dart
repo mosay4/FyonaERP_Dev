@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:fyona_flutter/features/personal/data/ledger/personal_relay_config.dart';
 import 'package:fyona_flutter/core/database/repositories/personal_cache_repository.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/features/personal/domain/services/personal_finance_service.dart';
@@ -92,7 +93,11 @@ void main() {
     expect(usd.map((r) => r['account_type']).toSet(), {'savings', 'checking'});
   });
 
-  test('empty mirror + existing server cash creates nothing', () async {
+  test('empty mirror + existing server cash creates nothing (relay off)', () async {
+    // Without the Personal device relay the server is still consulted; with
+    // it the ledger is the truth (see personal_local_reads_test.dart).
+    PersonalRelayConfig.enabled = false;
+    addTearDown(() => PersonalRelayConfig.enabled = PersonalRelayConfig.build);
     final svc = makeService(
         dio: stubServer([
       {'id': 'srv-usd', 'bank_name': 'كاش', 'currency': 'USD', 'balance': 10},

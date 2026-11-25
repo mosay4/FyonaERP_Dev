@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, File, Form, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, File, Form, UploadFile, HTTPException, Request
+from pydantic import BaseModel
 from typing import Optional
 from uuid import UUID
 import json
@@ -13,6 +14,7 @@ from ...domain.models.agent_models import AgentContext
 from ...domain.services.m5_service import HRService
 from ...domain.services.sara_agent_service import SaraAgentService
 from ...domain.services.sara_subscriptions import load_context
+from ...domain.services import sara_personal_device as personal_device
 from ...infrastructure.repositories.sql_alchemy_m5_repository import (
     SQLDepartmentRepo,
     SQLPositionRepo,
@@ -72,6 +74,7 @@ async def sara_metrics(
 @router.post("/ai/query", summary="Natural language query with AI Agent")
 async def query_ai(
     data: AIQuery,
+    request: Request,
     org=Depends(get_current_org_id),
     uid=Depends(get_current_user_id),
     db=Depends(get_db),
@@ -115,6 +118,9 @@ async def query_ai(
         query=data.query,
         ctx=ctx,
         conversation_history=history,
+        # New app builds: the Personal ledger is on the phone; Sara's reads
+        # come back as device_calls (POST /ai/continue).
+        device=personal_device.is_device_request(request),
     )
     result = response.model_dump()
     result["user_query"] = data.query
@@ -135,6 +141,7 @@ async def query_attachment(
     audio_file: Optional[UploadFile] = File(None),
     image_file: Optional[UploadFile] = File(None),
     attachment_file: Optional[UploadFile] = File(None),
+    request: Request = None,
     org=Depends(get_current_org_id),
     uid=Depends(get_current_user_id),
     db=Depends(get_db),
@@ -290,9 +297,57 @@ async def query_attachment(
         query=query,
         ctx=ctx,
         conversation_history=history_list,
+        device=personal_device.is_device_request(request),
     )
     result = response.model_dump()
     result["user_query"] = query
+    return ok(result)
+
+
+class PersonalContinue(BaseModel):
+    state: dict
+    results: list = []
+    language: str = "ar"
+    screen_catalog: list = []
+    current_screen: str = ""
+    user_name: str = ""
+
+
+@router.post("/ai/continue", summary="Personal Sara: resume with the phone's answers")
+async def continue_personal(
+    data: PersonalContinue,
+    request: Request,
+    org=Depends(get_current_org_id),
+    uid=Depends(get_current_user_id),
+    db=Depends(get_db),
+    _=Depends(require_permission("ai", "read")),
+):
+    """The phone answered Sara's Personal reads from its own ledger. The
+    paused conversation comes back signed; nothing was kept on the server."""
+    if not personal_device.is_device_request(request):
+        raise HTTPException(409, detail="Personal Sara device mode header is missing.")
+    if len(json.dumps(data.state, default=str)) > personal_device.STATE_LIMIT or \
+            len(json.dumps(data.results, default=str)) > personal_device.STATE_LIMIT:
+        raise HTTPException(413, detail="المحادثة طويلة جدًا؛ ابدأ طلبًا جديدًا.")
+    try:
+        state = personal_device.unseal(data.state, str(UUID(uid)))
+    except ValueError:
+        raise HTTPException(409, detail="انتهت صلاحية هذه المحادثة؛ أعد إرسال سؤالك.")
+    ctx = AgentContext(
+        user_id=uid,
+        user_name=data.user_name or "",
+        account_type="personal",
+        current_screen=data.current_screen or "",
+        subscription_context=await load_context(db, uid),
+        language=data.language or "ar",
+        screen_catalog=data.screen_catalog or [],
+    )
+    agent = SaraAgentService(db, UUID(org), UUID(uid))
+    response = await agent.process(query="", ctx=ctx, device=True,
+                                   resume={"state": state, "results": data.results})
+    result = response.model_dump()
+    if state.get("phase") == "context":
+        result["user_query"] = state.get("query")
     return ok(result)
 
 

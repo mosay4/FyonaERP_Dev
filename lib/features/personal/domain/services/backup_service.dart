@@ -15,6 +15,7 @@ import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/network/api_client.dart';
 import '../../data/ledger/personal_ledger.dart';
 import '../../data/ledger/personal_ledger_backup.dart';
+import '../../data/ledger/personal_relay_store.dart';
 import 'backup/backup_integrity.dart';
 import 'backup/backup_snapshot.dart';
 import 'backup/server_backup_service.dart';
@@ -1280,6 +1281,8 @@ class BackupService {
       final nowIso = DateTime.now().toIso8601String();
       // Personal tables: one transaction in the encrypted ledger.
       final ledger = await PersonalLedger.forNamespace(mergeNs);
+      // The restored rows also reach the user's other devices (device relay).
+      final relay = PersonalRelayCapture.begin();
       await ledger.transaction((tx) async {
         for (final sweepId in sweepIds) {
           await PersonalLedgerBackup.deleteMirrorRow(
@@ -1287,6 +1290,7 @@ class BackupService {
             userId: mergeNs,
             entityType: 'personal_bank_account',
             remoteId: sweepId,
+            cap: relay,
           );
           sweptStubs++;
         }
@@ -1310,9 +1314,11 @@ class BackupService {
               table,
               Map<String, dynamic>.from(row),
               nowIso: nowIso,
+              relay: relay,
             );
           }
         }
+        await relay?.seal(tx);
       });
       // Non-Personal tables of the archive (app database).
       await DatabaseHelper.transaction((tx) async {
@@ -1767,6 +1773,7 @@ class BackupService {
     String table,
     Map<String, dynamic> rowMap, {
     required String nowIso,
+    PersonalRelayCapture? relay,
   }) async {
     if (table == 'personal_entity_cache') {
       final entityType = rowMap['entity_type']?.toString() ?? '';
@@ -1783,10 +1790,16 @@ class BackupService {
         entityType: entityType,
         remoteId: remoteId,
         dataJson: dataJson,
+        cap: relay,
       );
       return;
     }
     if (table == 'users') return; // login state is never rewritten
+    if (relay != null && table == 'personal_exchange_rates') {
+      final rate = rowMap['rate'];
+      relay.rate('${rowMap['from_currency']}', '${rowMap['to_currency']}',
+          rate is num ? rate.toDouble() : 1.0);
+    }
     final id = rowMap['id'];
     if (id == null) return;
     final values = Map<String, dynamic>.from(rowMap)..remove('id');

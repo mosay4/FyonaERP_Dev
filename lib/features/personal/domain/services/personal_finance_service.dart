@@ -10,6 +10,8 @@ import '../../../../core/network/api_endpoints.dart';
 import '../../../../core/offline/offline_guard.dart';
 import '../../../../core/offline/sync_operation_types.dart';
 import '../../data/ledger/personal_ledger.dart';
+import '../../data/ledger/personal_relay_config.dart';
+import '../../data/ledger/personal_relay_store.dart';
 import '../../../../core/services/currency/currency_engine.dart';
 import '../../data/models/personal_models.dart';
 import '../../data/repositories/personal_finance_api.dart';
@@ -668,9 +670,13 @@ class PersonalFinanceService {
   ///
   /// Uniqueness rule: the same currency is NEVER created twice in the same
   /// account — unless the account TYPE differs (checking vs savings).
-  /// The check consults the local mirror (type-aware) AND the server: a
-  /// fresh/unsynced mirror must not recreate what already exists remotely
-  /// (that blind path is what produced permanent same-name duplicates).
+  /// The check consults the local mirror (type-aware). With the Personal
+  /// device relay on, the ledger is the truth: nothing is asked of the
+  /// server, and while this device still waits for its first copy from the
+  /// user's other devices nothing is created (the copy brings their cash —
+  /// creating it here too is what produced permanent same-name duplicates).
+  /// With the relay off, the server is consulted as before: a fresh/unsynced
+  /// mirror must not recreate what already exists remotely.
   /// When [enabled] is given, only those currencies may be created — this is
   /// what stops a deleted currency from resurrecting on the next trigger.
   /// Fully offline → falls back to the mirror-only check.
@@ -702,14 +708,18 @@ class PersonalFinanceService {
     // blocks creating another checking one (the type-differ exception can
     // only be proven locally).
     final haveRemote = <String>{};
-    try {
-      final raw = await _api.list(ApiEndpoints.personalFinanceAccounts);
-      for (final e in raw.whereType<Map>()) {
-        final m = Map<String, dynamic>.from(e);
-        if (!isCashAccount((m['bank_name'] ?? '').toString())) continue;
-        haveRemote.add(cashBucket((m['currency'] ?? '').toString()));
-      }
-    } catch (_) {}
+    if (PersonalRelayConfig.enabled) {
+      if (await _relayAwaitsSnapshot()) return;
+    } else {
+      try {
+        final raw = await _api.list(ApiEndpoints.personalFinanceAccounts);
+        for (final e in raw.whereType<Map>()) {
+          final m = Map<String, dynamic>.from(e);
+          if (!isCashAccount((m['bank_name'] ?? '').toString())) continue;
+          haveRemote.add(cashBucket((m['currency'] ?? '').toString()));
+        }
+      } catch (_) {}
+    }
     for (final c in currencies) {
       final code = canonicalCashCode(c);
       if (code.isEmpty) continue;
@@ -729,6 +739,17 @@ class PersonalFinanceService {
     // are exactly the phantom-zero cards — remove them everywhere.
     await sweepDuplicateCashAccounts();
     });
+  }
+
+  /// True while this device waits for its first copy (snapshot) from the
+  /// user's other devices through the Personal relay.
+  Future<bool> _relayAwaitsSnapshot() async {
+    try {
+      final store = PersonalRelayStore(await PersonalLedger.forNamespace(_userId));
+      return await store.resync() == 'waiting';
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Merges exact-duplicate cash rows in the local mirror (same currency
@@ -776,7 +797,12 @@ class PersonalFinanceService {
       }
       for (final rows in groups.values) {
         if (rows.length < 2) continue;
-        var survivor = rows.first;
+        // The same survivor on every device of the user (smallest id when
+        // all are zero), so two devices healing the same duplicates never
+        // delete each other's row.
+        final ordered = [...rows]
+          ..sort((a, b) => '${a['id']}'.compareTo('${b['id']}'));
+        var survivor = ordered.first;
         for (final r in rows) {
           if (((r['balance'] as num?)?.toDouble() ?? 0) != 0) {
             survivor = r;
@@ -1659,37 +1685,45 @@ class PersonalFinanceService {
     return <String, dynamic>{'offline': true, 'amount': amount, 'debt_id': id};
   }
 
-  /// Lists a debt's payments. Offline this reconstructs the history from the
-  /// locally mirrored payment transactions (exact amounts/dates are stored on
-  /// the transaction row), so the UI keeps working without Internet.
+  /// Lists a debt's payments, from the device ledger: every payment is one
+  /// debt-linked payment transaction (the server made exactly one per
+  /// payment too). Same fields and order as the server list: credited
+  /// amount (debt currency), newest payment first. Unknown debt → throws,
+  /// like the server's 404.
   Future<List<PersonalDebtPayment>> getDebtPayments(String debtId) async {
-    try {
-      final raw = await _api.list(ApiEndpoints.personalFinanceDebtPayments(debtId));
-      return raw.map((e) {
-        final m = Map<String, dynamic>.from(e as Map);
-        return PersonalDebtPayment.fromServer(m);
-      }).toList();
-    } catch (e) {
-      if (!isConnectivityError(e)) rethrow;
-      final txs = await _cache?.getCollection(_userId, 'personal_transaction') ??
-          const <Map<String, dynamic>>[];
-      return txs
-          .where((t) =>
-              (t['debt_id']?.toString() ?? '') == debtId &&
-              ((t['tx_type'] ?? '') == 'expense' || (t['tx_type'] ?? '') == 'income'))
-          .map((t) => PersonalDebtPayment(
-                id: t['id']?.toString() ?? '',
-                debtId: debtId,
-                amount: (t['debt_amount'] as num?)?.toDouble() ??
-                    (t['amount'] as num?)?.toDouble() ??
-                    0,
-                paymentDate:
-                    DateTime.tryParse(t['date']?.toString() ?? '') ??
-                        DateTime.now(),
-                notes: t['description']?.toString() ?? '',
-              ))
-          .toList();
+    final cache = _cache;
+    if (cache == null) return const [];
+    final debt = await _localRow('personal_debt', debtId);
+    if (debt == null) throw Exception('الدين غير موجود');
+    final txs = await cache.getCollection(_userId, 'personal_transaction');
+    final person = (debt['person_name'] ?? '').toString();
+    final payments = <PersonalDebtPayment>[];
+    for (final t in txs) {
+      if ((t['debt_id']?.toString() ?? '') != debtId) continue;
+      final type = (t['tx_type'] ?? t['type'] ?? '').toString();
+      if (type != 'expense' && type != 'income') continue;
+      final description = (t['description'] ?? '').toString();
+      payments.add(PersonalDebtPayment(
+        id: t['id']?.toString() ?? '',
+        debtId: debtId,
+        amount: (t['debt_amount'] as num?)?.toDouble() ??
+            (t['amount'] as num?)?.toDouble() ??
+            0,
+        currency: (debt['currency'] ?? t['currency'] ?? 'SAR').toString(),
+        paymentMethod: (t['payment_method'] ?? 'cash').toString(),
+        bankAccountId: t['bank_account_id']?.toString(),
+        budgetId: (t['budget_id'] ?? debt['budget_id'])?.toString(),
+        paymentDate: DateTime.tryParse(
+                (t['payment_date'] ?? t['date'])?.toString() ?? '') ??
+            DateTime.now(),
+        // The server's payment notes; its transaction text falls back to
+        // the person's name when there were none.
+        notes: t['notes']?.toString() ??
+            (description == person ? '' : description),
+      ));
     }
+    payments.sort((a, b) => b.paymentDate.compareTo(a.paymentDate));
+    return payments;
   }
 
   // ── Analytics / totals ──
@@ -1997,23 +2031,29 @@ class PersonalFinanceService {
     } catch (_) {
       // Backend قديم بدون endpoint الدفعة أو مشكلة اتصال: نرجع للاتصال الفردي.
     }
-    for (final a in await getBankAccounts()) {
-      try { await _api.remove(ApiEndpoints.personalFinanceAccount(a.id)); } catch (_) {}
+    // What to remove one by one comes from the device ledger.
+    Future<List<String>> ids(String type) async => [
+          for (final r in await _cache?.getCollection(_userId, type) ??
+              const <Map<String, dynamic>>[])
+            if ((r['id']?.toString() ?? '').isNotEmpty) r['id'].toString(),
+        ];
+    for (final id in await ids('personal_bank_account')) {
+      try { await _api.remove(ApiEndpoints.personalFinanceAccount(id)); } catch (_) {}
     }
-    for (final t in await getTransactions()) {
-      try { await _api.remove(ApiEndpoints.personalFinanceTransaction(t.id)); } catch (_) {}
+    for (final id in await ids('personal_transaction')) {
+      try { await _api.remove(ApiEndpoints.personalFinanceTransaction(id)); } catch (_) {}
     }
-    for (final g in await getSavingsGoals()) {
-      try { await _api.remove(ApiEndpoints.personalFinanceGoal(g.id)); } catch (_) {}
+    for (final id in await ids('personal_savings_goal')) {
+      try { await _api.remove(ApiEndpoints.personalFinanceGoal(id)); } catch (_) {}
     }
-    for (final d in await getDebts()) {
-      try { await _api.remove(ApiEndpoints.personalFinanceDebt(d.id)); } catch (_) {}
+    for (final id in await ids('personal_debt')) {
+      try { await _api.remove(ApiEndpoints.personalFinanceDebt(id)); } catch (_) {}
     }
-    for (final b in await getAllBudgets()) {
-      try { await _api.remove(ApiEndpoints.personalFinanceBudget(b.id)); } catch (_) {}
+    for (final id in await ids('personal_budget')) {
+      try { await _api.remove(ApiEndpoints.personalFinanceBudget(id)); } catch (_) {}
     }
-    for (final r in await getRecurring()) {
-      try { await _api.remove(ApiEndpoints.personalFinanceRecurringItem(r.id)); } catch (_) {}
+    for (final id in await ids('personal_recurring_transaction')) {
+      try { await _api.remove(ApiEndpoints.personalFinanceRecurringItem(id)); } catch (_) {}
     }
   }
 
@@ -2066,10 +2106,22 @@ class PersonalFinanceService {
     return null;
   }
 
-  /// Single source of truth: backend-computed aggregation for one budget.
+  /// Aggregation for one budget, computed on the device from the ledger
+  /// with the server's rules ([computeBudgetAggregation]: IDs only, period
+  /// filter, dedup). Unknown budget → throws, like the server's 404.
   Future<BudgetAggregation> getBudgetAggregation(String budgetId) async {
-    final res = await _api.one(ApiEndpoints.personalFinanceBudgetAggregation(budgetId));
-    return BudgetAggregation.fromJson(res);
+    final cache = _cache;
+    if (cache == null) throw StateError('PersonalFinanceService: no ledger');
+    final budget = await _localRow('personal_budget', budgetId);
+    if (budget == null || budget['is_deleted'] == true) {
+      throw Exception('الميزانية غير موجودة');
+    }
+    return BudgetAggregation.fromJson(computeBudgetAggregation(
+      budget: budget,
+      transactions: await cache.getCollection(_userId, 'personal_transaction'),
+      goals: await cache.getCollection(_userId, 'personal_savings_goal'),
+      debts: await cache.getCollection(_userId, 'personal_debt'),
+    ));
   }
 
   /// Local-First CREATE: mirror + outbox first, background replay.
@@ -2496,26 +2548,19 @@ class PersonalFinanceService {
     }
   }
 
+  /// The user's categories: stored ones, then the distinct category names of
+  /// their transactions in name order (what the server derived), all from
+  /// the device ledger.
   Future<List<SpendingCategory>> getCategories() async {
-    List<String> server;
-    try {
-      final raw = await _api.list(ApiEndpoints.personalFinanceCategories);
-      server = raw.map((e) => e.toString()).toList();
-    } catch (e) {
-      // Offline/slow network: derive from the local mirror so category UIs
-      // open instantly instead of awaiting (then failing) a network call.
-      if (!isConnectivityError(e)) rethrow;
-      return getLocalCategories();
-    }
     List<String> local = const [];
     try {
-      local = await _localCategoryNames();
+      local = (await _localCategoryNames()).toSet().toList()..sort();
     } catch (_) {}
     List<SpendingCategory> stored = const [];
     try {
       stored = await _storedCategories();
     } catch (_) {}
-    return _mergeCategories(stored, [...server, ...local]);
+    return _mergeCategories(stored, local);
   }
 
   /// How many local transactions and recurring rules use [cat] (by its
@@ -2585,7 +2630,7 @@ class PersonalFinanceService {
           sortOrder: stored.isEmpty ? 0 : stored.last.sortOrder + 1,
         ),
         id);
-    await cache.upsertItem(_userId, categoryEntityType, id, row);
+    await cache.commitLocalRow(_userId, categoryEntityType, id, row);
     return SpendingCategory.fromJson(row);
   }
 
@@ -2636,7 +2681,7 @@ class PersonalFinanceService {
         ),
         id,
         createdAt: createdAt);
-    await cache.upsertItem(_userId, categoryEntityType, id, row);
+    await cache.commitLocalRow(_userId, categoryEntityType, id, row);
     return SpendingCategory.fromJson(row);
   }
 
@@ -2666,7 +2711,7 @@ class PersonalFinanceService {
           'التصنيف «${existing.nameAr}» مأخوذ من معاملاتك، لذلك لا يمكن حذفه.',
           'Category "${existing.name}" comes from your transactions, so it cannot be deleted.');
     }
-    await cache.removeItem(_userId, categoryEntityType, id);
+    await cache.commitLocalRow(_userId, categoryEntityType, id, null);
   }
 }
 

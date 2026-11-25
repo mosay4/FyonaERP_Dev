@@ -91,6 +91,8 @@ class ApiEndpoints {
   static const String aiQuery = '$basePath/ai/query';
   static const String aiQueryAudio = '$basePath/ai/query-audio';
   static const String aiQueryAttachment = '$basePath/ai/query-attachment';
+  /// Personal Sara device mode: resume with this phone's answers.
+  static const String aiContinue = '$basePath/ai/continue';
   static const String aiSpeak = '$basePath/ai/speak';
 
   // Banking

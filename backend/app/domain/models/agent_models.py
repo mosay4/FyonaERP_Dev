@@ -44,6 +44,10 @@ class AgentResponse(BaseModel):
     confidence: float = 0.9
     needs_clarification: bool = False
     pending_tools: List[dict] = []  # Tools to execute on Flutter side
+    # Personal device mode: reads the phone answers before Sara continues
+    # (POST /ai/continue with the signed [state]).
+    device_calls: List[dict] = []
+    state: Optional[dict] = None
 
 
 class IntentClassification(BaseModel):

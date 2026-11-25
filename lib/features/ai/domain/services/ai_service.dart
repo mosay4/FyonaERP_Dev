@@ -8,6 +8,7 @@ import '../../../../core/offline/offline_sara.dart';
 import '../../../../core/offline/offline_guard.dart';
 import '../../presentation/widgets/sara_offline_notice.dart';
 import '../../../../shared/widgets/sara_action_dispatcher.dart';
+import '../agent/sara_device_loop.dart';
 
 /// App state snapshot sent to Sara for full app awareness.
 class SaraAppState {
@@ -187,13 +188,18 @@ class AiService {
     SaraAppState? appState,
     Ref? ref,
     List<String>? deviceRoutes,
+    SaraDeviceCall? personalDevice,
   }) async {
+    final personal = accountType != 'business' && personalDevice != null;
     try {
       final resp = await apiClient.postSafe<Map<String, dynamic>>(
         accountType == 'business' ? '/business-sara/query' : ApiEndpoints.aiQuery,
         options: Options(
           receiveTimeout: const Duration(minutes: 3),
-          headers: {if (deviceRoutes != null) 'x-fyona-device-sara': '1'},
+          headers: {
+            if (deviceRoutes != null) 'x-fyona-device-sara': '1',
+            if (personal) personalDeviceHeader: personalDeviceValue,
+          },
         ),
         data: {
           if (deviceRoutes != null) 'device_routes': deviceRoutes,
@@ -209,7 +215,10 @@ class AiService {
           if (appState != null) ...appState.toJson(),
         },
       );
-      return AiAgentResponse.fromJson(resp.data ?? {});
+      final first = AiAgentResponse.fromJson(resp.data ?? {});
+      if (!personal) return first;
+      return await runPersonalDevice(first, personalDevice, language: language,
+          screenCatalog: screenCatalog, currentScreen: currentScreen, userName: userName);
     } catch (e) {
       // Offline fallback: answer locally from the same services the UI uses
       // (never fake success — local writers still go through the outbox).
@@ -284,6 +293,72 @@ class AiService {
     return AiAgentResponse.fromJson(resp.data ?? {});
   }
 
+  /// Personal Sara device mode (new builds): the Personal ledger is only on
+  /// this phone, so the server asks it for every Personal read.
+  static const personalDeviceHeader = 'x-fyona-device-sara';
+  static const personalDeviceValue = 'personal';
+
+  /// Resume a Personal conversation with this phone's answers (/ai/continue).
+  Future<AiAgentResponse> continuePersonal({
+    required Map<String, dynamic> state,
+    required List<Map<String, dynamic>> results,
+    String? language,
+    List<Map<String, String>>? screenCatalog,
+    String currentScreen = '',
+    String? userName,
+  }) async {
+    final resp = await apiClient.postSafe<Map<String, dynamic>>(
+      ApiEndpoints.aiContinue,
+      options: Options(
+        receiveTimeout: const Duration(minutes: 3),
+        headers: {personalDeviceHeader: personalDeviceValue},
+      ),
+      data: {
+        'state': state,
+        'results': results,
+        'language': language ?? 'ar',
+        'current_screen': currentScreen,
+        'user_name': userName ?? '',
+        if (screenCatalog != null) 'screen_catalog': screenCatalog,
+      },
+    );
+    return AiAgentResponse.fromJson(resp.data ?? {});
+  }
+
+  /// Answers the server's Personal reads on this phone until Sara replies
+  /// (same loop, deadlines and size limits as Business device mode).
+  Future<AiAgentResponse> runPersonalDevice(
+    AiAgentResponse first,
+    SaraDeviceCall handle, {
+    String? language,
+    List<Map<String, String>>? screenCatalog,
+    String currentScreen = '',
+    String? userName,
+  }) async {
+    if (first.deviceCalls.isEmpty || first.state == null) return first;
+    final arabic = language != 'en';
+    final done = await SaraDeviceLoop.run(first,
+        arabic: arabic,
+        handle: handle,
+        resume: (state, results) => continuePersonal(state: state, results: results,
+            language: language, screenCatalog: screenCatalog, currentScreen: currentScreen, userName: userName),
+        timeoutText: (ar) => ar
+            ? 'تعذرت قراءة هذه البيانات من الجهاز خلال المهلة. لا تكرري نفس الطلب؛ '
+                  'أجيبي بما قرأتِه أو اقترحي سؤالًا أضيق (فترة أو نوع واحد).'
+            : 'This data could not be read on the device in time. Do not repeat the '
+                  'same request; answer with what you have or suggest a narrower question.',
+        unfinishedText: (ar) => ar
+            ? 'استغرق جمع بياناتك من الجهاز وقتًا أطول من المعتاد فلم أكمل الإجابة. '
+                  'جرّب سؤالًا أضيق: فترة محددة أو نوعًا واحدًا (البنوك، المصاريف، الأهداف…).'
+            : 'Reading your data on this device took longer than usual, so I could not finish. '
+                  'Try a narrower question: a period or one kind (banks, expenses, goals…).');
+    final reply = done ?? first;
+    if (reply.userQuery != null || first.userQuery == null) return reply;
+    return AiAgentResponse(text: reply.text, actions: reply.actions, suggestions: reply.suggestions,
+        confidence: reply.confidence, pendingTools: reply.pendingTools, userQuery: first.userQuery,
+        deviceCalls: reply.deviceCalls, state: reply.state);
+  }
+
   Future<AiAgentResponse> askQuestionWithAudio(
     String query, {
     String? audioFile,
@@ -297,7 +372,9 @@ class AiService {
     SaraAppState? appState,
     Ref? ref,
     List<String>? deviceRoutes,
+    SaraDeviceCall? personalDevice,
   }) async {
+    final personal = accountType != 'business' && personalDevice != null;
     final formData = FormData.fromMap({
       'query': query,
       if (deviceRoutes != null) 'device_routes': jsonEncode(deviceRoutes),
@@ -331,11 +408,17 @@ class AiService {
         options: Options(
           receiveTimeout: const Duration(minutes: 15),
           sendTimeout: const Duration(minutes: 3),
-          headers: {if (deviceRoutes != null) 'x-fyona-device-sara': '1'},
+          headers: {
+            if (deviceRoutes != null) 'x-fyona-device-sara': '1',
+            if (personal) personalDeviceHeader: personalDeviceValue,
+          },
         ),
         data: formData,
       );
-      return AiAgentResponse.fromJson(resp.data ?? {});
+      final first = AiAgentResponse.fromJson(resp.data ?? {});
+      if (!personal) return first;
+      return await runPersonalDevice(first, personalDevice, language: language,
+          screenCatalog: screenCatalog, userName: userName);
     } catch (e) {
       // Offline fallback: same local assistant path as askQuestion.
       // Personal Sara is online-only: no local answers from device data.

@@ -1,12 +1,17 @@
 import 'dart:convert';
 
 import 'ledger/personal_ledger.dart';
+import 'ledger/personal_relay_config.dart';
 
 /// Personal bank account types (جاري checking / توفير savings) — kept ONLY on
-/// the device. The user's other devices receive changes through the peer
-/// relay (`/peer-relay/self-push`), which deletes them once delivered; the
-/// server never stores them. Each entry carries the time it was chosen so
-/// devices agree on the latest choice (last writer wins).
+/// the device. Each entry carries the time it was chosen so devices agree on
+/// the latest choice (last writer wins).
+///
+/// With the Personal device relay on ([PersonalRelayConfig]) every choice
+/// rides it as an `_acct` change of the same ledger transaction. Otherwise
+/// (and, for one release, to answer devices on an older version) the whole
+/// map goes through the peer relay (`/peer-relay/self-push`). Either relay
+/// deletes it once delivered; the server never stores it.
 ///
 /// Stored in the signed-in user's encrypted Personal ledger under the same
 /// keys the SharedPreferences entries used (moved over once).
@@ -44,19 +49,29 @@ class PersonalAccountTypeStore {
     }
   }
 
-  static Future<void> _write(Map<String, String> types, Map<String, int> at) async {
-    await PersonalLedgerKv.setString(typesKey, jsonEncode(types));
-    await PersonalLedgerKv.setString(_atKey, jsonEncode(at));
-  }
+  static Future<void> _write(
+    Map<String, String> types,
+    Map<String, int> at, {
+    (String, String?, int)? relay,
+  }) => PersonalLedgerKv.setStrings(
+    {typesKey: jsonEncode(types), _atKey: jsonEncode(at)},
+    relay: relay == null
+        ? null
+        : (cap) => cap.accountType(relay.$1, relay.$2, relay.$3),
+  );
 
   /// The user chose [type] for [accountId] on this device.
   static Future<void> save(String accountId, String type) async {
     final types = _decode(await PersonalLedgerKv.getString(typesKey));
     final at = _decodeAt(await PersonalLedgerKv.getString(_atKey));
+    final when = now();
     types[accountId] = type;
-    at[accountId] = now();
-    await _write(types, at);
-    await PersonalLedgerKv.setBool(_pendingKey, true);
+    at[accountId] = when;
+    await _write(types, at, relay: (accountId, type, when));
+    // The old peer-relay push is only for builds without the device relay.
+    if (!PersonalRelayConfig.enabled) {
+      await PersonalLedgerKv.setBool(_pendingKey, true);
+    }
   }
 
   static Future<void> remove(String accountId) async {
@@ -64,7 +79,7 @@ class PersonalAccountTypeStore {
     final at = _decodeAt(await PersonalLedgerKv.getString(_atKey));
     types.remove(accountId);
     at.remove(accountId);
-    await _write(types, at);
+    await _write(types, at, relay: (accountId, null, now()));
   }
 
   /// What this device sends to the user's other devices.

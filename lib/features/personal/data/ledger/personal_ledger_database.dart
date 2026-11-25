@@ -46,7 +46,7 @@ final class PersonalLedgerUnavailable implements Exception {
 final class PersonalLedgerDatabase {
   PersonalLedgerDatabase._(this.owner, this.storageId, this.path, this._db);
 
-  static const schemaVersion = 1;
+  static const schemaVersion = 2;
   static final _opening = Lock();
   static final _factory = createDatabaseFactoryFfi();
 
@@ -58,6 +58,13 @@ final class PersonalLedgerDatabase {
   static const conflicts = 'personal_migration_conflicts';
   static const syncLog = 'personal_sync_log';
   static const syncState = 'personal_sync_state';
+
+  /// Device relay (Stage 3): operations made here waiting for / sent to the
+  /// relay, per-row order + tombstones, and received items waiting for a key
+  /// or a snapshot.
+  static const relayOutbox = 'personal_relay_outbox';
+  static const relayRows = 'personal_relay_rows';
+  static const relayParked = 'personal_relay_parked';
 
   /// Older per-table Personal tables (same names/columns as the plain DB so
   /// [PersonalRepository] and backup/restore keep their SQL).
@@ -159,8 +166,9 @@ final class PersonalLedgerDatabase {
           onCreate: (db, _) => _create(db),
           onDowngrade: (_, _, _) =>
               throw StateError('Unsupported personal ledger schema'),
-          onUpgrade: (_, _, _) =>
-              throw StateError('Missing personal ledger schema migration'),
+          onUpgrade: (db, from, _) async {
+            if (from < 2) await createRelayTables(db);
+          },
         ),
       );
       return PersonalLedgerDatabase._(owner, storageId, path, db);
@@ -229,7 +237,7 @@ final class PersonalLedgerDatabase {
         noted_us INTEGER NOT NULL
       )
     ''');
-    // Stage 3 (device relay) — created now, not used yet.
+    // Device relay: applied operation ids (idempotency) and relay state.
     await db.execute('''
       CREATE TABLE $syncLog (
         op_id TEXT PRIMARY KEY,
@@ -262,6 +270,44 @@ final class PersonalLedgerDatabase {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_personal_tx_user_date ON personal_transactions(user_id, date)',
     );
+    await createRelayTables(db);
+  }
+
+  /// Schema v2: the device-relay tables (see personal_relay_store.dart).
+  static Future<void> createRelayTables(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $relayOutbox (
+        op_id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        created_us INTEGER NOT NULL,
+        seq INTEGER,
+        pushed_us INTEGER
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS personal_relay_outbox_pending ON $relayOutbox (seq, created_us)',
+    );
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $relayRows (
+        entity_type TEXT NOT NULL,
+        id TEXT NOT NULL,
+        last_seq INTEGER,
+        fields TEXT,
+        pending TEXT,
+        deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+        PRIMARY KEY (entity_type, id)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $relayParked (
+        ord INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id TEXT NOT NULL UNIQUE,
+        seq INTEGER,
+        kind TEXT NOT NULL,
+        author TEXT,
+        payload TEXT NOT NULL
+      )
+    ''');
   }
 
   static void _changed() {

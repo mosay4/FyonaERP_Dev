@@ -1,5 +1,6 @@
 import '../../features/ai/domain/agent/business_device_router.dart';
 import '../../features/ai/domain/agent/business_device_loop.dart';
+import '../../features/ai/domain/agent/personal_device_router.dart';
 import '../providers/platform_controls_provider.dart' show platformControlsProvider;
 import '../../features/core_business/data/local_commerce/local_commerce_api.dart' show localCommerceBridgeProvider;
 import '../../features/core_business/presentation/providers/business_all_branches_provider.dart' show businessAllBranchesProvider;
@@ -1647,6 +1648,14 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
       lastOperation: _lastOperation,
     );
 
+    // Personal Sara reads this phone's ledger: the server asks, the phone
+    // answers (device_calls) — the server never reads Personal data.
+    final personalDevice = widget.accountType == 'business'
+        ? null
+        : PersonalDeviceRouter(capturedFinanceService,
+                executor: _wiredExecutor(capturedFinanceService), language: appLanguage)
+            .handle;
+
     Future<AiAgentResponse> _doQuery() async {
       final boundedHistory = _buildHistoryForLLM(query);
       // Live screen catalog: every route this app build ships, so Sara can
@@ -1662,7 +1671,8 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
           language: appLanguage,
           screenCatalog: catalog,
           history: boundedHistory.isEmpty ? null : boundedHistory,
-          appState: appState);
+          appState: appState,
+          personalDevice: personalDevice);
       }
       return aiService.askQuestion(query,
           userName: user?.fullName,
@@ -1671,7 +1681,8 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
           language: appLanguage,
           screenCatalog: catalog,
           history: boundedHistory.isEmpty ? null : boundedHistory,
-          appState: appState);
+          appState: appState,
+          personalDevice: personalDevice);
     }
 
     _doQuery().then((resp) async {
@@ -2617,6 +2628,7 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
       lastScreen: _lastScreen,
       lastOperation: _lastOperation,
     );
+    final retryService = ref.read(personalFinanceServiceProvider);
     ref.read(aiServiceProvider).askQuestion(query,
         userName: user?.fullName,
         accountType: widget.accountType,
@@ -2624,7 +2636,12 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
         language: l10n.locale.languageCode,
         screenCatalog:
             SaraScreenCatalog.entries(arabic: l10n.locale.languageCode != 'en'),
-        appState: appState).then((resp) async {
+        appState: appState,
+        personalDevice: widget.accountType == 'business'
+            ? null
+            : PersonalDeviceRouter(retryService, executor: _wiredExecutor(retryService),
+                    language: l10n.locale.languageCode)
+                .handle).then((resp) async {
       _ambient.responseReady(visualGeneration);
       if (!mounted) return;
       final elapsed = DateTime.now().difference(_sentAt).inMilliseconds;

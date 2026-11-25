@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'personal_ledger.dart';
+import 'personal_relay_store.dart';
 
 /// Keeps the local backup archive format unchanged while its Personal tables
 /// live in the encrypted ledger: the mirror is exported/imported in the old
@@ -43,14 +46,24 @@ final class PersonalLedgerBackup {
   }
 
   /// Upserts one archive mirror row (by user/type/remote id) inside a ledger
-  /// transaction.
+  /// transaction. With [cap] the restored row also reaches the user's other
+  /// devices.
   static Future<void> upsertMirrorRow(
     Transaction tx, {
     required int userId,
     required String entityType,
     required String remoteId,
     required String dataJson,
+    PersonalRelayCapture? cap,
   }) async {
+    if (cap != null) {
+      try {
+        final row = jsonDecode(dataJson);
+        if (row is Map) {
+          await cap.put(tx, entityType, remoteId, Map<String, dynamic>.from(row));
+        }
+      } catch (_) {}
+    }
     final now = DateTime.now().microsecondsSinceEpoch;
     final updated = await tx.update(
       PersonalLedgerDatabase.rows,
@@ -75,9 +88,13 @@ final class PersonalLedgerBackup {
     required int userId,
     required String entityType,
     required String remoteId,
-  }) => tx.delete(
-    PersonalLedgerDatabase.rows,
-    where: 'user_id = ? AND entity_type = ? AND id = ?',
-    whereArgs: [userId, entityType, remoteId],
-  );
+    PersonalRelayCapture? cap,
+  }) async {
+    await cap?.drop(tx, entityType, remoteId);
+    await tx.delete(
+      PersonalLedgerDatabase.rows,
+      where: 'user_id = ? AND entity_type = ? AND id = ?',
+      whereArgs: [userId, entityType, remoteId],
+    );
+  }
 }

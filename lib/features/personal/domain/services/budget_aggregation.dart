@@ -1,6 +1,8 @@
 // ─────────────────────────────────────────────────────────────
 // BudgetAggregation — the SINGLE source of truth for budget statistics.
-// Reads ONLY the backend aggregation endpoint (IDs + period + dedup).
+// Computed on the device from the Personal ledger by
+// [computeBudgetAggregation], a port of the server's
+// GET /personal/finance/budgets/{id}/aggregation (IDs + period + dedup).
 // No name matching anywhere. Currency conversion is delegated to the
 // existing CurrencyEngine and is never reimplemented here.
 // ─────────────────────────────────────────────────────────────
@@ -195,4 +197,161 @@ class BudgetAggregation {
       operations: ops,
     );
   }
+}
+
+double? _aggNum(Object? v) =>
+    v is num ? v.toDouble() : (v is String ? double.tryParse(v) : null);
+
+/// Python's `round(x, n)` for the values the server returns.
+double _aggRound(double v, int digits) => double.parse(v.toStringAsFixed(digits));
+
+/// Server datetimes without a zone are UTC (Python compares them as UTC).
+DateTime? _aggDate(Object? v) {
+  final s = v?.toString().trim() ?? '';
+  if (s.isEmpty) return null;
+  final zoned = RegExp(r'(Z|[+-]\d\d:?\d\d)$').hasMatch(s);
+  final hasTime = s.contains('T') || s.contains(' ');
+  return DateTime.tryParse(zoned ? s : (hasTime ? '${s}Z' : '${s}T00:00:00Z'));
+}
+
+String? _aggId(Object? v) {
+  final s = v?.toString() ?? '';
+  return s.isEmpty ? null : s;
+}
+
+/// The server's budget aggregation, on device rows (same JSON shape, read by
+/// [BudgetAggregation.fromJson]). Rules (IDs only, no name matching):
+/// - an expense belongs to the budget iff tx.budget_id == budget, or its
+///   goal / debt is linked to the budget;
+/// - category used += amount iff tx.budget_category_id == category;
+/// - only operations inside [start_date, end_date] (open ends unbounded),
+///   newest first, each transaction counted once.
+Map<String, dynamic> computeBudgetAggregation({
+  required Map<String, dynamic> budget,
+  required List<Map<String, dynamic>> transactions,
+  required List<Map<String, dynamic>> goals,
+  required List<Map<String, dynamic>> debts,
+}) {
+  final budgetId = '${budget['id']}';
+  final currency = budget['currency']?.toString() ?? 'SAR';
+  bool live(Map<String, dynamic> r) => r['is_deleted'] != true;
+  final cats = [
+    for (final c in budget['categories'] as List? ?? const [])
+      if (c is Map && _aggId(c['id']) != null) Map<String, dynamic>.from(c),
+  ];
+  final linkedGoals = [
+    for (final g in goals)
+      if (live(g) && _aggId(g['budget_id']) == budgetId) g,
+  ];
+  final linkedDebts = [
+    for (final d in debts)
+      if (live(d) && _aggId(d['budget_id']) == budgetId) d,
+  ];
+  final goalIds = {for (final g in linkedGoals) '${g['id']}'};
+  final debtIds = {for (final d in linkedDebts) '${d['id']}'};
+  final catIds = {for (final c in cats) '${c['id']}'};
+  final start = _aggDate(budget['start_date']);
+  final end = _aggDate(budget['end_date']);
+
+  final txs = [
+    for (final t in transactions)
+      if (live(t) &&
+          (t['tx_type'] ?? t['type'])?.toString() == 'expense' &&
+          (_aggId(t['budget_id']) == budgetId ||
+              goalIds.contains(_aggId(t['goal_id'])) ||
+              debtIds.contains(_aggId(t['debt_id']))))
+        t,
+  ];
+  // ORDER BY date DESC (rows without a date last; they never count).
+  txs.sort((a, b) {
+    final da = _aggDate(a['date']), db = _aggDate(b['date']);
+    if (da == null || db == null) return da == null ? (db == null ? 0 : 1) : -1;
+    return db.compareTo(da);
+  });
+
+  final seen = <String>{};
+  final catUsed = {for (final id in catIds) id: 0.0};
+  final goalUsed = {for (final id in goalIds) id: 0.0};
+  final debtUsed = {for (final id in debtIds) id: 0.0};
+  final operations = <Map<String, dynamic>>[];
+  var totalUsed = 0.0;
+  for (final t in txs) {
+    final tid = '${t['id']}';
+    if (seen.contains(tid)) continue;
+    final d = _aggDate(t['date']);
+    if (d == null) continue;
+    if (start != null && d.isBefore(start)) continue;
+    if (end != null && d.isAfter(end)) continue;
+    seen.add(tid);
+    final amount = _aggNum(t['amount']) ?? 0;
+    totalUsed += amount;
+    operations.add(t);
+    final cat = _aggId(t['budget_category_id']);
+    if (cat != null && catIds.contains(cat)) catUsed[cat] = catUsed[cat]! + amount;
+    final goal = _aggId(t['goal_id']);
+    if (goal != null && goalIds.contains(goal)) goalUsed[goal] = goalUsed[goal]! + amount;
+    final debt = _aggId(t['debt_id']);
+    if (debt != null && debtIds.contains(debt)) debtUsed[debt] = debtUsed[debt]! + amount;
+  }
+  double nonZero(Object? v) {
+    final n = _aggNum(v) ?? 0;
+    return n;
+  }
+
+  final totalAmount = nonZero(budget['total_amount']) != 0
+      ? nonZero(budget['total_amount'])
+      : nonZero(budget['amount']);
+  return {
+    'budget': budget,
+    'total_amount': totalAmount,
+    'total_used': _aggRound(totalUsed, 2),
+    'remaining': _aggRound(totalAmount - totalUsed, 2),
+    'progress': _aggRound(totalAmount > 0 ? totalUsed / totalAmount : 0, 4),
+    'currency': currency,
+    'categories': [
+      for (final c in cats)
+        {
+          'id': '${c['id']}',
+          'budget_id': _aggId(c['budget_id']) ?? budgetId,
+          'name': c['name'],
+          'type': c['type'] ?? 'expense',
+          'allocated_amount': _aggNum(c['allocated_amount']) ?? 0.0,
+          'used': _aggRound(catUsed['${c['id']}'] ?? 0, 2),
+          'remaining': _aggRound(
+            (_aggNum(c['allocated_amount']) ?? 0) - (catUsed['${c['id']}'] ?? 0),
+            2,
+          ),
+          'currency': (c['currency']?.toString().isNotEmpty ?? false)
+              ? c['currency']
+              : currency,
+          'goal_id': _aggId(c['goal_id']),
+          'debt_id': _aggId(c['debt_id']),
+        },
+    ],
+    'goals': [
+      for (final g in linkedGoals)
+        {
+          'id': '${g['id']}',
+          'name': g['name'],
+          'target_amount': _aggNum(g['target_amount']) ?? 0.0,
+          'current_amount': _aggNum(g['current_amount']) ?? 0.0,
+          'contributed_in_period': _aggRound(goalUsed['${g['id']}'] ?? 0, 2),
+          'currency': g['currency'],
+          'budget_id': _aggId(g['budget_id']),
+        },
+    ],
+    'debts': [
+      for (final d in linkedDebts)
+        {
+          'id': '${d['id']}',
+          'person_name': d['person_name'],
+          'amount': _aggNum(d['amount']) ?? 0.0,
+          'paid_in_period': _aggRound(debtUsed['${d['id']}'] ?? 0, 2),
+          'currency': d['currency'],
+          'budget_id': _aggId(d['budget_id']),
+        },
+    ],
+    'operations': operations,
+    'operations_count': operations.length,
+  };
 }

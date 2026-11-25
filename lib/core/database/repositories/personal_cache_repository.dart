@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart' show DatabaseExecutor;
 import '../database_helper.dart';
 import '../../../features/personal/data/ledger/personal_ledger.dart';
+import '../../../features/personal/data/ledger/personal_relay_store.dart';
 import '../../offline/sync_integrity.dart';
 import '../../offline/sync_operation_types.dart';
 import 'sync_outbox.dart';
@@ -48,35 +49,46 @@ class PersonalCacheRepository {
 
   /// Upsert of one mirror row (`INSERT OR REPLACE`: a re-written row moves
   /// to the end of the collection order, exactly like the old mirror).
+  ///
+  /// [cap]: the relay capture of a user-intent commit (server-mirror writes
+  /// pass none — they are never sent to the other devices).
   static Future<void> _put(
     DatabaseExecutor db,
     int userId,
     String entityType,
     String id,
-    Map<String, dynamic> row,
-  ) => db.rawInsert(
-    'INSERT OR REPLACE INTO $_rows '
-    '(user_id, entity_type, id, data_json, updated_us, deleted, version) '
-    'VALUES (?, ?, ?, ?, ?, 0, ?)',
-    [
-      userId,
-      entityType,
-      id,
-      jsonEncode(row),
-      DateTime.now().microsecondsSinceEpoch,
-      _versionOf(row),
-    ],
-  );
+    Map<String, dynamic> row, [
+    PersonalRelayCapture? cap,
+  ]) async {
+    await cap?.put(db, entityType, id, row);
+    await db.rawInsert(
+      'INSERT OR REPLACE INTO $_rows '
+      '(user_id, entity_type, id, data_json, updated_us, deleted, version) '
+      'VALUES (?, ?, ?, ?, ?, 0, ?)',
+      [
+        userId,
+        entityType,
+        id,
+        jsonEncode(row),
+        DateTime.now().microsecondsSinceEpoch,
+        _versionOf(row),
+      ],
+    );
+  }
 
   static Future<void> _drop(
     DatabaseExecutor db,
     int userId,
     String entityType,
-    String id,
-  ) => db.rawDelete(
-    'DELETE FROM $_rows WHERE user_id = ? AND entity_type = ? AND id = ?',
-    [userId, entityType, id],
-  );
+    String id, [
+    PersonalRelayCapture? cap,
+  ]) async {
+    await cap?.drop(db, entityType, id);
+    await db.rawDelete(
+      'DELETE FROM $_rows WHERE user_id = ? AND entity_type = ? AND id = ?',
+      [userId, entityType, id],
+    );
+  }
 
   /// Ledger-side namespace wipe (reset account): mirror rows and outbox
   /// operations of [namespaces] only — never other users' data.
@@ -85,9 +97,20 @@ class PersonalCacheRepository {
     if (ns.isEmpty) return;
     final db = await _ledger(ns.first);
     final marks = List.filled(ns.length, '?').join(',');
+    final cap = PersonalRelayCapture.begin();
     await db.transaction((tx) async {
+      if (cap != null) {
+        // The reset reaches the user's other devices as one operation.
+        for (final r in await tx.rawQuery(
+          'SELECT entity_type, id FROM $_rows WHERE user_id IN ($marks) AND deleted = 0',
+          ns,
+        )) {
+          await cap.drop(tx, r['entity_type'] as String, r['id'] as String);
+        }
+      }
       await tx.rawDelete('DELETE FROM $_rows WHERE user_id IN ($marks)', ns);
       await tx.rawDelete('DELETE FROM $_outbox WHERE user_id IN ($marks)', ns);
+      await cap?.seal(tx);
     });
   }
 
@@ -582,6 +605,26 @@ class PersonalCacheRepository {
         .transaction((tx) => _drop(tx, userId, entityType, remoteId));
   }
 
+  /// A user's own write of one device-only row (e.g. a category): stored,
+  /// and sent to the user's other devices. [row] null deletes it. Unlike
+  /// [upsertItem]/[removeItem] (server mirror), this is a user intent.
+  Future<void> commitLocalRow(
+    int userId,
+    String entityType,
+    String remoteId,
+    Map<String, dynamic>? row,
+  ) async {
+    final cap = PersonalRelayCapture.begin();
+    await (await _ledger(userId)).transaction((tx) async {
+      if (row != null) {
+        await _put(tx, userId, entityType, remoteId, row, cap);
+      } else {
+        await _drop(tx, userId, entityType, remoteId, cap);
+      }
+      await cap?.seal(tx);
+    });
+  }
+
   Future<bool> isOfflineCached(int userId, String entityType) async {
     final rows = await (await _ledger(userId)).rawQuery(
       'SELECT 1 FROM $_rows WHERE user_id = ? AND entity_type = ? AND deleted = 0 LIMIT 1',
@@ -654,6 +697,7 @@ class PersonalCacheRepository {
     final occurred = occurredAt ?? nowUtc;
 
     final db = await _ledger(userId);
+    final cap = PersonalRelayCapture.begin();
     await db.transaction((tx) async {
       if (cancelExistingOps) {
         // A new intent for this entity supersedes queued (not yet
@@ -665,15 +709,15 @@ class PersonalCacheRepository {
         );
       }
       if (primaryRow != null) {
-        await _put(tx, userId, entityType, remoteId, primaryRow);
+        await _put(tx, userId, entityType, remoteId, primaryRow, cap);
       } else {
-        await _drop(tx, userId, entityType, remoteId);
+        await _drop(tx, userId, entityType, remoteId, cap);
       }
       for (final m in related) {
         if (m.row != null) {
-          await _put(tx, userId, m.entityType, m.remoteId, m.row!);
+          await _put(tx, userId, m.entityType, m.remoteId, m.row!, cap);
         } else {
-          await _drop(tx, userId, m.entityType, m.remoteId);
+          await _drop(tx, userId, m.entityType, m.remoteId, cap);
         }
       }
       // ── Additive integrity stamp (shadow phase), computed INSIDE the same
@@ -737,6 +781,8 @@ class PersonalCacheRepository {
           idempotencyKey,
         ],
       );
+      // The same intent, for the user's other devices (same transaction).
+      await cap?.seal(tx);
     });
   }
 
@@ -750,17 +796,21 @@ class PersonalCacheRepository {
     List<MirrorMutation> related = const [],
   }) async {
     final db = await _ledger(userId);
+    // Nothing to replay on the server, but the other devices may already
+    // hold the cancelled row/effects: the reversal travels to them.
+    final cap = PersonalRelayCapture.begin();
     await db.transaction((tx) async {
       for (final m in related) {
         if (m.row != null) {
-          await _put(tx, userId, m.entityType, m.remoteId, m.row!);
+          await _put(tx, userId, m.entityType, m.remoteId, m.row!, cap);
         } else {
-          await _drop(tx, userId, m.entityType, m.remoteId);
+          await _drop(tx, userId, m.entityType, m.remoteId, cap);
         }
       }
       if (deleteEntityType != null && deleteRemoteId != null) {
-        await _drop(tx, userId, deleteEntityType, deleteRemoteId);
+        await _drop(tx, userId, deleteEntityType, deleteRemoteId, cap);
       }
+      await cap?.seal(tx);
     });
   }
 
@@ -787,18 +837,19 @@ class PersonalCacheRepository {
       {'id': inId, 'mirror': inMirrorRow, 'send': inSend, 'type': SyncOperationTypes.transactionCreate},
     ];
     final db = await _ledger(userId);
+    final cap = PersonalRelayCapture.begin();
     await db.transaction((tx) async {
       // Balance mutations first (both accounts)
       for (final m in balanceMutations) {
         if (m.row != null) {
-          await _put(tx, userId, m.entityType, m.remoteId, m.row!);
+          await _put(tx, userId, m.entityType, m.remoteId, m.row!, cap);
         }
       }
       // Both transaction mirrors
       for (final op in ops) {
         final rid = op['id'] as String;
         final mirror = op['mirror'] as Map<String, dynamic>;
-        await _put(tx, userId, 'personal_transaction', rid, {...mirror, 'id': rid});
+        await _put(tx, userId, 'personal_transaction', rid, {...mirror, 'id': rid}, cap);
       }
       // Both outbox rows
       for (final op in ops) {
@@ -851,6 +902,8 @@ class PersonalCacheRepository {
           ],
         );
       }
+      // Both legs and both balances: one operation for the other devices.
+      await cap?.seal(tx);
     });
   }
 }

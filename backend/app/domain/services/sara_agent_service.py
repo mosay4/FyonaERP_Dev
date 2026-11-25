@@ -3057,6 +3057,20 @@ class ToolExecutor:
 #  MAIN AGENT SERVICE
 # ═══════════════════════════════════════════════════════════════
 
+_REFLECT_EN = (
+    "I noticed that some tools failed or returned errors. Before writing your final reply, think: "
+    "can I retry with better parameters? Is there a suitable alternative tool? "
+    "Do I need to ask the user for more information? Review the results then reply with a useful answer "
+    "that explains what happened and suggests a next step — and do not repeat the same mistake."
+)
+_REFLECT_AR = (
+    "لاحظت أن بعض الأدوات فشلت أو أعادت أخطاء. قبل كتابة ردك النهائي، فكر: "
+    "هل يمكنني إعادة المحاولة بمعطيات أفضل؟ هل توجد أداة بديلة مناسبة؟ "
+    "هل أحتاج أن أطلب من المستخدم معلومات إضافية؟ راجع النتائج ثم رد بإجابة مفيدة "
+    "تشرح للمستخدم ما حدث وتقترح خطوة تالية — ولا تعيد نفس الخطأ."
+)
+
+
 class _NoopAnalytics:
     """Used when the analytics store cannot be constructed: the agent must
     never depend on analytics for its core function."""
@@ -3122,9 +3136,14 @@ def _needs_account_error(rows, bank_name, currency, is_en: bool = False) -> dict
     }
 
 
-async def prepare_personal_banking(executor, args):
-    """Resolve exact owned accounts and quote FX without writing money."""
-    accounts = await SaraContextBuilder(executor._db, executor._org_id, executor._user_id)._get_banking_summary()
+async def prepare_personal_banking(executor, args, accounts=None):
+    """Resolve exact owned accounts and quote FX without writing money.
+    [accounts]: the phone's own list (device mode) — never the server's."""
+    if accounts is None:
+        accounts = await SaraContextBuilder(executor._db, executor._org_id, executor._user_id)._get_banking_summary()
+    accounts = [{**a, 'id': str(a.get('id') or ''), 'name': str(a.get('name') or ''),
+                 'currency': str(a.get('currency') or '').strip().upper()}
+                for a in accounts if isinstance(a, dict)]
     def account(id_key, name_key, currency_key):
         wanted = str(args.get(id_key) or '').strip()
         name = str(args.get(name_key) or '').strip().casefold()
@@ -3210,7 +3229,17 @@ class SaraAgentService:
         query: str,
         ctx: AgentContext,
         conversation_history: Optional[list] = None,
+        *,
+        device: bool = False,
+        resume: Optional[dict] = None,
     ) -> AgentResponse:
+        """[device]: the Personal ledger lives on the user's phone (header
+        x-fyona-device-sara: personal). No Personal table is read: context
+        and read tools become `device_calls`, and the conversation resumes
+        with [resume] = {state (verified), results} from POST /ai/continue.
+        Nothing about the user's money is kept on the server between rounds
+        (no MEMORY_STORE turns/facts, no question text in analytics)."""
+        from app.domain.services import sara_personal_device as personal_device
         try:
             _started = time.perf_counter()
             user_key = f'{self._user_key()}:personal'
@@ -3218,20 +3247,47 @@ class SaraAgentService:
             from app.domain.services.sara_subscriptions import load_context, subscription_reply, cross_section_reply, policy
             subscription_context = ctx.subscription_context or await load_context(self._db, self._user_id)
             language = 'en' if is_en else 'ar'
-            guidance = (subscription_reply(query, subscription_context, language) or
-                        cross_section_reply(query, subscription_context, 'personal', language))
-            if guidance:
-                return AgentResponse(text=guidance['text'], actions=[AgentAction(**a) for a in guidance['actions']], confidence=1)
-            memory = MEMORY_STORE.get(user_key)
-            self._analytics.record_question(question=query)
+            state = (resume or {}).get('state') or {}
+            results = [r for r in (resume or {}).get('results') or [] if isinstance(r, dict)]
+            if state.get('phase') == 'loop':
+                return await self._run(None, ctx, None, device=True, resume_state=state,
+                                       results=results, subscription_context=subscription_context)
+            if state.get('phase') == 'context':
+                query = str(state.get('query') or '')
+                conversation_history = list(state.get('history') or [])
+            else:
+                guidance = (subscription_reply(query, subscription_context, language) or
+                            cross_section_reply(query, subscription_context, 'personal', language))
+                if guidance:
+                    return AgentResponse(text=guidance['text'], actions=[AgentAction(**a) for a in guidance['actions']], confidence=1)
+                # Device mode: the question may carry the user's figures —
+                # analytics keeps only that a question was asked.
+                self._analytics.record_question(question='' if device else query)
+            # Device mode never reads or writes the shared in-process memory.
+            memory = (AgentMemoryStore().get(user_key) if device else MEMORY_STORE.get(user_key))
 
             # 1. Classify intent (for context building; tools stay dynamic)
             intent = classify_intent(query)
             intent_str = intent.category
 
             # 2. Build minimal context based on intent
-            context_builder = SaraContextBuilder(self._db, self._org_id, self._user_id)
-            data = await context_builder.build(intent)
+            if device and state.get('phase') == 'context':
+                data = personal_device.context_from_results(results)
+            elif device:
+                from app.domain.services.sara_analytics import load_user_timezone_name
+                tz_name = await load_user_timezone_name(self._db, self._user_id)
+                calls = personal_device.context_calls(intent_str, intent.period, tz_name)
+                if calls:
+                    history = [{'role': h.get('role'), 'content': str(h.get('content', ''))}
+                               for h in (conversation_history or [])[-10:]
+                               if isinstance(h, dict) and h.get('role') in ('user', 'assistant')]
+                    return AgentResponse(text='', confidence=0.9, device_calls=calls,
+                        state=personal_device.seal({'phase': 'context', 'query': query,
+                                                    'history': history}, self._user_key()))
+                data = {}
+            else:
+                context_builder = SaraContextBuilder(self._db, self._org_id, self._user_id)
+                data = await context_builder.build(intent)
 
             # 3. Always search knowledge base (help + feature guidance)
             results = search_knowledge(query, account_type=ctx.account_type)
@@ -3244,7 +3300,7 @@ class SaraAgentService:
             relationships = format_relationships_for_prompt(feature) if feature else None
 
             # 3c. Persist current screen into memory (app awareness)
-            if ctx.current_screen:
+            if ctx.current_screen and not device:
                 MEMORY_STORE.set_state(user_key, last_screen=ctx.current_screen)
 
             # 4. Build dynamic prompt (with memory + relationships + app state)
@@ -3283,7 +3339,24 @@ class SaraAgentService:
                 if isinstance(msg, dict) and msg.get("role") in ("user", "assistant"):
                     messages.append({"role": msg["role"], "content": msg.get("content", "")})
             messages.append({"role": "user", "content": query})
-            MEMORY_STORE.append_turn(user_key, "user", query)
+            if not device:
+                MEMORY_STORE.append_turn(user_key, "user", query)
+            return await self._run(messages, ctx, query, device=device, intent_str=intent_str,
+                                   subscription_context=subscription_context)
+        except Exception as e:
+            return self._failure(e, is_en, _started)
+
+    async def _run(self, messages, ctx: AgentContext, query, *, device: bool,
+                   intent_str: str = 'general', resume_state: Optional[dict] = None,
+                   results: Optional[list] = None, subscription_context=None) -> AgentResponse:
+        """The agent loop. In device mode it pauses (device_calls + signed
+        state) whenever the phone must answer a read, and resumes here."""
+        from app.domain.services import sara_personal_device as personal_device
+        from app.domain.services.sara_presentation import present
+        try:
+            _started = time.perf_counter()
+            user_key = f'{self._user_key()}:personal'
+            is_en = (ctx.language or "ar").lower() in ("en", "english")
 
             # 6. AI setup — central router (DeepSeek-first, adaptive
             # effort by question difficulty; legacy OpenAI fallback).
@@ -3308,9 +3381,59 @@ class SaraAgentService:
             clarification_requested = False
             rounds_used = 0
             tool_calls_made = 0
+            first_round = 0
+            tz_name = None
+            if device:
+                from app.domain.services.sara_analytics import load_user_timezone_name
+                tz_name = await load_user_timezone_name(self._db, self._user_id)
+            if resume_state is not None:
+                # The phone answered this round's reads: put each answer
+                # where the tool reply belongs, then continue the loop.
+                st = resume_state
+                messages = [m for m in st.get('messages') or [] if isinstance(m, dict)]
+                query = str(st.get('query') or '')
+                intent_str = str(st.get('intent') or 'general')
+                actions = [AgentAction(**a) for a in st.get('actions') or [] if isinstance(a, dict)]
+                suggestions = list(st.get('suggestions') or [])
+                pending_tools = list(st.get('pending_tools') or [])
+                answer = str(st.get('answer') or '')
+                tool_failures = int(st.get('tool_failures') or 0)
+                clarification_requested = bool(st.get('clarification_requested'))
+                tool_calls_made = int(st.get('tool_calls_made') or 0)
+                first_round = rounds_used = max(0, min(int(st.get('round') or 0), self.MAX_ROUNDS))
+                answered = {str(r.get('id')): r.get('result') for r in results or []}
+                prepare = st.get('prepare') or {}
+                convert = st.get('convert') or {}
+                for call_id in st.get('calls') or []:
+                    result = answered.get(str(call_id))
+                    if result is None:
+                        result = {'success': False, 'error': ('The device did not answer this read.' if is_en
+                                                              else 'لم يُجب الجهاز على هذه القراءة.')}
+                    if str(call_id) in prepare:
+                        payload = personal_device._payload(result)
+                        accounts = payload.get('accounts') if isinstance(payload, dict) else None
+                        if personal_device.failed(result) or not isinstance(accounts, list):
+                            prepared = {'error': ('Could not read your accounts on the device.' if is_en
+                                                  else 'تعذرت قراءة حساباتك من الجهاز.')}
+                        else:
+                            prepared = await prepare_personal_banking(tool_executor, prepare[str(call_id)], accounts=accounts)
+                        if not prepared.get('error') and not prepared.get('error_code'):
+                            return AgentResponse(text=('Review the operation and exchange rate, then confirm. Nothing has been executed yet.' if is_en else 'راجع تفاصيل العملية وسعر الصرف ثم أكد التنفيذ. لم يتم التنفيذ بعد.'),
+                                                 pending_tools=[*pending_tools, prepared], actions=actions, confidence=0.9)
+                        messages.append({'role': 'tool', 'tool_call_id': str(call_id),
+                                         'content': json.dumps(prepared, ensure_ascii=False, default=str)})
+                        continue
+                    if str(call_id) in convert and not personal_device.failed(result):
+                        result = await personal_device.convert_analytics(personal_device._payload(result), convert[str(call_id)])
+                    if personal_device.failed(result):
+                        tool_failures += 1
+                    messages.append({'role': 'tool', 'tool_call_id': str(call_id),
+                                     'content': personal_device.encode_result(result)})
+                if tool_failures > 0:
+                    messages.append({'role': 'system', 'content': _REFLECT_EN if is_en else _REFLECT_AR})
 
             # 7. AGENT LOOP — Reason → Plan → Act → Observe → Reflect → Respond
-            for _round in range(self.MAX_ROUNDS):
+            for _round in range(first_round, self.MAX_ROUNDS):
                 rounds_used = _round + 1
                 resp = await client.chat.completions.create(
                     messages=messages,
@@ -3332,6 +3455,9 @@ class SaraAgentService:
                        if getattr(assistant_msg, 'reasoning_content', None) else {}),
                     "tool_calls": [tc.model_dump() if hasattr(tc, "model_dump") else tc for tc in assistant_msg.tool_calls],
                 })
+                device_calls = []
+                prepare = {}
+                convert = {}
 
                 for tc in assistant_msg.tool_calls:
                     fn = tc.function
@@ -3345,6 +3471,18 @@ class SaraAgentService:
                     except (json.JSONDecodeError, TypeError):
                         fn_args = {}
 
+                    if device and fn_name == 'create_transaction':
+                        # The phone lists its own accounts; prepared on resume.
+                        tool_calls_made += 1
+                        prepare[tc.id] = fn_args
+                        device_calls.append(personal_device.device_call(tc.id, 'get_bank_accounts', {}, tz_name))
+                        continue
+                    if device and fn_name in personal_device.DEVICE_READ_TOOLS:
+                        tool_calls_made += 1
+                        if fn_name == 'get_financial_analytics' and fn_args.get('target_currency'):
+                            convert[tc.id] = str(fn_args['target_currency'])
+                        device_calls.append(personal_device.device_call(tc.id, fn_name, fn_args, tz_name))
+                        continue
                     if fn_name == 'create_transaction':
                         prepared = await prepare_personal_banking(tool_executor, fn_args)
                         if prepared.get('error'):
@@ -3466,7 +3604,8 @@ class SaraAgentService:
                         tool_calls_made += 1
                         self._analytics.record_tool(tool_name="ask_clarification", success=True)
                         # Model needs more info from the user — remember the pending task
-                        MEMORY_STORE.set_state(user_key, current_task=query)
+                        if not device:
+                            MEMORY_STORE.set_state(user_key, current_task=query)
                         clarification_requested = True
                         question = fn_args.get("question", "")
                         tool_result = {"clarification": question, "options": fn_args.get("options", [])}
@@ -3488,7 +3627,8 @@ class SaraAgentService:
                             "content": json.dumps(tool_result, ensure_ascii=False, default=str),
                         })
                         continue
-                    elif hasattr(tool_executor, f"_exec_{fn_name}"):
+                    elif hasattr(tool_executor, f"_exec_{fn_name}") and not (
+                            device and fn_name != 'get_exchange_rate'):
                         tool_calls_made += 1
                         # Data fetch OR execution: run and feed result back to the model.
                         # Data-driven: any tool with a _exec_<name> handler is executed,
@@ -3526,7 +3666,8 @@ class SaraAgentService:
                                 params={},
                                 label="Refresh Data" if is_en else "تحديث البيانات",
                             ))
-                            MEMORY_STORE.set_state(user_key, last_operation=(f"Financial operation: {tool_result.get('message', '')}" if is_en else f"عملية مالية: {tool_result.get('message', '')}"))
+                            if not device:
+                                MEMORY_STORE.set_state(user_key, last_operation=(f"Financial operation: {tool_result.get('message', '')}" if is_en else f"عملية مالية: {tool_result.get('message', '')}"))
                         continue
                     else:
                         # Unknown tool: return error to model so it can recover
@@ -3549,21 +3690,28 @@ class SaraAgentService:
                         "content": json.dumps({"handled": True}, ensure_ascii=False),
                     })
 
+                if device_calls:
+                    # The phone answers these reads from its own ledger,
+                    # then POST /ai/continue resumes right here.
+                    return AgentResponse(text='', actions=actions, confidence=0.9,
+                        device_calls=device_calls,
+                        state=personal_device.seal({
+                            'phase': 'loop', 'messages': messages, 'query': query,
+                            'intent': intent_str, 'round': _round + 1,
+                            'calls': [c['id'] for c in device_calls],
+                            'prepare': prepare, 'convert': convert,
+                            'actions': [a.model_dump() for a in actions],
+                            'suggestions': suggestions, 'pending_tools': pending_tools,
+                            'answer': answer, 'tool_failures': tool_failures,
+                            'clarification_requested': clarification_requested,
+                            'tool_calls_made': tool_calls_made,
+                        }, self._user_key()))
+
                 # ── OBSERVE + REFLECT: guide the model to recover from failures ──
                 if tool_failures > 0:
                     messages.append({
                         "role": "system",
-                        "content": (
-                            "I noticed that some tools failed or returned errors. Before writing your final reply, think: "
-                            "can I retry with better parameters? Is there a suitable alternative tool? "
-                            "Do I need to ask the user for more information? Review the results then reply with a useful answer "
-                            "that explains what happened and suggests a next step — and do not repeat the same mistake."
-                        ) if is_en else (
-                             "لاحظت أن بعض الأدوات فشلت أو أعادت أخطاء. قبل كتابة ردك النهائي، فكر: "
-                             "هل يمكنني إعادة المحاولة بمعطيات أفضل؟ هل توجد أداة بديلة مناسبة؟ "
-                             "هل أحتاج أن أطلب من المستخدم معلومات إضافية؟ راجع النتائج ثم رد بإجابة مفيدة "
-                             "تشرح للمستخدم ما حدث وتقترح خطوة تالية — ولا تعيد نفس الخطأ."
-                        ),
+                        "content": _REFLECT_EN if is_en else _REFLECT_AR,
                     })
 
             if pending_tools:
@@ -3580,11 +3728,13 @@ class SaraAgentService:
             if not answer:
                 answer = ("Sorry, I couldn't process your request right now. Could you rephrase your question?" if is_en else "آسف، لم أستطع معالجة طلبك حالياً. هل يمكنك إعادة صياغة سؤالك؟")
 
-            # 8. Persist assistant turn + inferred task
-            MEMORY_STORE.append_turn(user_key, "assistant", answer)
+            # 8. Persist assistant turn + inferred task (never in device
+            # mode: Sara's answer may quote the user's figures).
+            if not device:
+                MEMORY_STORE.append_turn(user_key, "assistant", answer)
             # Only clear the in-flight task if it was actually completed (i.e. the
             # model did NOT stop to ask for clarification and resume later).
-            if intent_str in ("create", "transaction", "navigation", "delete") and not clarification_requested:
+            if not device and intent_str in ("create", "transaction", "navigation", "delete") and not clarification_requested:
                 MEMORY_STORE.set_state(user_key, current_task=None)
 
             self._analytics.record_round(
@@ -3601,6 +3751,12 @@ class SaraAgentService:
                 pending_tools=pending_tools,
             )
 
+        except Exception as e:
+            return self._failure(e, is_en, _started)
+
+    def _failure(self, e, is_en: bool, _started: float) -> AgentResponse:
+        try:
+            raise e
         except AuthenticationError as e:
             logger.error("Sara auth error: %s", e)
             self._analytics.record_error(error_type="AuthenticationError")

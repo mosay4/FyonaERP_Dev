@@ -10,6 +10,7 @@ import '../../../../core/services/connectivity_service.dart';
 import '../../../../shared/providers/current_user_provider.dart';
 
 import '../../data/account_type_store.dart';
+import '../../data/ledger/personal_relay_config.dart';
 import '../../data/merchant_api.dart';
 import '../../data/peer_store.dart';
 import 'personal_providers.dart' show personalFinanceProvider;
@@ -100,8 +101,13 @@ final _peerRelayRuntimeProvider = Provider.autoDispose<void>((ref) {
 
 /// Carries this device's account types (جاري/توفير) to the user's other
 /// devices through the relay, which deletes them once delivered.
+///
+/// With the Personal device relay on, account types ride it instead; this
+/// path then only answers a request from a device still on an older build
+/// (one release), and incoming `account_types` are still merged above.
 Future<void> _relayAccountTypes(dynamic client, String device) async {
-  if (await PersonalAccountTypeStore.takeFirstRequest()) {
+  if (!PersonalRelayConfig.enabled &&
+      await PersonalAccountTypeStore.takeFirstRequest()) {
     // First run on this install: share what is here and ask the others.
     await PersonalAccountTypeStore.markPending();
     try {

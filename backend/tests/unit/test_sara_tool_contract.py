@@ -77,7 +77,8 @@ def test_pending_set_is_single_sourced_and_stable():
     assert cmod.PENDING_MUTATION_TOOLS == expected
     # And the agent loop consumes the contract set (no second hardcoded list).
     import inspect
-    src = inspect.getsource(smod.SaraAgentService.process)
+    # The loop lives in _run (process prepares it; device mode resumes it).
+    src = inspect.getsource(smod.SaraAgentService.process) + inspect.getsource(smod.SaraAgentService._run)
     assert "PENDING_MUTATION_TOOLS" in src
     assert '"create_savings_goal", "update_savings_goal"' not in src
 

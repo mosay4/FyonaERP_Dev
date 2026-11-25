@@ -192,6 +192,7 @@ import '../../features/core_business/presentation/providers/business_party_shari
 import '../../features/core_business/presentation/providers/business_cash_relay_provider.dart';
 import '../../features/core_business/presentation/providers/business_sync_provider.dart';
 import '../../features/personal/presentation/providers/peer_relay_provider.dart';
+import '../../features/personal/presentation/providers/personal_relay_provider.dart';
 import '../config/directory_pilot_build.dart';
 import '../../features/branches/data/branch_pictures.dart';
 
@@ -2402,14 +2403,14 @@ class _MainShellState extends ConsumerState<MainShell>
                               route: currentRoute,
                               child: EmployeeFeatureGate(
                                 route: currentRoute,
-                                 child: PeerRelayRuntime(child: isPersonal ? widget.child
+                                 child: PersonalRelayRuntime(child: PeerRelayRuntime(child: isPersonal ? widget.child
                                       : EmployeeDeviceFinanceRuntime(
                                           child: BusinessSyncRuntime(
                                             child: BusinessCashRelayRuntime(
                                               child: BusinessPartyShareRuntime(child: widget.child),
                                             ),
                                           ),
-                                        )),
+                                        ))),
                               ),
                             ),
                           ),
