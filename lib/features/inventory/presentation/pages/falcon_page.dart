@@ -10,6 +10,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/responsive/r_api.dart';
+import '../../../../core/services/currency/business_currency_scope.dart'
+    show bizEnabledCurrenciesProvider, loadBizEnabledCurrencies;
 import '../../../../core/services/currency/enabled_currencies_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -295,8 +297,9 @@ class _FalconPageState extends ConsumerState<FalconPage>
   /// Default = last saved choice; else USD when enabled; else the first
   /// enabled currency from Business → تخصيص العملات. «تلقائي» is gone.
   Future<void> _initCurrencyAndAnalyze() async {
-    final enabled = ref.read(enabledCurrenciesProvider).valueOrNull ??
-        await loadEnabledCurrencies(ref.read(currentUserIdProvider));
+    // Business set (profile settings) — never waits on the network.
+    final enabled = ref.read(bizEnabledCurrenciesProvider).valueOrNull ??
+        await loadBizEnabledCurrencies(ref.read(currentUserIdProvider));
     String pick;
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -720,7 +723,7 @@ class _FalconPageState extends ConsumerState<FalconPage>
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final enabled = ref.watch(enabledCurrenciesProvider).valueOrNull ??
+    final enabled = ref.watch(bizEnabledCurrenciesProvider).valueOrNull ??
         defaultEnabledCurrencies.toSet();
     return Scaffold(
       backgroundColor: AppColors.background,

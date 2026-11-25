@@ -8,6 +8,7 @@ import '../../../../core/services/sync_engine.dart';
 import '../../data/models/personal_models.dart';
 import '../../di/personal_providers.dart';
 import '../../domain/services/budget_aggregation.dart';
+import '../../domain/services/personal_account_type_sync.dart';
 import '../../domain/services/personal_finance_service.dart';
 import '../../services/recurring_reminder_service.dart';
 import '../../../../core/localization/app_localizations.dart';
@@ -39,15 +40,26 @@ class _AccountTypesStore {
     await prefs.setString(_key, jsonEncode(map));
   }
 
-  static List<PersonalBankAccount> apply(List<PersonalBankAccount> accounts, Map<String, String> localTypes) {
-    if (localTypes.isEmpty) return accounts;
-    return accounts.map((a) {
-      final localType = localTypes[a.id];
-      if (localType != null && localType != a.accountType) {
-        return PersonalBankAccount(id: a.id, bankName: a.bankName, balance: a.balance, currency: a.currency, notes: a.notes, accountType: localType);
+  /// Server-stated types win; the legacy device map only fills rows the
+  /// server never typed (see [resolvePersonalAccountTypes]).
+  static List<PersonalBankAccount> apply(List<PersonalBankAccount> accounts, Map<String, String> localTypes) =>
+      resolvePersonalAccountTypes(accounts, localTypes);
+
+  /// One-time push of legacy device-only types (savings) for rows the server
+  /// never typed. Queued through the outbox (works offline); the local
+  /// mirror is marked typed at once, so it is not re-pushed on every load.
+  static Future<bool> migrateToServer(
+      PersonalFinanceService service, List<PersonalBankAccount> accounts) async {
+    try {
+      final plan = planPersonalAccountTypeMigration(accounts, await load());
+      for (final e in plan.entries) {
+        await service.updateBankAccount(e.key, accountType: e.value);
       }
-      return a;
-    }).toList();
+      return plan.isNotEmpty;
+    } catch (e) {
+      debugPrint('account type migration skipped: $e');
+      return false;
+    }
   }
 }
 
@@ -401,6 +413,9 @@ class PersonalFinanceNotifier extends StateNotifier<PersonalFinanceState> {
         exchangeRates: rates,
         walletTotalBalance: _convertAccountsTotal(patchedAccounts, state.walletCurrency, rates),
       );
+      unawaited(_AccountTypesStore.migrateToServer(service, accounts).then((pushed) {
+        if (pushed) _triggerAutoSync();
+      }));
 
       // Phase 1b — the rest fills in as each resolves; the cards above are
       // already painted and never flicker back to empty.

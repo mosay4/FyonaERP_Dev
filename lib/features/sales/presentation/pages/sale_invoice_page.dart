@@ -22,6 +22,7 @@ import '../../../core_business/presentation/widgets/business_operation_error.dar
 import '../../data/sales_api.dart';
 import '../widgets/sale_field.dart';
 import 'sale_success_dialog.dart';
+import '../../../../shared/widgets/fresh_invoice_scroll.dart';
 import '../widgets/sale_customer_section.dart';
 import '../widgets/sale_items_section.dart';
 import '../widgets/sale_payment_section.dart';
@@ -198,11 +199,7 @@ class _SaleInvoicePageState extends ConsumerState<SaleInvoicePage>
   /// form, with the list gliding to its start at the same time.
   void _startFresh() {
     _fresh.forward(from: 0);
-    if (_scroll.hasClients && _scroll.offset > 0) {
-      unawaited(_scroll.animateTo(0,
-          duration: const Duration(milliseconds: 420),
-          curve: Curves.easeOutCubic));
-    }
+    glideFreshInvoiceToTop(_scroll, isMounted: () => mounted);
   }
 
   Future<void> _scrollToItems() async {
@@ -299,9 +296,10 @@ class _SaleInvoicePageState extends ConsumerState<SaleInvoicePage>
       // Selling changes stock: refresh EVERY stock-reading surface (list,
       // details, stats, lots, movements) in one shot.
       invalidateInventoryData(ref);
-      final next = await showDialog<String>(
+      // Drop the bottom field's focus first: restoring it when the dialog
+      // closes scrolled the fresh invoice back to the end.
+      final next = await showIssueResultDialog<String>(
         context: context,
-        barrierDismissible: false,
         builder: (_) => SaleSuccessDialog(invoice: res),
       );
       if (next == 'new' && mounted) _startFresh();

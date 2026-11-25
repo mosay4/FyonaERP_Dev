@@ -35,12 +35,57 @@ class SaraInsightInputBuilder {
     return DateTime(l.year, l.month, l.day);
   }
 
+  static DateTime _localDay(DateTime d) {
+    final l = d.isUtc ? d.toLocal() : d;
+    return DateTime(l.year, l.month, l.day);
+  }
+
+  /// Monthly equivalent of one occurrence.
+  static double _perMonth(String frequency, int interval) {
+    final n = interval < 1 ? 1 : interval;
+    switch (frequency) {
+      case 'daily':
+        return 30.4 / n;
+      case 'weekly':
+        return 4.35 / n;
+      case 'yearly':
+        return 1 / (12 * n);
+      case 'monthly':
+        return 1 / n;
+      default:
+        return 30.4 / n;
+    }
+  }
+
+  /// Occurrences of [r] from its next date up to [until] (inclusive). A
+  /// next date already in the past (not executed yet) counts as today.
+  static List<DateTime> _occurrences(
+      RecurringTransaction r, DateTime today, DateTime until) {
+    final first = r.nextDate;
+    if (first == null) return const [];
+    final out = <DateTime>[];
+    var cur = _localDay(first);
+    var rule = r;
+    for (var i = 0; i < 400 && !cur.isAfter(until); i++) {
+      out.add(cur.isBefore(today) ? today : cur);
+      rule = rule.copyWith(nextDate: cur);
+      final next = _localDay(nextRecurringDate(rule));
+      if (!next.isAfter(cur)) break;
+      cur = next;
+    }
+    // Several missed past runs collapse into one "due now".
+    final seen = <DateTime>{};
+    return out.where(seen.add).toList();
+  }
+
   static SaraInsightInput build({
     required DateTime now,
     required String baseCurrency,
     required List<PersonalTransaction> transactions,
     required List<SavingsGoal> goals,
     List<PersonalBudget> budgets = const [],
+    List<RecurringTransaction> recurring = const [],
+    List<PersonalDebt> debts = const [],
     double? liquidBalance,
     required SaraConvert convert,
   }) {
@@ -65,6 +110,7 @@ class SaraInsightInputBuilder {
         toGoal: t.type == 'expense' && (t.goalId ?? '').isNotEmpty,
         originalAmount: t.amount,
         originalCurrency: t.currency,
+        note: t.description,
       ));
     }
 
@@ -110,6 +156,64 @@ class SaraInsightInputBuilder {
       ));
     }
 
+    // Recurring rules → monthly load, upcoming bills, scheduled incomes.
+    final today = _localDay(now);
+    final until = today.add(const Duration(days: 62));
+    final rules = <InsightRecurring>[];
+    final obligations = <InsightObligation>[];
+    final incomes = <InsightIncomeEvent>[];
+    for (final r in recurring) {
+      if (!r.isActive || r.amount <= 0) continue;
+      if (r.type != 'income' && r.type != 'expense') continue;
+      final base = _toBase(r.amount, r.currency, baseCurrency, convert);
+      if (base == null || base <= 0) continue;
+      final isIncome = r.type == 'income';
+      rules.add(InsightRecurring(
+        id: r.id,
+        name: r.name.trim().isNotEmpty ? r.name.trim() : r.category,
+        category: r.category,
+        isIncome: isIncome,
+        amountBase: base,
+        monthlyBase: base * _perMonth(r.frequency, r.intervalValue),
+      ));
+      for (final d in _occurrences(r, today, until)) {
+        if (isIncome) {
+          incomes.add(InsightIncomeEvent(d, base));
+        } else {
+          obligations.add(InsightObligation(
+            id: r.id,
+            kind: 'recurring',
+            name: r.name.trim().isNotEmpty ? r.name.trim() : r.category,
+            amountBase: base,
+            amountNative: r.amount,
+            currency: r.currency.trim().isEmpty ? baseCurrency : r.currency,
+            due: d,
+            reminded: r.executionType == 'reminder',
+          ));
+        }
+      }
+    }
+
+    // Debts with a due date (payable → bills, receivable → to collect).
+    for (final d in debts) {
+      if (d.isPaid || d.status == 'paid' || d.dueDate == null) continue;
+      final remaining = d.amount - d.paid;
+      if (remaining <= 0) continue;
+      if (d.type != 'payable' && d.type != 'receivable') continue;
+      final base = _toBase(remaining, d.currency, baseCurrency, convert);
+      if (base == null || base <= 0) continue;
+      obligations.add(InsightObligation(
+        id: d.id,
+        kind: d.type == 'payable' ? 'debt' : 'debtIn',
+        name: d.personName,
+        amountBase: base,
+        amountNative: remaining,
+        currency: d.currency.trim().isEmpty ? baseCurrency : d.currency,
+        due: _localDay(d.dueDate!),
+        reminded: d.reminder,
+      ));
+    }
+
     return SaraInsightInput(
       now: now,
       baseCurrency: baseCurrency,
@@ -117,6 +221,9 @@ class SaraInsightInputBuilder {
       goals: gs,
       budgets: bs,
       liquidBalance: liquidBalance,
+      recurring: rules,
+      obligations: obligations,
+      scheduledIncomes: incomes,
     );
   }
 }

@@ -56,6 +56,8 @@ async def init_db() -> None:
             ("personal_debts", "is_paid", "BOOLEAN NOT NULL DEFAULT FALSE"),
             ("personal_debts", "paid_date", "DATE"),
             ("personal_debts", "due_date", "DATE"),
+            # جاري/توفير; NULL = never stated (legacy) and reads as current.
+            ("personal_bank_accounts", "account_type", "VARCHAR(20)"),
             ("subscription_requests", "currency", "VARCHAR(10)"),
             ("organizations", "avatar", "VARCHAR(500)"),
             ("branches", "is_archived", "BOOLEAN NOT NULL DEFAULT false"),

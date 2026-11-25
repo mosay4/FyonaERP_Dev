@@ -1214,7 +1214,9 @@ class ToolExecutor {
     // Same bank + currency may legitimately exist twice as جاري AND توفير
     // (the banks screen allows it); only the same TYPE is a duplicate.
     final rawType = '${p['account_type'] ?? ''}'.trim().toLowerCase();
-    final accountType = rawType == 'savings' ? 'savings' : 'checking';
+    // checking/current/جاري → جاري; savings/توفير → توفير (sent to the server).
+    final accountType =
+        personalAccountTypeFromServer(rawType) == 'savings' ? 'savings' : 'checking';
 
     if (bankName.isEmpty) {
       return ToolExecutionResult(

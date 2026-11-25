@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'sara_insight_engine.dart';
 import 'sara_notice_composer.dart';
 
@@ -65,6 +67,21 @@ class SaraDailyPlanner {
     return db.difference(da).inHours ~/ 24;
   }
 
+  /// Quiet period per notice family: rare insights (a forgotten
+  /// subscription, the month-end outlook, a no-spend streak) must not
+  /// come back every few days.
+  static int cooldownFor(String key) {
+    if (key.startsWith('subs:')) return 45;
+    if (key.startsWith('proj:good')) return 31;
+    if (key.startsWith('proj:short')) return 7;
+    if (key.startsWith('payday:')) return 20;
+    if (key == 'nospend') return 7;
+    if (key.startsWith('debt:late')) return 7;
+    if (key.startsWith('goal:due')) return 5;
+    if (key.startsWith('enc:')) return 5;
+    return cooldownDays;
+  }
+
   /// Is [key] allowed in the digest of [day]?
   static bool cooldownAllows(
       Map<String, SaraCooldownEntry> cooldown, String key, String day) {
@@ -72,7 +89,7 @@ class SaraDailyPlanner {
     if (e == null) return true;
     // Re-planning the same day's digest may keep its own warning.
     if (e.src == 'digest' && e.day == day) return true;
-    return _daysBetween(e.day, day).abs() >= cooldownDays;
+    return _daysBetween(e.day, day).abs() >= cooldownFor(key);
   }
 
   static List<SaraSlot> plan({
@@ -121,8 +138,10 @@ class SaraDailyPlanner {
   }) {
     final out = Map<String, SaraCooldownEntry>.from(cooldown);
     final today = dayKey(now);
-    out.removeWhere((_, e) {
-      if (_daysBetween(e.day, today) > 30) return true;
+    out.removeWhere((k, e) {
+      if (_daysBetween(e.day, today) > math.max(30, cooldownFor(k))) {
+        return true;
+      }
       if (e.src != 'digest') return false;
       if (e.day.compareTo(today) < 0) return false; // past: delivered
       // Today's digest that already fired stays reserved.

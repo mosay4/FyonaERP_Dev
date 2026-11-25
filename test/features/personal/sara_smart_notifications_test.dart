@@ -19,6 +19,7 @@ import 'package:fyona_flutter/features/personal/services/smart_insights/sara_sma
 import 'package:fyona_flutter/shared/providers/current_user_provider.dart';
 import 'package:fyona_flutter/shared/services/alarm_tap_bridge.dart';
 import 'package:fyona_flutter/shared/services/notification_router.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -54,8 +55,32 @@ void main() {
       expect(sw.value, isTrue);
       expect(find.byKey(const Key('saraSmartNotifTimeRow')), findsOneWidget);
       expect(find.text('Auto (8:00 PM)'), findsOneWidget);
-      expect(find.text('Account, security and subscription alerts are not affected.'),
-          findsOneWidget);
+      // The time row says exactly «Daily notification time.» — no extra
+      // hints under it (owner's request).
+      expect(find.text('Daily notification time.'), findsOneWidget);
+      expect(find.textContaining('not affected'), findsNothing);
+      expect(find.textContaining('usually log'), findsNothing);
+    });
+
+    testWidgets('Arabic time row reads exactly «وقت الإشعار اليومي.»',
+        (t) async {
+      await t.runAsync(
+          () => AppLocalizations.delegate.load(const Locale('ar')));
+      await t.pumpWidget(ProviderScope(
+        overrides: [currentUserIdProvider.overrideWithValue('u1')],
+        child: MaterialApp(
+          locale: const Locale('ar'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: const Scaffold(body: SaraSmartNotificationsTile()),
+        ),
+      ));
+      await t.pumpAndSettle();
+      final desc = t.widget<Text>(
+          find.byKey(const Key('saraSmartNotifTimeDesc')));
+      expect(desc.data, 'وقت الإشعار اليومي.');
+      expect(find.textContaining('سارة تختار الساعة'), findsNothing);
+      expect(find.textContaining('ما تتأثر'), findsNothing);
     });
 
     testWidgets('switch off hides the timer and persists per user', (t) async {
@@ -315,6 +340,15 @@ void main() {
         }),
       });
       expect(await SaraSmartScheduler.lastFiredDay(), key);
+    });
+
+    test('every Sara notification carries her avatar + custom sound', () {
+      final d = SaraSmartScheduler.detailsForTest('Body').android!;
+      final icon = d.largeIcon as DrawableResourceAndroidBitmap;
+      expect(icon.data, 'sara_avatar_notif');
+      expect((d.sound as RawResourceAndroidNotificationSound).sound,
+          'sound_1');
+      expect(d.channelId, 'sara_channel');
     });
 
     test('instant alerts are capped per day', () async {

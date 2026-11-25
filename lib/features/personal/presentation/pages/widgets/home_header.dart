@@ -96,19 +96,20 @@ class HomeHeader extends ConsumerWidget {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Flexible(
-                    child: Text(
-                      AppLocalizations.of(context).translate(
-                          isPersonal ? 'headerSectionPersonal' : 'headerSectionBusiness'),
-                      style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 17), fontWeight: FontWeight.w700, color: AppColors.textPrimary, height: 1.3),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  Text(
+                    AppLocalizations.of(context).translate(
+                        isPersonal ? 'headerSectionPersonal' : 'headerSectionBusiness'),
+                    style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 17), fontWeight: FontWeight.w700, color: AppColors.textPrimary, height: 1.3),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  // Current branch — only when the merchant has 2+ branches.
-                  if (!isPersonal) const Flexible(child: BusinessBranchChip()),
+                  // Current branch UNDER the title — only with 2+ branches
+                  // (collapses to nothing otherwise).
+                  if (!isPersonal) const BusinessBranchChip(),
                 ],
               ),
             ),

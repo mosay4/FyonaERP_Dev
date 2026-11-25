@@ -14,6 +14,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.net.Uri
@@ -2119,6 +2120,12 @@ class AlarmReceiver : BroadcastReceiver() {
             // Sara's digest is two short lines — readable when expanded.
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(body))
             builder.setVibrate(longArrayOf(0, 300, 150, 300))
+            // Sara's portrait as the large icon (round PNG, 192 px) so every
+            // smart notification reads as hers — even with the app killed.
+            try {
+                val avatar = BitmapFactory.decodeResource(context.resources, R.drawable.sara_avatar_notif)
+                if (avatar != null) builder.setLargeIcon(avatar)
+            } catch (_: Exception) {}
         }
         val notification = builder.build()
 

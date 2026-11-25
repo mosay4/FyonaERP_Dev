@@ -11,6 +11,8 @@ import '../../domain/section_access.dart';
 import '../providers/subscription_providers.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../employees/presentation/providers/employee_device_finance_provider.dart';
+import '../../../splash/presentation/brand_entry_view.dart';
+import '../../../splash/presentation/brand_handoff_page.dart';
 
 /// Resolves account access only after authentication and phone collection.
 class AccountEntryPage extends ConsumerStatefulWidget {
@@ -26,6 +28,12 @@ class _AccountEntryPageState extends ConsumerState<AccountEntryPage> {
   void initState() {
     super.initState();
     Future.microtask(_enter);
+  }
+
+  /// The next screen crossfades in over the branded entry (no jump).
+  void _go(String location) {
+    BrandEntryHandoff.arm();
+    context.go(location);
   }
 
   Future<void> _enter() async {
@@ -51,7 +59,7 @@ class _AccountEntryPageState extends ConsumerState<AccountEntryPage> {
           if (!mounted) return;
           if (copy != null && ref.read(employeeDeviceSelectionProvider) == employee) {
             ref.read(activeSectionProvider.notifier).state = AppSection.business;
-            context.go('/job-requests');
+            _go('/job-requests');
             return;
           }
         } catch (_) {
@@ -75,7 +83,7 @@ class _AccountEntryPageState extends ConsumerState<AccountEntryPage> {
         if (!mounted) return;
         if (saved != null && preferBusiness &&
             sameDirectoryScope(pilot, ref.read(directoryPilotAccessProvider))) {
-          context.go(RouteNames.dashboard);
+          _go(RouteNames.dashboard);
           return;
         }
       }
@@ -95,7 +103,7 @@ class _AccountEntryPageState extends ConsumerState<AccountEntryPage> {
       final business = hasSectionAccess(status, 'business');
       final personal = hasSectionAccess(status, 'personal');
       if (!business && !personal) {
-        context.go(
+        _go(
           status['status'] == 'pending'
               ? RouteNames.subscriptionPending
               : RouteNames.subscription,
@@ -115,9 +123,9 @@ class _AccountEntryPageState extends ConsumerState<AccountEntryPage> {
       if (mode == 'business' &&
           status['is_trial'] != true &&
           status['business_setup_completed'] != true) {
-        context.go('/business-setup');
+        _go('/business-setup');
       } else {
-        context.go(
+        _go(
           mode == 'business'
               ? RouteNames.dashboard
               : RouteNames.personalDashboard,
@@ -128,15 +136,17 @@ class _AccountEntryPageState extends ConsumerState<AccountEntryPage> {
     }
   }
 
+  // Calm branded entry while access resolves — never a bare spinner.
   @override
   Widget build(BuildContext context) => Scaffold(
-    body: Center(
-      child: _failed
+    backgroundColor: BrandEntryView.background,
+    body: BrandEntryView(
+      footer: _failed
           ? FilledButton(
               onPressed: _enter,
               child: Text(AppLocalizations.of(context).translate('retry')),
             )
-          : const CircularProgressIndicator(),
+          : null,
     ),
   );
 }

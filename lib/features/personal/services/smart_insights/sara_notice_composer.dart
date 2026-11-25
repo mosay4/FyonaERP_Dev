@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'sara_insight_engine.dart';
 
 // ─────────────────────────────────────────────────────────────
@@ -19,7 +21,8 @@ typedef SaraMoney = String Function(double amount, String currency);
 
 class SaraNotice {
   /// plan | tight | budget | spendHigh | spendLow | log | encourage |
-  /// bigExpense | budgetOver
+  /// bigExpense | budgetOver | bill | debt | collect | projection |
+  /// goalDue | payday | subscription | noSpend
   final String kind;
   final String title;
   final String body;
@@ -48,12 +51,38 @@ class SaraRoutes {
       '/personal/reports/view?kind=categories&period=week';
   static const String quickAddExpense = '/personal/quick-add?type=expense';
   static const String transactions = '/personal/transactions';
+  static String recurring(String id) => '/personal/recurring/detail?id=$id';
+  static String debt(String id) => '/personal/debts?debtId=$id';
+  static const String monthReport =
+      '/personal/reports/view?kind=cashflow&period=month';
+  static const String recurringList = '/personal/recurring';
+}
+
+/// Day keys for cooldown identities (yyyymmdd).
+class SaraDailyKeys {
+  SaraDailyKeys._();
+  static String day(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}';
 }
 
 class SaraNoticeComposer {
   SaraNoticeComposer._();
 
   static String _pct(double ratio) => (ratio * 100).round().abs().toString();
+
+  static DateTime _d(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  /// «today» / «tomorrow» / «in 2 days» / «in N days», or the overdue days.
+  static String _when(DateTime due, DateTime now, SaraTr tr) {
+    final n = _d(due).difference(_d(now)).inHours ~/ 24;
+    if (n <= 0) return tr('saraNotifWhenToday');
+    if (n == 1) return tr('saraNotifWhenTomorrow');
+    if (n == 2) return tr('saraNotifWhenTwoDays');
+    return tr('saraNotifWhenDays', {'n': n});
+  }
+
+  static String _ym(DateTime d) =>
+      '${d.year}${d.month.toString().padLeft(2, '0')}';
 
   /// Daily digest for one slot. [firstSlot] = the next notification to
   /// fire (built from fresh data); later slots are pre-scheduled backups
@@ -70,10 +99,101 @@ class SaraNoticeComposer {
     SaraNotice? primary;
 
     if (firstSlot) {
-      for (final b in a.budgetAlerts) {
-        if (!allowed(b.key)) continue;
-        primary = _budget(b, tr, money);
-        break;
+      // 1. A bill the balance cannot cover before payday — most useful.
+      final risk = a.billRisk;
+      if (risk != null) {
+        final o = risk.obligation;
+        final k = 'bill:${o.kind}:${o.id}:${SaraDailyKeys.day(o.due)}';
+        if (allowed(k)) {
+          primary = SaraNotice(
+            kind: 'bill',
+            title: tr('saraNotifBillTitle'),
+            body: tr('saraNotifBillShort', {
+              'name': o.name,
+              'amount': money(o.amountNative, o.currency),
+              'when': _when(o.due, a.now, tr),
+              'short': money(_roundUp(risk.shortBy), base),
+            }),
+            route: o.kind == 'recurring'
+                ? SaraRoutes.recurring(o.id)
+                : SaraRoutes.debt(o.id),
+            cooldownKey: k,
+          );
+        }
+      }
+      // 2. A debt to pay (due soon / overdue) the user set no reminder for.
+      if (primary == null) {
+        for (final o in a.debtsDue) {
+          final overdue = _d(a.now).difference(_d(o.due)).inHours ~/ 24;
+          final k = overdue > 0
+              ? 'debt:late:${o.id}'
+              : 'debt:due:${o.id}:${SaraDailyKeys.day(o.due)}';
+          if (!allowed(k)) continue;
+          primary = SaraNotice(
+            kind: 'debt',
+            title: tr('saraNotifDebtTitle'),
+            body: overdue > 0
+                ? tr('saraNotifDebtOverdue', {
+                    'name': o.name,
+                    'amount': money(o.amountNative, o.currency),
+                    'n': overdue,
+                  })
+                : tr('saraNotifDebtDue', {
+                    'name': o.name,
+                    'amount': money(o.amountNative, o.currency),
+                    'when': _when(o.due, a.now, tr),
+                  }),
+            route: SaraRoutes.debt(o.id),
+            cooldownKey: k,
+          );
+          break;
+        }
+      }
+      if (primary == null) {
+        for (final b in a.budgetAlerts) {
+          if (!allowed(b.key)) continue;
+          primary = _budget(b, tr, money);
+          break;
+        }
+      }
+      // 3. Month-end outlook: heading for a shortfall.
+      final p = a.projection;
+      if (primary == null && p != null && p.net < 0 && p.daysLeft > 0) {
+        final gap = -p.net;
+        final k = 'proj:short:${_ym(a.now)}';
+        if (gap >= p.expectedIncome * 0.03 && allowed(k)) {
+          primary = SaraNotice(
+            kind: 'projection',
+            title: tr('saraNotifProjTitle'),
+            body: tr('saraNotifProjShort', {
+              'amount': money(_roundUp(gap), base),
+              'daily': money(_roundUp(gap / p.daysLeft), base),
+            }),
+            route: SaraRoutes.monthReport,
+            cooldownKey: k,
+          );
+        }
+      }
+      // 4. A goal whose deadline is close.
+      final dg = a.deadlineGoal;
+      if (primary == null && dg != null) {
+        final k = 'goal:due:${dg.id}';
+        final left = _d(dg.deadline!).difference(_d(a.now)).inHours ~/ 24;
+        if (allowed(k)) {
+          final perDay = dg.remainingNative / math.max(1, left + 1);
+          primary = SaraNotice(
+            kind: 'goalDue',
+            title: tr('saraNotifGoalDueTitle'),
+            body: tr(left <= 0 ? 'saraNotifGoalDueToday' : 'saraNotifGoalDue', {
+              'goal': dg.name,
+              'n': left,
+              'amount': money(dg.remainingNative, dg.currency),
+              'daily': money(_roundUp(perDay), dg.currency),
+            }),
+            route: SaraRoutes.goal(dg.id),
+            cooldownKey: k,
+          );
+        }
       }
       if (primary == null &&
           a.spendLevel == SpendLevel.high &&
@@ -95,8 +215,53 @@ class SaraNoticeComposer {
       }
     }
 
+    // Payday: pay yourself first (also on a predicted payday ahead).
+    if (primary == null && a.isPayday && a.paydaySave > 0) {
+      final k = 'payday:${SaraDailyKeys.day(a.now)}';
+      if (allowed(k)) {
+        final g = _topGoalName(a);
+        primary = SaraNotice(
+          kind: 'payday',
+          title: tr('saraNotifPaydayTitle'),
+          body: g != null
+              ? tr('saraNotifPaydayGoals', {
+                  'amount': money(
+                      SaraInsightEngine.niceFloor(a.paydaySave * g.nativePerBase),
+                      g.currency),
+                  'goal': g.name,
+                })
+              : tr('saraNotifPaydayNoGoal',
+                  {'amount': money(a.paydaySave, base)}),
+          route: g != null ? SaraRoutes.goal(g.id) : SaraRoutes.goals,
+          cooldownKey: k,
+        );
+      }
+    }
+
     if (primary == null && a.allocations.isNotEmpty) {
       primary = _plan(a.allocations, tr, money);
+    }
+
+    // A forgotten repeat charge (subscription) — rare, once a season.
+    if (primary == null && firstSlot) {
+      for (final h in a.subscriptions) {
+        final k = 'subs:${h.signature}';
+        if (!allowed(k)) continue;
+        primary = SaraNotice(
+          kind: 'subscription',
+          title: tr('saraNotifSubsTitle'),
+          body: tr('saraNotifSubsBody', {
+            'name': h.label,
+            'amount': (h.originalAmount != null &&
+                    (h.originalCurrency ?? '').isNotEmpty)
+                ? money(h.originalAmount!, h.originalCurrency!)
+                : money(h.amountBase, base),
+          }),
+          route: SaraRoutes.recurringList,
+          cooldownKey: k,
+        );
+        break;
+      }
     }
 
     if (primary == null &&
@@ -114,6 +279,26 @@ class SaraNoticeComposer {
         route: top != null ? SaraRoutes.goal(top.id) : SaraRoutes.goals,
         cooldownKey: 'tight',
       );
+    }
+
+    // Money owed to the user is due: a gentle "collect" nudge.
+    if (primary == null && firstSlot) {
+      for (final o in a.collectDue) {
+        final k = 'collect:${o.id}:${SaraDailyKeys.day(o.due)}';
+        if (!allowed(k)) continue;
+        primary = SaraNotice(
+          kind: 'collect',
+          title: tr('saraNotifCollectTitle'),
+          body: tr('saraNotifCollectDue', {
+            'name': o.name,
+            'amount': money(o.amountNative, o.currency),
+            'when': _when(o.due, a.now, tr),
+          }),
+          route: SaraRoutes.debt(o.id),
+          cooldownKey: k,
+        );
+        break;
+      }
     }
 
     if (primary == null && !a.loggedToday) {
@@ -135,6 +320,36 @@ class SaraNoticeComposer {
         body: tr('saraNotifSpendLow', {'pct': _pct(a.spendDelta)}),
         route: SaraRoutes.spendingReport,
         cooldownKey: 'spend:low',
+      );
+    }
+
+    if (primary == null &&
+        firstSlot &&
+        a.noSpendDays >= 2 &&
+        allowed('nospend')) {
+      primary = SaraNotice(
+        kind: 'noSpend',
+        title: tr('saraNotifNoSpendTitle'),
+        body: tr('saraNotifNoSpendBody', {'n': a.noSpendDays}),
+        route: SaraRoutes.transactions,
+        cooldownKey: 'nospend',
+      );
+    }
+
+    final proj = a.projection;
+    if (primary == null &&
+        firstSlot &&
+        proj != null &&
+        a.now.day >= 20 &&
+        proj.net >= proj.expectedIncome * 0.05 &&
+        allowed('proj:good:${_ym(a.now)}')) {
+      primary = SaraNotice(
+        kind: 'projection',
+        title: tr('saraNotifProjTitle'),
+        body: tr('saraNotifProjGood',
+            {'amount': money(SaraInsightEngine.niceFloor(proj.net), base)}),
+        route: a.hasActiveGoals ? SaraRoutes.goals : SaraRoutes.monthReport,
+        cooldownKey: 'proj:good:${_ym(a.now)}',
       );
     }
 
@@ -172,6 +387,7 @@ class SaraNoticeComposer {
     if (!a.loggedToday &&
         (primary.kind == 'plan' ||
             primary.kind == 'tight' ||
+            primary.kind == 'payday' ||
             primary.kind == 'encourage')) {
       return SaraNotice(
         kind: primary.kind,
@@ -182,6 +398,19 @@ class SaraNoticeComposer {
       );
     }
     return primary;
+  }
+
+  /// Rounds UP to a friendly figure (a shortfall is never understated).
+  static double _roundUp(double x) {
+    if (x.isNaN || x <= 0) return 0;
+    final step = x >= 1000
+        ? 50.0
+        : x >= 200
+            ? 10.0
+            : x >= 20
+                ? 5.0
+                : 1.0;
+    return (x / step - 1e-9).ceilToDouble() * step;
   }
 
   static InsightGoal? _topGoalName(SaraAnalysis a) {

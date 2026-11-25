@@ -10,6 +10,8 @@ import '../localization/app_localizations.dart';
 import '../router/shell_keys.dart';
 import '../theme/app_colors.dart';
 import 'api_interceptors.dart';
+import 'network_quality_interceptor.dart';
+import '../services/connectivity_service.dart';
 import 'retry_interceptor.dart';
 import 'token_refresh_interceptor.dart';
 import '../storage/secure_storage.dart';
@@ -111,6 +113,8 @@ void _showReadOnlyDialog() {
 final dioProvider = Provider<Dio>((ref) {
   final secureStorage = ref.watch(secureStorageProvider);
   final baseUrl = ref.watch(serverBaseUrlProvider);
+  final connectivity = ref.read(connectivityServiceProvider)
+    ..attachServer(baseUrl);
   final dio = Dio(
     BaseOptions(
       baseUrl: baseUrl,
@@ -401,6 +405,11 @@ final dioProvider = Provider<Dio>((ref) {
         handler.next(gatewayDownAsOffline(e));
       },
     ),
+    // Last on purpose: times the request as it leaves the device and sees
+    // gateway failures already mapped to "offline". A connected but very
+    // poor link is then reported offline app-wide, and requests started in
+    // that state get short timeouts so nothing hangs.
+    NetworkQualityInterceptor(connectivity.quality),
   ]);
 
   return dio;

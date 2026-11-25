@@ -6,10 +6,12 @@
     reference to the base @mipmap/ic_launcher App Icon — no custom image)
   - @raw/sound_1 / @raw/sound_2 (notification channel sounds referenced via
     android.resource:// URIs; stripped files mean silent channels)
+  - @drawable/sara_avatar_notif (Sara's large icon on her smart
+    notifications, resolved by name from Dart and Kotlin)
   Keep them explicitly. Orphan raw files (alarm.wav, crystal_echo.mp3) stay
   strippable — nothing references them.
 -->
 <resources xmlns:tools="http://schemas.android.com/tools"
-    tools:keep="@drawable/ic_launcher,@raw/sound_1,@raw/sound_2" />
+    tools:keep="@drawable/ic_launcher,@drawable/sara_avatar_notif,@raw/sound_1,@raw/sound_2" />
 
 

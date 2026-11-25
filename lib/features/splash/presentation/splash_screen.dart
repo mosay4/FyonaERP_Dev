@@ -12,6 +12,8 @@ import '../../../shared/providers/auth_provider.dart';
 import '../../../shared/services/notification_router.dart';
 import '../../auth/presentation/providers/biometric_provider.dart';
 import '../../auth/domain/services/biometric_service.dart';
+import 'brand_entry_view.dart';
+import 'brand_handoff_page.dart';
 import 'intro_video.dart';
 import '../domain/intro_replay_policy.dart';
 
@@ -37,7 +39,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   bool _isPausedByLifecycle = false;
   bool _initStarted = false;
   /// True when the intro motion was skipped (played < 72h ago): the splash
-  /// then stays pure black and hands over with no fade/delay.
+  /// then shows the calm branded entry (logo reveal, no spinner) and hands
+  /// over with a crossfade into the first screen.
   bool _introSkipped = false;
 
   late AnimationController _fadeController;
@@ -85,7 +88,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       if (!mounted || _hasNavigated) return;
       if (!play) {
         StartupLogger.log('VIDEO_SKIPPED', 'played < 72h ago');
-        _introSkipped = true;
+        setState(() => _introSkipped = true);
         _navigateToApp();
         return;
       }
@@ -130,6 +133,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     } else {
       // Video failed — keep pure black briefly then proceed to app.
       StartupLogger.log('VIDEO_READY_FAILED', 'skipping video');
+      setState(() => _introSkipped = true);
       await Future.delayed(const Duration(milliseconds: 300));
       if (mounted) _navigateToApp();
     }
@@ -219,7 +223,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     if (!mounted || _hasFaded) return;
     _hasFaded = true;
     if (_introSkipped) {
-      // Nothing was shown — no fade-out, hand over immediately.
+      // The branded entry stays on screen; the next page crossfades over it.
       _finalizeNavigation();
       return;
     }
@@ -282,6 +286,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   void _go(String route) {
     if (!mounted) return;
+    // The first screen fades/scales in over the branded entry (no jump).
+    BrandEntryHandoff.arm();
     context.go(route);
     // A notification tapped while the app was terminated waited for this
     // exact moment — deliver it right after the intro finishes.
@@ -344,6 +350,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
           children: [
             // Pure black base — NO logo, NO poster, no placeholder.
             const ColoredBox(color: Colors.black),
+            // Intro skipped (or unavailable): calm branded entry instead of
+            // a bare black screen / loading spinner while the app prepares.
+            if (_introSkipped) const BrandEntryView(),
             // Video fullscreen over black, fades in after init success.
             if (_isVideoReady)
               FadeTransition(opacity: _fadeAnimation, child: videoLayer),

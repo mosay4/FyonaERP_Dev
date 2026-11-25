@@ -35,6 +35,9 @@ class InsightTx {
   final double? originalAmount;
   final String? originalCurrency;
 
+  /// Free-text description / merchant (used to spot repeat charges).
+  final String? note;
+
   const InsightTx({
     required this.id,
     required this.type,
@@ -45,6 +48,7 @@ class InsightTx {
     this.toGoal = false,
     this.originalAmount,
     this.originalCurrency,
+    this.note,
   });
 
   bool get isIncome => type == 'income';
@@ -117,6 +121,66 @@ class InsightBudget {
   });
 }
 
+/// One active recurring rule (amounts in BASE currency).
+class InsightRecurring {
+  final String id;
+  final String name;
+  final String category;
+  final bool isIncome;
+
+  /// One occurrence.
+  final double amountBase;
+
+  /// Monthly equivalent (weekly × 4.35, yearly ÷ 12, …).
+  final double monthlyBase;
+  const InsightRecurring({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.isIncome,
+    required this.amountBase,
+    required this.monthlyBase,
+  });
+}
+
+/// A dated money commitment: the next occurrence(s) of a recurring bill
+/// ('recurring'), a debt the user must pay ('debt') or a debt owed TO the
+/// user ('debtIn'). [amountBase] drives the maths, native for display.
+class InsightObligation {
+  final String id;
+  final String kind;
+  final String name;
+  final double amountBase;
+  final double amountNative;
+  final String currency;
+
+  /// Local due day.
+  final DateTime due;
+
+  /// The user already set their own reminder for it (Sara stays quiet
+  /// unless money is actually short).
+  final bool reminded;
+  const InsightObligation({
+    required this.id,
+    required this.kind,
+    required this.name,
+    required this.amountBase,
+    required this.amountNative,
+    required this.currency,
+    required this.due,
+    this.reminded = false,
+  });
+
+  bool get isOutflow => kind == 'recurring' || kind == 'debt';
+}
+
+/// A scheduled income (recurring income rule occurrence), base currency.
+class InsightIncomeEvent {
+  final DateTime date;
+  final double amountBase;
+  const InsightIncomeEvent(this.date, this.amountBase);
+}
+
 class SaraInsightInput {
   final DateTime now;
   final String baseCurrency;
@@ -127,6 +191,15 @@ class SaraInsightInput {
   /// Liquid balance (banks + cash) in base currency, null when unknown.
   final double? liquidBalance;
 
+  /// Active recurring rules (bills and incomes).
+  final List<InsightRecurring> recurring;
+
+  /// Upcoming bills / debts (and money owed to the user), absolute dates.
+  final List<InsightObligation> obligations;
+
+  /// Upcoming scheduled incomes (recurring income rules).
+  final List<InsightIncomeEvent> scheduledIncomes;
+
   const SaraInsightInput({
     required this.now,
     required this.baseCurrency,
@@ -134,6 +207,9 @@ class SaraInsightInput {
     this.goals = const [],
     this.budgets = const [],
     this.liquidBalance,
+    this.recurring = const [],
+    this.obligations = const [],
+    this.scheduledIncomes = const [],
   });
 
   SaraInsightInput atTime(DateTime t) => SaraInsightInput(
@@ -143,6 +219,9 @@ class SaraInsightInput {
         goals: goals,
         budgets: budgets,
         liquidBalance: liquidBalance,
+        recurring: recurring,
+        obligations: obligations,
+        scheduledIncomes: scheduledIncomes,
       );
 }
 
@@ -189,6 +268,50 @@ class BudgetAlert {
       : 'budget:${budget.id}:${level.name}';
 }
 
+/// The first upcoming bill the balance cannot cover before payday.
+class BillRisk {
+  final InsightObligation obligation;
+
+  /// How much is missing (base) once usual daily spending is kept.
+  final double shortBy;
+  const BillRisk(this.obligation, this.shortBy);
+}
+
+/// Month-end outlook (base currency).
+class MonthProjection {
+  final double spentSoFar;
+  final double projectedSpend;
+  final double expectedIncome;
+  final int daysLeft;
+  const MonthProjection({
+    required this.spentSoFar,
+    required this.projectedSpend,
+    required this.expectedIncome,
+    required this.daysLeft,
+  });
+
+  /// Positive = money left at month end, negative = shortfall.
+  double get net => expectedIncome - projectedSpend;
+}
+
+/// A charge that repeats monthly but is not a recurring rule yet.
+class SubscriptionHint {
+  final String signature;
+  final String label;
+  final double amountBase;
+  final double? originalAmount;
+  final String? originalCurrency;
+  final int count;
+  const SubscriptionHint({
+    required this.signature,
+    required this.label,
+    required this.amountBase,
+    this.originalAmount,
+    this.originalCurrency,
+    required this.count,
+  });
+}
+
 class SaraAnalysis {
   final DateTime now;
   final String baseCurrency;
@@ -221,6 +344,38 @@ class SaraAnalysis {
   final int loggingStreak;
   final int peakHour;
 
+  /// Usual daily spending WITHOUT the recurring bills' share (base).
+  final double discretionaryDaily;
+
+  /// Monthly recurring bills spread per day (base).
+  final double recurringDaily;
+
+  /// Bills + payable debts due before the next income (base).
+  final double obligationsBeforePayday;
+  final BillRisk? billRisk;
+
+  /// Payable debts due within 2 days or overdue (≤ 30 days), earliest
+  /// first; only those without the user's own reminder.
+  final List<InsightObligation> debtsDue;
+
+  /// Money owed to the user due within 2 days (or overdue ≤ 14 days).
+  final List<InsightObligation> collectDue;
+  final MonthProjection? projection;
+  final List<SubscriptionHint> subscriptions;
+
+  /// Consecutive full days (ending yesterday) without any spending, only
+  /// counted for users who usually log daily (else it is missing data).
+  final int noSpendDays;
+
+  /// Today is (or is predicted to be) the user's payday.
+  final bool isPayday;
+
+  /// "Pay yourself first" amount for today (base), 0 when none.
+  final double paydaySave;
+
+  /// Active goal whose deadline is within 14 days and still unfunded.
+  final InsightGoal? deadlineGoal;
+
   const SaraAnalysis({
     required this.now,
     required this.baseCurrency,
@@ -247,6 +402,18 @@ class SaraAnalysis {
     required this.savedThisWeek,
     required this.loggingStreak,
     required this.peakHour,
+    this.discretionaryDaily = 0,
+    this.recurringDaily = 0,
+    this.obligationsBeforePayday = 0,
+    this.billRisk,
+    this.debtsDue = const [],
+    this.collectDue = const [],
+    this.projection,
+    this.subscriptions = const [],
+    this.noSpendDays = 0,
+    this.isPayday = false,
+    this.paydaySave = 0,
+    this.deadlineGoal,
   });
 
   double get allocatedTotal =>
@@ -328,10 +495,14 @@ class SaraInsightEngine {
     span = span.clamp(1, windowDays);
     final confident = span >= 7 && txs.length >= 3;
 
-    // Income + cadence.
+    // Income + cadence. The cadence comes from the user's main income
+    // stream (the income category with the largest total seen on 2+ days,
+    // e.g. «Salary»), so a one-off gift or refund never skews payday.
     final incomes = txs.where((t) => t.isIncome).toList();
     final incomeSum = incomes.fold<double>(0, (s, t) => s + t.amount);
-    final cadence = incomeCadence(incomes.map((t) => t.date).toList());
+    final payday = _paydayStream(incomes);
+    final cadence = incomeCadence(payday.map((t) => t.date).toList()) ??
+        incomeCadence(incomes.map((t) => t.date).toList());
     final incomeDays = incomes.map((t) => _day(t.date)).toSet().length;
     // One salary observed in a short history must be spread over a full
     // cycle, never over the few days we happen to have seen.
@@ -344,19 +515,50 @@ class SaraInsightEngine {
     final spendSum = spending.fold<double>(0, (s, t) => s + t.amount);
     final avgDailyExpense = spendSum / span;
 
+    // Typical payday amount (median of the main stream).
+    final paydayAmounts = payday.map((t) => t.amount).toList()..sort();
+    final typicalPay =
+        paydayAmounts.isEmpty ? 0.0 : paydayAmounts[paydayAmounts.length ~/ 2];
+
+    // Next income: a scheduled (recurring) income wins over prediction;
+    // monthly pay steps by calendar month on the same day-of-month.
     DateTime? nextIncome;
-    var daysUntilIncome = 30;
-    if (incomes.isNotEmpty) {
-      final last = incomes
+    var paidToday = false;
+    final scheduled = input.scheduledIncomes
+        .map((e) => _day(e.date))
+        .where((d) => !d.isBefore(today))
+        .toList()
+      ..sort();
+    if (scheduled.isNotEmpty && scheduled.first == today) paidToday = true;
+    final future = scheduled.where((d) => d.isAfter(today)).toList();
+    if (future.isNotEmpty) nextIncome = future.first;
+    final stream = payday.isNotEmpty ? payday : incomes;
+    if (stream.isNotEmpty) {
+      final last = stream
           .map((t) => _day(t.date))
           .reduce((a, b) => a.isAfter(b) ? a : b);
-      final step = cadence ?? 30;
-      var n = last.add(Duration(days: step));
-      while (!n.isAfter(today)) {
-        n = n.add(Duration(days: step));
+      if (last == today) {
+        // The main income landed today (a small top-up does not count).
+        final todayPay = stream
+            .where((t) => _day(t.date) == today)
+            .fold<double>(0, (s, t) => s + t.amount);
+        if (typicalPay <= 0 || todayPay >= typicalPay * 0.5) paidToday = true;
       }
-      nextIncome = n;
-      daysUntilIncome = math.max(1, _daysBetween(today, n));
+      final step = cadence ?? 30;
+      var k = 1;
+      var n = _stepIncome(last, step, k);
+      while (!n.isAfter(today) && k < 400) {
+        // Predicted payday is today (salary not logged yet).
+        if (n == today && cadence != null) paidToday = true;
+        k++;
+        n = _stepIncome(last, step, k);
+      }
+      // A scheduled (recurring) income wins over the prediction.
+      nextIncome ??= n;
+    }
+    var daysUntilIncome = 30;
+    if (nextIncome != null) {
+      daysUntilIncome = math.max(1, _daysBetween(today, nextIncome));
     }
 
     // Today.
@@ -368,16 +570,130 @@ class SaraInsightEngine {
         .where((t) => t.isSpending && _day(t.date) == today)
         .fold<double>(0, (s, t) => s + t.amount);
 
+    // Recurring bills: their monthly share is already inside the average
+    // when the user logs them, so the discretionary pace excludes it (with
+    // a floor: the bills may not be logged as transactions at all).
+    final recurringDaily = input.recurring
+            .where((r) => !r.isIncome)
+            .fold<double>(0, (s, r) => s + r.monthlyBase) /
+        30.4;
+    final discretionary = recurringDaily > 0
+        ? math.max(avgDailyExpense - recurringDaily, avgDailyExpense * 0.6)
+        : avgDailyExpense;
+
+    // Upcoming outflows (bills + payable debts; overdue debts count now).
+    final outflows = input.obligations
+        .where((o) =>
+            o.isOutflow &&
+            o.amountBase > 0 &&
+            (!_day(o.due).isBefore(today) ||
+                (o.kind == 'debt' && _daysBetween(o.due, today) <= 30)))
+        .toList()
+      ..sort((a, b) => a.due.compareTo(b.due));
+    DateTime dueOf(InsightObligation o) =>
+        _day(o.due).isBefore(today) ? today : _day(o.due);
+    final horizon = math.max(daysUntilIncome, 7);
+    final billsInHorizon = outflows
+        .where((o) => _daysBetween(today, dueOf(o)) < horizon)
+        .fold<double>(0, (s, o) => s + o.amountBase);
+    final beforePayday = outflows
+        .where((o) =>
+            nextIncome == null || dueOf(o).isBefore(nextIncome))
+        .toList();
+    final obligationsBeforePayday =
+        beforePayday.fold<double>(0, (s, o) => s + o.amountBase);
+
     // Affordability — the hard ceiling for any goal suggestion.
     final affordable = _affordableToday(
       confident: confident,
       hasIncome: incomes.isNotEmpty,
       avgDailyIncome: avgDailyIncome,
       avgDailyExpense: avgDailyExpense,
+      discretionaryDaily: discretionary,
+      recurringDaily: recurringDaily,
       liquid: input.liquidBalance,
       daysUntilIncome: daysUntilIncome,
+      billsInHorizon: billsInHorizon,
       todayExpense: todayExpense,
     );
+
+    // Bill risk: walk the bills due before payday in date order, keeping
+    // the usual daily spending; the first one the balance cannot cover
+    // (within the next 7 days, so it is actionable) is flagged.
+    BillRisk? billRisk;
+    final liquid = input.liquidBalance;
+    if (liquid != null && beforePayday.isNotEmpty) {
+      var cum = 0.0;
+      for (final o in beforePayday) {
+        final d = _daysBetween(today, dueOf(o));
+        if (d > 7) break;
+        cum += o.amountBase;
+        final need = cum + (confident ? discretionary * d : 0);
+        final short = need - liquid;
+        if (short > math.max(1.0, o.amountBase * 0.02)) {
+          billRisk = BillRisk(o, short);
+          break;
+        }
+      }
+    }
+
+    // Debts: payable due within 2 days (or overdue ≤ 30), without the
+    // user's own reminder; money owed to the user due soon.
+    bool soon(InsightObligation o, int overdueDays) {
+      final d = _daysBetween(today, _day(o.due));
+      return d <= 2 && d >= -overdueDays;
+    }
+
+    final debtsDue = input.obligations
+        .where((o) => o.kind == 'debt' && !o.reminded && soon(o, 30))
+        .toList()
+      ..sort((a, b) => a.due.compareTo(b.due));
+    final collectDue = input.obligations
+        .where((o) => o.kind == 'debtIn' && !o.reminded && soon(o, 14))
+        .toList()
+      ..sort((a, b) => a.due.compareTo(b.due));
+
+    // Month-end outlook: spent so far + usual pace for the days left +
+    // bills still due this month, against income received + expected.
+    MonthProjection? projection;
+    final monthEnd = DateTime(today.year, today.month + 1, 0);
+    final daysLeft = _daysBetween(today, monthEnd);
+    if (confident &&
+        today.day >= 10 &&
+        daysLeft >= 3 &&
+        (cadence != null || scheduled.isNotEmpty) &&
+        incomes.isNotEmpty) {
+      final monthStart = DateTime(today.year, today.month, 1);
+      bool inMonth(DateTime d) =>
+          !_day(d).isBefore(monthStart) && !_day(d).isAfter(today);
+      final spentSoFar = input.transactions
+          .where((t) => t.isSpending && inMonth(t.date))
+          .fold<double>(0, (s, t) => s + t.amount);
+      final incomeSoFar = input.transactions
+          .where((t) => t.isIncome && inMonth(t.date))
+          .fold<double>(0, (s, t) => s + t.amount);
+      final billsLeft = outflows
+          .where((o) =>
+              dueOf(o).isAfter(today) && !dueOf(o).isAfter(monthEnd))
+          .fold<double>(0, (s, o) => s + o.amountBase);
+      var expected = incomeSoFar;
+      final upcomingScheduled = input.scheduledIncomes.where((e) =>
+          _day(e.date).isAfter(today) && !_day(e.date).isAfter(monthEnd));
+      if (upcomingScheduled.isNotEmpty) {
+        expected +=
+            upcomingScheduled.fold<double>(0, (s, e) => s + e.amountBase);
+      } else if (nextIncome != null && !nextIncome.isAfter(monthEnd)) {
+        expected += typicalPay;
+      }
+      if (expected > 0) {
+        projection = MonthProjection(
+          spentSoFar: spentSoFar,
+          projectedSpend: spentSoFar + discretionary * daysLeft + billsLeft,
+          expectedIncome: expected,
+          daysLeft: daysLeft,
+        );
+      }
+    }
 
     // Spending level: last 7 days vs the user's OWN baseline before that.
     final recentStart = today.subtract(const Duration(days: 6));
@@ -444,6 +760,69 @@ class SaraInsightEngine {
         .where((t) => t.toGoal && !_day(t.date).isBefore(recentStart))
         .fold<double>(0, (s, t) => s + t.amount);
 
+    // Payday: "pay yourself first" — a cycle's worth of the goals' pace,
+    // capped by what the pay leaves after usual spending and bills (and
+    // by the real balance once the salary is logged).
+    var paydaySave = 0.0;
+    if (paidToday && confident) {
+      final cycle = math.max(7, cadence ?? 30);
+      final pay = typicalPay > 0 ? typicalPay : avgDailyIncome * cycle;
+      final billsCycle = outflows
+          .where((o) => _daysBetween(today, dueOf(o)) < cycle)
+          .fold<double>(0, (s, o) => s + o.amountBase);
+      final free = pay -
+          discretionary * cycle * 1.1 -
+          math.max(recurringDaily * cycle, billsCycle);
+      var cap = free * flowSafety;
+      final loggedPay = incomes.any((t) => _day(t.date) == today);
+      if (liquid != null && loggedPay) {
+        cap = math.min(
+            cap, liquid - billsCycle - discretionary * cycle * 1.1);
+      }
+      final need = activeGoals.isEmpty
+          ? pay * 0.1
+          : activeGoals.fold<double>(
+              0,
+              (s, g) => s +
+                  math.min(g.remainingBase, requiredDaily(g, today) * cycle));
+      paydaySave = niceFloor(math.min(need, cap));
+    }
+
+    // Goal with a close deadline that still needs money.
+    InsightGoal? deadlineGoal;
+    for (final g in activeGoals) {
+      final dl = g.deadline;
+      if (dl == null) continue;
+      final left = _daysBetween(today, dl);
+      if (left < 0 || left > 14) continue;
+      if (deadlineGoal == null ||
+          dl.isBefore(deadlineGoal.deadline!)) {
+        deadlineGoal = g;
+      }
+    }
+
+    // No-spend streak, only for users who usually log spending daily and
+    // were active in the app lately (otherwise silence = missing data).
+    var noSpend = 0;
+    {
+      final spendDays = spending.map((t) => _day(t.date)).toSet();
+      var d = today.subtract(const Duration(days: 1));
+      while (!spendDays.contains(d) && noSpend < 30 && !d.isBefore(windowStart)) {
+        noSpend++;
+        d = d.subtract(const Duration(days: 1));
+      }
+      final priorEnd = d;
+      final priorStart = priorEnd.subtract(const Duration(days: 27));
+      final priorDays = spendDays
+          .where((x) => !x.isBefore(priorStart) && !x.isAfter(priorEnd))
+          .length;
+      final yesterday = today.subtract(const Duration(days: 1));
+      final active = input.transactions.any((t) =>
+          !_day(t.createdAt ?? t.date).isBefore(yesterday) &&
+          !_day(t.createdAt ?? t.date).isAfter(today));
+      if (noSpend < 2 || priorDays < 17 || !active) noSpend = 0;
+    }
+
     return SaraAnalysis(
       now: now,
       baseCurrency: input.baseCurrency,
@@ -474,7 +853,106 @@ class SaraInsightEngine {
           .map((t) => t.createdAt!)
           .where((c) => !_day(c).isBefore(windowStart))
           .toList()),
+      discretionaryDaily: discretionary,
+      recurringDaily: recurringDaily,
+      obligationsBeforePayday: obligationsBeforePayday,
+      billRisk: billRisk,
+      debtsDue: debtsDue,
+      collectDue: collectDue,
+      projection: projection,
+      subscriptions: detectSubscriptions(spending, input.recurring, today),
+      noSpendDays: noSpend,
+      isPayday: paidToday,
+      paydaySave: paydaySave,
+      deadlineGoal: deadlineGoal,
     );
+  }
+
+  /// The user's main income stream: the income category with the largest
+  /// total among those seen on 2+ distinct days (e.g. the salary). Empty
+  /// when no category repeats.
+  static List<InsightTx> _paydayStream(List<InsightTx> incomes) {
+    final byCat = <String, List<InsightTx>>{};
+    for (final t in incomes) {
+      byCat.putIfAbsent(t.category.trim().toLowerCase(), () => []).add(t);
+    }
+    List<InsightTx> best = const [];
+    var bestSum = 0.0;
+    byCat.forEach((_, list) {
+      if (list.map((t) => _day(t.date)).toSet().length < 2) return;
+      final sum = list.fold<double>(0, (s, t) => s + t.amount);
+      if (sum > bestSum) {
+        bestSum = sum;
+        best = list;
+      }
+    });
+    return best;
+  }
+
+  /// [k]-th income after [last]: calendar months for a monthly cadence
+  /// (same day-of-month, clamped to short months), plain days otherwise.
+  static DateTime _stepIncome(DateTime last, int cadence, int k) {
+    if (cadence == 30) return _addMonths(last, k);
+    return _day(last).add(Duration(days: cadence * k));
+  }
+
+  static DateTime _addMonths(DateTime d, int months) {
+    final total = d.month - 1 + months;
+    final y = d.year + total ~/ 12;
+    final m = total % 12 + 1;
+    final last = DateTime(y, m + 1, 0).day;
+    return DateTime(y, m, math.min(d.day, last));
+  }
+
+  // ── Repeat charges ────────────────────────────────────────
+
+  static String _norm(String s) =>
+      s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  /// Charges that repeat about monthly with the SAME amount but are not a
+  /// recurring rule yet (forgotten subscriptions). A description match
+  /// needs 2 charges; a bare category needs 3 (coincidences are common).
+  static List<SubscriptionHint> detectSubscriptions(
+    List<InsightTx> spending,
+    List<InsightRecurring> recurring,
+    DateTime today,
+  ) {
+    final groups = <String, List<InsightTx>>{};
+    for (final t in spending) {
+      final note = _norm(t.note ?? '');
+      final sig = note.isNotEmpty ? 'n:$note' : 'c:${_norm(t.category)}';
+      final amt = (t.originalAmount ?? t.amount).toStringAsFixed(2);
+      groups.putIfAbsent('$sig|$amt|${t.originalCurrency ?? ''}', () => []).add(t);
+    }
+    final out = <SubscriptionHint>[];
+    groups.forEach((key, list) {
+      final byNote = key.startsWith('n:');
+      final days = list.map((t) => _day(t.date)).toSet().toList()..sort();
+      if (days.length < (byNote ? 2 : 3)) return;
+      for (var i = 1; i < days.length; i++) {
+        final g = _daysBetween(days[i - 1], days[i]);
+        if (g < 26 || g > 35) return;
+      }
+      if (_daysBetween(days.last, today) > 35) return; // stopped already
+      final t = list.last;
+      final label = byNote ? (t.note ?? '').trim() : t.category;
+      final known = recurring.any((r) =>
+          !r.isIncome &&
+          (r.amountBase - t.amount).abs() <= math.max(0.5, t.amount * 0.02) &&
+          (_norm(r.name) == _norm(label) ||
+              _norm(r.category) == _norm(t.category)));
+      if (known) return;
+      out.add(SubscriptionHint(
+        signature: key,
+        label: label,
+        amountBase: t.amount,
+        originalAmount: t.originalAmount,
+        originalCurrency: t.originalCurrency,
+        count: days.length,
+      ));
+    });
+    out.sort((a, b) => b.amountBase.compareTo(a.amountBase));
+    return out;
   }
 
   static double _affordableToday({
@@ -482,20 +960,26 @@ class SaraInsightEngine {
     required bool hasIncome,
     required double avgDailyIncome,
     required double avgDailyExpense,
+    required double discretionaryDaily,
+    required double recurringDaily,
     required double? liquid,
     required int daysUntilIncome,
+    required double billsInHorizon,
     required double todayExpense,
   }) {
     if (!confident) return 0;
     double? flow;
     if (hasIncome) {
-      flow = math.max(0, avgDailyIncome - avgDailyExpense) * flowSafety;
+      // Bills that are not logged as transactions still cost money.
+      final outflow = math.max(avgDailyExpense, recurringDaily);
+      flow = math.max(0, avgDailyIncome - outflow) * flowSafety;
     }
     double? cashCap;
     if (liquid != null) {
       final horizon = math.max(daysUntilIncome, 7);
-      // Keep enough to cover usual spending until the next income + 10%.
-      final reserve = avgDailyExpense * horizon * 1.1;
+      // Keep enough for usual spending until the next income (+10%) AND
+      // every bill / debt that falls due before it.
+      final reserve = discretionaryDaily * horizon * 1.1 + billsInHorizon;
       final free = liquid - reserve;
       cashCap = free <= 0 ? 0 : free / horizon;
     }

@@ -11,6 +11,37 @@ def utcnow():
     return datetime.now(timezone.utc)
 
 
+# Personal bank account kinds: جاري (current) / توفير (savings).
+VALID_ACCOUNT_TYPES = ("current", "savings")
+DEFAULT_ACCOUNT_TYPE = "current"
+_ACCOUNT_TYPE_ALIASES = {
+    "current": "current", "checking": "current", "جاري": "current",
+    "savings": "savings", "saving": "savings", "توفير": "savings",
+}
+
+
+def normalize_account_type(value):
+    """Canonical account type ('current'/'savings') for [value].
+
+    Returns None for a missing/blank value and raises ValueError for an
+    unknown one, so callers can tell "not stated" from "invalid".
+    """
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    canonical = _ACCOUNT_TYPE_ALIASES.get(text)
+    if canonical is None:
+        raise ValueError("account_type must be 'current' or 'savings'")
+    return canonical
+
+
+def effective_account_type(row) -> str:
+    """The account type a client should show (legacy NULL rows = current)."""
+    return getattr(row, "account_type", None) or DEFAULT_ACCOUNT_TYPE
+
+
 class PersonalBankAccount(Base):
     __tablename__ = "personal_bank_accounts"
 
@@ -20,6 +51,11 @@ class PersonalBankAccount(Base):
     currency = Column(String(10), default="SAR")
     balance = Column(Numeric(12, 2), default=0)
     notes = Column(Text)
+    # 'current' (جاري) / 'savings' (توفير). NULL = never stated (rows created
+    # before the column existed, or by older clients) and reads as 'current';
+    # it lets a device push its legacy local type once without ever
+    # overwriting a type that was already stated on the server.
+    account_type = Column(String(20), nullable=True)
     sort_order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
     is_deleted = Column(Boolean, default=False)

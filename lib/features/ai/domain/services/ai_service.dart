@@ -6,6 +6,7 @@ import '../../../../core/network/dio_provider.dart';
 import '../../../../core/network/api_endpoints.dart';
 import '../../../../core/offline/offline_sara.dart';
 import '../../../../core/offline/offline_guard.dart';
+import '../../presentation/widgets/sara_offline_notice.dart';
 import '../../../../shared/widgets/sara_action_dispatcher.dart';
 
 /// App state snapshot sent to Sara for full app awareness.
@@ -212,8 +213,11 @@ class AiService {
     } catch (e) {
       // Offline fallback: answer locally from the same services the UI uses
       // (never fake success — local writers still go through the outbox).
+      // Personal Sara is online-only: no local answers from device data.
       final r = ref ?? _ref;
-      if (r != null && isConnectivityError(e)) {
+      if (r != null &&
+          SaraOnlinePolicy.allowsOfflineFallback(accountType) &&
+          isConnectivityError(e)) {
         final text = await OfflineSara.answer(
           ref: r,
           query: query,
@@ -334,8 +338,11 @@ class AiService {
       return AiAgentResponse.fromJson(resp.data ?? {});
     } catch (e) {
       // Offline fallback: same local assistant path as askQuestion.
+      // Personal Sara is online-only: no local answers from device data.
       final r = ref ?? _ref;
-      if (r != null && isConnectivityError(e)) {
+      if (r != null &&
+          SaraOnlinePolicy.allowsOfflineFallback(accountType) &&
+          isConnectivityError(e)) {
         final text = await OfflineSara.answer(
           ref: r,
           query: query,

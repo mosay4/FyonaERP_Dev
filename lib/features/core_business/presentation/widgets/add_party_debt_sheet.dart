@@ -3,6 +3,8 @@ import 'business_number_field.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/localization/app_localizations.dart';
+import '../../../../shared/widgets/biz_currency_items.dart'
+    show readBizCurrencies;
 import '../../../../core/services/currency/enabled_currencies_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/amount_input_formatter.dart';
@@ -40,7 +42,8 @@ Future<bool> showAddPartyDebtSheet(
   final userId = ref.read(currentUserIdProvider);
   var currencies = <String>[];
   try {
-    currencies = (await loadEnabledCurrencies(userId)).toList()..sort();
+    // Business set (profile settings), never the Personal one.
+    currencies = await readBizCurrencies(ref);
   } catch (_) {}
   var currency = '';
   try {

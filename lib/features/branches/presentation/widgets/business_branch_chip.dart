@@ -50,8 +50,8 @@ String? businessBranchChipLabel({
   return mainBranchLabel;
 }
 
-/// Small chip beside «قسم الأعمال» naming the branch in use. Hidden entirely
-/// when the merchant has only one branch. Rebuilds on every branch switch.
+/// Small chip under the «قسم الأعمال» title naming the branch in use. Hidden
+/// entirely when the merchant has only one branch. Rebuilds on every switch.
 class BusinessBranchChip extends ConsumerWidget {
   const BusinessBranchChip({super.key});
 
@@ -77,27 +77,34 @@ class BusinessBranchChip extends ConsumerWidget {
 }
 
 /// Visual of the chip (theme-aware through the mode-aware [AppColors]).
+///
+/// Sits on its own line under the section title, so it may use the whole
+/// header width: the full branch name shows, with an ellipsis only when the
+/// name is truly longer than the available space (capped at [maxWidth]).
 class BranchChipView extends StatelessWidget {
   const BranchChipView({super.key, required this.label, this.allMode = false});
 
   final String label;
   final bool allMode;
 
+  static const double maxWidth = 320;
+
   @override
   Widget build(BuildContext context) {
     final light = AppColors.isLightMode;
+    final accent = light ? AppColors.primary : AppColors.primaryLight;
     return Padding(
-      padding: const EdgeInsetsDirectional.only(start: 8),
+      padding: const EdgeInsets.only(top: 3),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 140),
+        constraints: const BoxConstraints(maxWidth: maxWidth),
         child: Container(
           key: const ValueKey('business-branch-chip'),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          padding: const EdgeInsetsDirectional.fromSTEB(8, 2, 10, 2),
           decoration: BoxDecoration(
-            color: AppColors.primary.withAlpha(light ? 18 : 34),
+            color: AppColors.primary.withAlpha(light ? 16 : 30),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: AppColors.primary.withAlpha(light ? 70 : 90),
+              color: AppColors.primary.withAlpha(light ? 60 : 80),
               width: 0.8,
             ),
           ),
@@ -106,10 +113,10 @@ class BranchChipView extends StatelessWidget {
             children: [
               Icon(
                 allMode ? Icons.account_tree_outlined : Icons.storefront_outlined,
-                size: 12,
-                color: light ? AppColors.primary : AppColors.primaryLight,
+                size: 13,
+                color: accent,
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 5),
               Flexible(
                 child: Text(
                   label,
@@ -118,10 +125,10 @@ class BranchChipView extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontFamily: 'Cairo',
-                    fontSize: R.fontSize(context, 11),
+                    fontSize: R.fontSize(context, 11.5),
                     fontWeight: FontWeight.w700,
                     height: 1.4,
-                    color: AppColors.textPrimary,
+                    color: light ? AppColors.textPrimary : AppColors.textPrimary.withAlpha(235),
                   ),
                 ),
               ),

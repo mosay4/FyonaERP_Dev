@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/core/utils/currency_formatter.dart' show currencyFlagEmoji;
+import 'package:fyona_flutter/core/services/currency/business_currency_scope.dart'
+    show bizEnabledCurrenciesProvider;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fyona_flutter/core/localization/app_localizations.dart';
@@ -426,26 +429,40 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('hub currency picker lists the business real currencies', (
+  testWidgets('hub currency picker lists exactly the Business enabled set, '
+      'each with its flag', (
     tester,
   ) async {
     await preload(tester);
+    // The server reports AED, SAR and USD; only AED + USD are enabled in the
+    // Business profile settings → the picker shows exactly those two.
     final fake = FakeReportsApi(ApiClient(dio: Dio()));
     tester.view.physicalSize = const Size(390, 2600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [businessReportsApiProvider.overrideWithValue(fake)],
+        overrides: [
+          businessReportsApiProvider.overrideWithValue(fake),
+          bizEnabledCurrenciesProvider.overrideWith(
+            (ref) async => {'AED', 'USD'},
+          ),
+        ],
         child: hostRouted(const ReportsHubPage()),
       ),
     );
     await pumpFor(tester, const Duration(milliseconds: 200), 14);
     await tester.tap(find.byIcon(Icons.currency_exchange_rounded).first);
     await pumpFor(tester, const Duration(milliseconds: 200), 4);
-    // Arabic UI shows the full Arabic currency name, not the ISO code.
+    // Arabic UI shows the full Arabic currency name next to its flag.
     expect(find.text('درهم إماراتي'), findsWidgets);
-    expect(find.text('AED'), findsNothing);
+    expect(find.byKey(const ValueKey('report-currency-AED')), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-currency-USD')), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-currency-SAR')), findsNothing);
+    expect(find.text(currencyFlagEmoji('AED')), findsOneWidget);
+    expect(find.text(currencyFlagEmoji('USD')), findsOneWidget);
+    expect(find.text('عملاتك'), findsNothing);
+    expect(find.text('كل العملات'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

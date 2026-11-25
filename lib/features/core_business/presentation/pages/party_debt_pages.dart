@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../../core/localization/app_localizations.dart';
+import '../../../../shared/widgets/biz_currency_items.dart'
+    show readBizCurrencies;
 import '../../../../core/services/currency/enabled_currencies_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/styled_snack.dart';
@@ -185,7 +187,8 @@ Future<String?> _pickCurrency(
   WidgetRef ref,
   String? current,
 ) async {
-  final enabled = await loadEnabledCurrencies(ref.read(currentUserIdProvider));
+  // Business set (profile settings), never the Personal one.
+  final enabled = await readBizCurrencies(ref);
   if (!context.mounted || enabled.isEmpty) return null;
   final sorted = enabled.toList()..sort();
   return showDialog<String>(

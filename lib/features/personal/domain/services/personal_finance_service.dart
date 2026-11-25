@@ -591,7 +591,8 @@ class PersonalFinanceService {
   static String cashTypeKey(String? type) {
     final t = (type ?? 'checking').trim().toLowerCase();
     if (t == 'cash') return 'checking';
-    return t;
+    // Server rows say current/savings; the device says checking/savings.
+    return personalAccountTypeFromServer(t);
   }
 
   static String _cashVaultKey(int userId) => 'cash_vault_$userId';
@@ -1857,10 +1858,14 @@ class PersonalFinanceService {
 
   /// Local-First CREATE: mirror + outbox first, background replay.
   Future<void> addBankAccount({required String bankName, required String currency, required double openingBalance, String? notes, String accountType = 'checking'}) async {
+    // The type (جاري/توفير) travels with the create (server vocabulary
+    // current/savings) so it syncs across devices and survives reinstall;
+    // the outbox replays it when the create was made offline.
+    final isCash = accountType == 'cash';
     await _offlineCreate('personal_bank_account', {
       'bank_name': bankName,
       'currency': currency,
-      'account_type': accountType,
+      if (!isCash) 'account_type': personalAccountTypeToServer(accountType),
       if (notes != null) 'notes': notes,
       'balance': openingBalance,
       'created_at': DateTime.now().toIso8601String(),
@@ -1868,6 +1873,7 @@ class PersonalFinanceService {
       'bank_name': bankName,
       'currency': currency,
       'account_type': accountType,
+      if (!isCash) 'account_type_set': true,
       'balance': openingBalance,
       if (notes != null) 'notes': notes,
       'created_at': DateTime.now().toIso8601String(),
@@ -1883,7 +1889,11 @@ class PersonalFinanceService {
     if (currency != null) data['currency'] = currency;
     if (balance != null) data['balance'] = balance;
     if (notes != null) data['notes'] = notes;
-    if (accountType != null) data['account_type'] = accountType;
+    if (accountType != null && accountType != 'cash') {
+      data['account_type'] = personalAccountTypeToServer(accountType);
+      // Local truth until the server confirms (the field is ignored there).
+      data['account_type_set'] = true;
+    }
     if (data.isEmpty) return;
     await _offlineUpdate('personal_bank_account', accountId, data);
     _scheduleSync();

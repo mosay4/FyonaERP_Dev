@@ -405,10 +405,21 @@ class SaraAmbientPainter extends CustomPainter {
       primary,
       c.typingAmp * (dark ? .07 : .05) + c.sendImpulse * .06,
     );
-    // Behind the reply as it streams, fading after.
+    // A brief, soft light where the user's message just landed (send).
+    final user = g.user?.center;
+    if (user != null) {
+      glow(user, w * .42, primary, c.sendImpulse * (dark ? .07 : .05));
+    }
+    // Behind the reply as it streams (each new word adds a faint swell),
+    // fading after.
     final reply = g.reply?.center;
     if (reply != null) {
-      glow(reply, w * .5, primary, c.respondFlow * (dark ? .06 : .04));
+      glow(
+        reply,
+        w * .5,
+        primary,
+        c.respondFlow * (dark ? .06 : .04) + c.revealPulse * (dark ? .025 : .018),
+      );
     }
   }
 

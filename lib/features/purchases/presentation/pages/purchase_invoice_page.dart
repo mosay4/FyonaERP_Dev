@@ -23,6 +23,7 @@ import '../widgets/purchase_items_section.dart';
 import '../widgets/purchase_payment_section.dart';
 import '../widgets/purchase_supplier_section.dart';
 import 'purchase_success_dialog.dart';
+import '../../../../shared/widgets/fresh_invoice_scroll.dart';
 
 /// Purchase invoice screen: supplier → items → payment → totals → issue.
 /// Same five-block, seconds-to-finish philosophy as the sale invoice.
@@ -184,11 +185,7 @@ class _PurchaseInvoicePageState extends ConsumerState<PurchaseInvoicePage>
   /// form, with the list gliding to its start at the same time.
   void _startFresh() {
     _fresh.forward(from: 0);
-    if (_scroll.hasClients && _scroll.offset > 0) {
-      unawaited(_scroll.animateTo(0,
-          duration: const Duration(milliseconds: 420),
-          curve: Curves.easeOutCubic));
-    }
+    glideFreshInvoiceToTop(_scroll, isMounted: () => mounted);
   }
 
   Future<void> _scrollToItems() async {
@@ -286,9 +283,10 @@ class _PurchaseInvoicePageState extends ConsumerState<PurchaseInvoicePage>
       // inventory list must refresh (otherwise a just-added product looks
       // "missing" until a manual pull-to-refresh).
       invalidateInventoryData(ref);
-      final next = await showDialog<String>(
+      // Drop the bottom field's focus first: restoring it when the dialog
+      // closes scrolled the fresh invoice back to the end.
+      final next = await showIssueResultDialog<String>(
         context: context,
-        barrierDismissible: false,
         builder: (_) => PurchaseSuccessDialog(invoice: res),
       );
       if (next == 'new' && mounted) _startFresh();

@@ -275,6 +275,28 @@ class SavingsGoal {
   };
 }
 
+/// Device vocabulary for a Personal bank account type from any source.
+///
+/// The server stores `current` / `savings`; the app has always used
+/// `checking` (جاري) / `savings` (توفير) / `cash`. Unknown/blank → checking.
+String personalAccountTypeFromServer(String? raw) {
+  final t = (raw ?? '').trim().toLowerCase();
+  switch (t) {
+    case 'savings':
+    case 'saving':
+    case 'توفير':
+      return 'savings';
+    case 'cash':
+      return 'cash';
+    default:
+      return 'checking';
+  }
+}
+
+/// Server vocabulary (`current` / `savings`) for a device account type.
+String personalAccountTypeToServer(String? type) =>
+    personalAccountTypeFromServer(type) == 'savings' ? 'savings' : 'current';
+
 class PersonalBankAccount {
   /// Backend UUID (personal_bank_accounts.id).
   final String id;
@@ -284,7 +306,12 @@ class PersonalBankAccount {
   final String? notes;
   final String accountType;
 
-  PersonalBankAccount({required this.id, required this.bankName, this.balance = 0.0, this.currency = 'SAR', this.notes, this.accountType = 'checking'});
+  /// Server's `account_type_set`: true when the server row carries a stated
+  /// type, false for legacy rows whose type was never stored on the server
+  /// (they read as جاري), null when unknown (older server / local-only row).
+  final bool? accountTypeSet;
+
+  PersonalBankAccount({required this.id, required this.bankName, this.balance = 0.0, this.currency = 'SAR', this.notes, this.accountType = 'checking', this.accountTypeSet});
 
   factory PersonalBankAccount.fromJson(Map<String, dynamic> json) => PersonalBankAccount.fromServer(json);
 
@@ -298,7 +325,10 @@ class PersonalBankAccount {
       notes: json['notes'] as String?,
       accountType: (bankName == 'كاش' || bankName == 'Cash')
           ? 'cash'
-          : (json['account_type'] as String? ?? 'checking'),
+          : personalAccountTypeFromServer(json['account_type']?.toString()),
+      accountTypeSet: json['account_type_set'] is bool
+          ? json['account_type_set'] as bool
+          : null,
     );
   }
 
@@ -311,6 +341,8 @@ class PersonalBankAccount {
   Map<String, dynamic> toServerJson() => {
     'bank_name': bankName,
     'currency': currency,
+    if (accountType != 'cash')
+      'account_type': personalAccountTypeToServer(accountType),
     if (notes != null) 'notes': notes,
   };
 }

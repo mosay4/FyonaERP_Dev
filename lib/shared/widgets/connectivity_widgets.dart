@@ -342,14 +342,6 @@ Future<bool> showOfflineDialog(
                     fontSize: 13,
                     height: 1.55,
                     color: AppColors.textSecondary)),
-            const SizedBox(height: 2),
-            Text(l10n.translate('offlineAutoSyncHint'),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: 11.5,
-                    height: 1.5,
-                    color: AppColors.textTertiary)),
             const SizedBox(height: 20),
             SizedBox(
               height: 50,
@@ -409,8 +401,12 @@ Future<bool> showOfflineDialog(
   while (true) {
     final retried = await showOnce();
     if (!retried) return false;
-    // User tapped retry — check connectivity
-    if (connectivity != null && connectivity.isOnline) return true;
+    // User tapped retry — check connectivity (a very poor link is probed
+    // once right now, bounded by the probe timeout).
+    if (connectivity != null &&
+        (connectivity.isOnline || await connectivity.recheck())) {
+      return true;
+    }
     // Still offline — show dialog again
   }
 }

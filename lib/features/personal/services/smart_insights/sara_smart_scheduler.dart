@@ -45,6 +45,9 @@ class SaraSmartScheduler {
   static const String instantCountKey = 'sara_smart_instant_count_v1';
   static const String kind = 'sara';
 
+  /// Android drawable shown as the large icon of every Sara notification.
+  static const String saraLargeIcon = 'sara_avatar_notif';
+
   /// Test seam: 'android' | 'ios' forces the platform path.
   @visibleForTesting
   static String? debugPlatform;
@@ -124,6 +127,9 @@ class SaraSmartScheduler {
     } catch (_) {}
   }
 
+  @visibleForTesting
+  static NotificationDetails detailsForTest(String body) => _details(body);
+
   static NotificationDetails _details(String body) {
     const spec = NotificationChannels.sara;
     return NotificationDetails(
@@ -135,6 +141,9 @@ class SaraSmartScheduler {
         priority: Priority.high,
         autoCancel: true,
         icon: 'ic_launcher',
+        // Sara's portrait (res/drawable-nodpi/sara_avatar_notif.png) —
+        // the same large icon the native alarm path uses.
+        largeIcon: const DrawableResourceAndroidBitmap(saraLargeIcon),
         color: const Color(0xFF000000),
         sound: RawResourceAndroidNotificationSound(spec.sound),
         enableVibration: true,

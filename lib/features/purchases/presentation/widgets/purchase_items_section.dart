@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
 import '../../../core_business/presentation/widgets/business_number_field.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/shared/widgets/biz_currency_items.dart';
 import '../../../../../core/localization/app_localizations.dart';
 import '../../../../../core/responsive/r_api.dart';
 import '../../../../../core/theme/app_colors.dart';
@@ -280,24 +281,21 @@ class PurchaseItemsSection extends ConsumerWidget {
   /// Standalone currency box beside the price field (used when «save to
   /// inventory» is ON so the full amount always fits). When [showError]
   /// is set the frame turns red (no tiny clipped helper text).
-  Widget _ccyBox(BuildContext ctx, StateSetter setSt, String current,
+  Widget _ccyBox(WidgetRef ref, BuildContext ctx, StateSetter setSt, String current,
       void Function(String) onPick,
       {bool showError = false}) {
     final l10n = AppLocalizations.of(ctx);
     final missing = showError && current.isEmpty;
     return InkWell(
       onTap: () async {
+        final items = bizCurrencySheetItems(await readBizCurrencies(ref));
+        if (!ctx.mounted) return;
         final picked = await showBusinessSelectionSheet<String>(
           context: ctx,
           title: l10n.translate('invCurrency'),
           selected: current.isEmpty ? null : current,
-          items: [
-            for (final c in const ['SAR', 'USD', 'YER_NEW', 'YER_OLD'])
-              BizSheetItem(
-                  value: c,
-                  title: currencyName(c),
-                  icon: Icons.monetization_on_outlined),
-          ],
+          // Exactly the Business currencies enabled in profile settings.
+          items: items,
         );
         if (picked != null) setSt(() => onPick(picked));
       },
@@ -559,7 +557,7 @@ class PurchaseItemsSection extends ConsumerWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       flex: 1,
-                      child: _ccyBox(ctx, setSt, buyCurrency, (v) {
+                      child: _ccyBox(ref, ctx, setSt, buyCurrency, (v) {
                         buyCurrency = v;
                         buyCcyError = false;
                       }, showError: buyCcyError),

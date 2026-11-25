@@ -10,9 +10,8 @@ import '../../../../core/responsive/r_api.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
-import '../../../../core/services/currency/enabled_currencies_service.dart';
 import '../../../../core/services/currency/business_currency_scope.dart'
-    show loadBizEnabledCurrencies;
+    show bizEnabledCurrenciesProvider;
 import '../../../../shared/providers/current_user_provider.dart';
 import '../../../../shared/widgets/styled_snack.dart';
 import '../../data/reports_api.dart';
@@ -225,20 +224,18 @@ class _ReportsHubPageState extends ConsumerState<ReportsHubPage> {
   Set<String> _enabledSet = {};
 
   void _applyCurrencyMerge() {
-    // The picker lists the app's OWN currencies: the user's enabled set
-    // UNION the currencies that really exist in this business (accounts +
-    // invoices + expenses, served by the backend) — never a fixed four.
-    final server = ((_home?['currencies'] as List?) ?? const [])
-        .whereType<String>()
-        .map((c) => c.trim().toUpperCase())
-        .where((c) => c.isNotEmpty)
-        .toSet();
-    final merged = {..._enabledSet, ...server, _currency};
-    final list = merged.where((c) => c.trim().isNotEmpty).toList()..sort();
+    // The picker lists EXACTLY the Business currencies enabled in profile
+    // settings — no server/extra currencies, none missing. Until that set
+    // is known the current choice alone is shown.
+    final list = _enabledSet.toList()..sort();
     if (!mounted || list.isEmpty) return;
-    setState(() {
-      _currencies = list;
-    });
+    setState(() => _currencies = list);
+    if (!list.contains(_currency)) {
+      // The saved report currency was disabled since: use an enabled one.
+      final next = list.contains('USD') ? 'USD' : list.first;
+      setState(() => _currency = next);
+      _load();
+    }
   }
 
   Future<void> _loadCurrencies([int attempt = 0]) async {
@@ -246,13 +243,8 @@ class _ReportsHubPageState extends ConsumerState<ReportsHubPage> {
     final api = ref.read(businessReportsApiProvider);
     final ticket = ++_currencyRequest;
     try {
-      final local = api.deviceAccountId;
-      final enabled = local == null
-          ? await ref.read(enabledCurrenciesProvider.future)
-          : {
-              ...await loadBizEnabledCurrencies(local),
-              if (mounted) ...await api.deviceCurrencies(),
-            };
+      // Business set (profile settings) — never the Personal one.
+      final enabled = await ref.read(bizEnabledCurrenciesProvider.future);
       if (!mounted ||
           ticket != _currencyRequest ||
           scope != BusinessReportsApi.scopeIdentity ||

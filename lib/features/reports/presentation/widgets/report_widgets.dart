@@ -882,58 +882,154 @@ class _ReportCountUpState extends State<ReportCountUp>
   static String _fmt(num v) => fmtNum(v);
 }
 
-/// Report-currency picker sheet (enabled currencies of the business).
+/// Report-currency picker sheet: exactly the Business currencies enabled in
+/// profile settings, each with its country flag (same emoji flags as the
+/// rest of the app), name and code. No section headers.
 Future<String?> showReportCurrencyPicker(
   BuildContext context,
   List<String> currencies,
   String current,
 ) async {
   final l10n = AppLocalizations.of(context);
-  final dark = Theme.of(context).brightness == Brightness.dark;
-  final list = currencies.isEmpty ? const ['SAR'] : currencies;
+  final lang = l10n.locale.languageCode;
+  final seen = <String>{};
+  final list = [
+    for (final c in (currencies.isEmpty ? [current] : currencies))
+      if (c.trim().isNotEmpty && seen.add(c.trim().toUpperCase()))
+        c.trim().toUpperCase(),
+  ];
+  Widget tile(BuildContext ctx, String c) {
+    final selected = c == current;
+    final flag = currencyFlagEmoji(c);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      child: Material(
+        color: selected
+            ? AppColors.primary.withAlpha(AppColors.isLightMode ? 18 : 30)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          key: ValueKey('report-currency-$c'),
+          borderRadius: BorderRadius.circular(14),
+          onTap: () {
+            HapticFeedback.selectionClick();
+            Navigator.pop(ctx, c);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.surfaceVariant,
+                    border: Border.all(
+                      color: selected
+                          ? AppColors.primary
+                          : AppColors.border,
+                      width: selected ? 1.2 : .6,
+                    ),
+                  ),
+                  child: Text(
+                    flag.isEmpty ? currencyShort(c) : flag,
+                    style: TextStyle(
+                      fontFamily: flag.isEmpty ? 'Cairo' : null,
+                      fontSize: flag.isEmpty ? 10 : 20,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        currencyName(c, locale: lang),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: 13.5,
+                          fontWeight:
+                              selected ? FontWeight.w800 : FontWeight.w700,
+                          color: selected
+                              ? AppColors.primary
+                              : AppColors.textPrimary,
+                        ),
+                      ),
+                      Text(
+                        currencyShort(c),
+                        textDirection: TextDirection.ltr,
+                        style: TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: 11,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (selected)
+                  const Icon(Icons.check_circle_rounded,
+                      color: AppColors.primary, size: 20),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   return showModalBottomSheet<String>(
     context: context,
+    isScrollControlled: true,
     backgroundColor: AppColors.surface,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
     builder: (ctx) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 14),
-          Text(
-            l10n.translate('repReportCurrency'),
-            style: TextStyle(
-              fontFamily: 'Cairo',
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 10),
-          for (final c in list)
-            ListTile(
-              leading: Icon(
-                c == current
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_off,
-                color: AppColors.primary,
-                size: 20,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(ctx).height * .8,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.border,
+                borderRadius: BorderRadius.circular(2),
               ),
-              title: Text(
-                currencyLabel(c, locale: l10n.locale.languageCode),
-                maxLines: 1,
-                overflow: TextOverflow.visible,
-                style: const TextStyle(
-                  fontFamily: 'Cairo',
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              onTap: () => Navigator.pop(ctx, c),
             ),
-          const SizedBox(height: 8),
-        ],
+            const SizedBox(height: 12),
+            Text(
+              l10n.translate('repReportCurrency'),
+              style: TextStyle(
+                fontFamily: 'Cairo',
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.only(bottom: 10),
+                children: [for (final c in list) tile(ctx, c)],
+              ),
+            ),
+          ],
+        ),
       ),
     ),
   );

@@ -376,8 +376,9 @@ class _PersonalRecurringFormPageState extends ConsumerState<PersonalRecurringFor
       const SizedBox(height: 8),
       enabledAsync.when(
         data: (enabled) {
-          final currencies = enabled.where((code) => ExchangeRateService.supportedCurrencies.containsKey(code)).toList();
-          if (currencies.isEmpty) currencies.addAll(['SAR', 'USD']);
+          // Exactly the currencies enabled in Profile › preferences.
+          final currencies = enabled.toList();
+          if (currencies.isEmpty) currencies.addAll(defaultEnabledCurrencies);
           return Wrap(spacing: 8, runSpacing: 8, children: currencies.map((code) {
             // Name only (localized): showing symbol + name duplicates text
             // for variants whose symbol IS the name (e.g. Yemeni Rial).

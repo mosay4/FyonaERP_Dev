@@ -31,6 +31,7 @@ final saraSmartCoordinatorProvider = Provider<SaraSmartCoordinator>((ref) {
   final c = SaraSmartCoordinator(ref);
   ref.listen<PersonalFinanceState>(personalFinanceProvider, (_, _) => c.poke());
   ref.listen<BudgetState>(budgetProvider, (_, _) => c.poke());
+  ref.listen<RecurringState>(recurringProvider, (_, _) => c.poke());
   ref.listen<String>(currentUserIdProvider, (prev, next) {
     if (prev == next) return;
     // Logout / account switch: the previous user's digests must not fire.
@@ -152,6 +153,7 @@ class SaraSmartCoordinator {
 
     final engine = _ref.read(currencyEngineProvider);
     final budgets = _ref.read(budgetProvider).budgets;
+    final recurring = _ref.read(recurringProvider).recurring;
     final now = DateTime.now();
     final input = SaraInsightInputBuilder.build(
       now: now,
@@ -159,6 +161,8 @@ class SaraSmartCoordinator {
       transactions: pf.transactions,
       goals: pf.savingsGoals,
       budgets: budgets,
+      recurring: recurring,
+      debts: pf.debts,
       liquidBalance: pf.bankAccounts.isEmpty ? null : pf.walletTotalBalance,
       convert: (a, f, t) => engine.convertSafe(a, f, t),
     );

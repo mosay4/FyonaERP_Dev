@@ -34,6 +34,7 @@ import '../utils/currency_formatter.dart';
 import '../../features/splash/presentation/splash_screen.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/reentry_page.dart';
+import '../../features/splash/presentation/brand_handoff_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/pages/verify_email_page.dart';
 import '../../features/auth/presentation/pages/forgot_password_page.dart';
@@ -262,6 +263,20 @@ bool _isSegmentBoundary(String route, int kLen) {
   return route[kLen] == '/';
 }
 
+/// Navigation never waits for a status refresh that is already in flight
+/// (the 8s enforcement poll refreshes it constantly, and on a poor network
+/// that request can hang for the whole HTTP timeout — every tap used to wait
+/// on it). The last live answer of the SAME account decides; the poll
+/// applies any change a moment later. Only a first load (or an account
+/// change) waits for the server.
+Future<Map<String, dynamic>> _subscriptionForNavigation(Ref ref) {
+  final current = ref.read(subscriptionStatusProvider);
+  if (current.hasValue && !current.hasError && !current.isReloading) {
+    return Future.value(current.requireValue);
+  }
+  return ref.read(subscriptionStatusProvider.future);
+}
+
 final goRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
     navigatorKey: _rootNavigatorKey,
@@ -449,7 +464,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             final connectivity = ref.read(connectivityServiceProvider);
             snapshot = await resolvePersonalEntry(
               connected: connectivity.isOnline,
-              live: () => ref.read(subscriptionStatusProvider.future),
+              live: () => _subscriptionForNavigation(ref),
               local: () => ref.read(personalOfflineAccessProvider).read(user),
             );
           } else if (directoryAccess != null) {
@@ -494,7 +509,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               snapshot = await ref.read(subscriptionStatusProvider.future);
             }
           } else {
-            snapshot = await ref.read(subscriptionStatusProvider.future);
+            snapshot = await _subscriptionForNavigation(ref);
           }
         } catch (_) {
           return '/account-entry';
@@ -674,7 +689,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: RouteNames.login,
         name: 'login',
-        builder: (_, _) => const DoubleBackToExit(child: LoginPage()),
+        pageBuilder: (_, state) => brandHandoffPage(
+            state, const DoubleBackToExit(child: LoginPage())),
       ),
       GoRoute(
         path: RouteNames.maintenance,
@@ -684,7 +700,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: RouteNames.reentry,
         name: 'reentry',
-        builder: (_, _) => const ReentryPage(),
+        pageBuilder: (_, state) =>
+            brandHandoffPage(state, const ReentryPage()),
       ),
       GoRoute(
         path: RouteNames.register,
@@ -708,7 +725,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/account-entry',
-        builder: (_, _) => const AccountEntryPage(),
+        pageBuilder: (_, state) =>
+            brandHandoffPage(state, const AccountEntryPage()),
       ),
       GoRoute(
         path: '/business-setup',
@@ -733,7 +751,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       ShellRoute(
         navigatorKey: _shellNavigatorKey,
-        builder: (context, state, child) => MainShell(child: child),
+        // Crossfades in when opened from the branded entry (else default).
+        pageBuilder: (context, state, child) =>
+            brandHandoffPage(state, MainShell(child: child)),
         routes: [
           GoRoute(
             path: RouteNames.dashboard,
@@ -1962,8 +1982,19 @@ class _MainShellState extends ConsumerState<MainShell>
     // Poll frequently (3s) so admin maintenance/button toggles apply almost
     // instantly for all connected users (the router + listener below bounce
     // the user out right away, and re-enable the second it is turned off).
+    // Never stack polls: on a poor link one request can outlive many ticks,
+    // and piled-up requests starve the screens the user is opening. Offline
+    // (or very poor) the cached controls stay in force; the connectivity
+    // listener below refreshes them the moment the link is back.
+    var controlsInFlight = false;
     _controlsTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      ref.read(platformControlsProvider.notifier).refresh();
+      if (controlsInFlight ||
+          !ref.read(connectivityServiceProvider).isOnline) return;
+      controlsInFlight = true;
+      ref
+          .read(platformControlsProvider.notifier)
+          .refresh()
+          .whenComplete(() => controlsInFlight = false);
     });
     // Poll the LIVE subscription status so an admin revoke (cancel) is
     // enforced IMMEDIATELY â€” the user is bounced to the paywall even while
@@ -1989,9 +2020,23 @@ class _MainShellState extends ConsumerState<MainShell>
     });
   }
 
+  bool _subscriptionCheckInFlight = false;
+
   Future<void> _checkSubscriptionEnforcement() async {
     if (!mounted) return;
     if (!ref.read(connectivityServiceProvider).isOnline) return;
+    // One status request at a time (see the controls poll above).
+    if (_subscriptionCheckInFlight) return;
+    _subscriptionCheckInFlight = true;
+    try {
+      await _runSubscriptionEnforcement();
+    } finally {
+      _subscriptionCheckInFlight = false;
+    }
+  }
+
+  Future<void> _runSubscriptionEnforcement() async {
+    if (!mounted) return;
     final auth = ref.read(authProvider);
     final user = auth.user;
     if (user == null || user.isAdmin) return;
@@ -2061,6 +2106,7 @@ class _MainShellState extends ConsumerState<MainShell>
   void _startPresence() {
     _presenceTimer?.cancel();
     void beat() {
+      if (!ref.read(connectivityServiceProvider).isOnline) return;
       try {
         ref.read(merchantApiProvider).touchPresence();
       } catch (_) {}

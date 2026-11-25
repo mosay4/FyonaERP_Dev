@@ -141,7 +141,8 @@ class SaraSmartNotificationsTile extends ConsumerWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          l10n.translate('saraSmartNotifTime'),
+                          l10n.translate('saraSmartNotifTimeDesc'),
+                          key: const Key('saraSmartNotifTimeDesc'),
                           style: TextStyle(
                             fontFamily: 'Cairo',
                             fontSize: 12,
@@ -195,30 +196,7 @@ class SaraSmartNotificationsTile extends ConsumerWidget {
                         ),
                       ),
                     ),
-                  )
-                else
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      l10n.translate('saraSmartNotifAutoHint'),
-                      style: const TextStyle(
-                        fontFamily: 'Cairo',
-                        fontSize: 11,
-                        color: AppColors.textDisabled,
-                      ),
-                    ),
                   ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    l10n.translate('saraSmartNotifScopeHint'),
-                    style: const TextStyle(
-                      fontFamily: 'Cairo',
-                      fontSize: 10.5,
-                      color: AppColors.textDisabled,
-                    ),
-                  ),
-                ),
               ],
             ),
           ),

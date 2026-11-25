@@ -120,8 +120,17 @@ void main() {
       ));
       expect(a.affordableToday, 0);
       expect(a.allocations, isEmpty);
-      final n = SaraNoticeComposer.digest(a,
+      // Spending above income mid-month: the month-end outlook warns first
+      // (on cooldown it falls back to the "make some room" nudge).
+      final p = SaraNoticeComposer.digest(a,
           firstSlot: true, allowed: (_) => true, tr: tr, money: money);
+      expect(p!.kind, 'projection');
+      expect(p.route, '/personal/reports/view?kind=cashflow&period=month');
+      final n = SaraNoticeComposer.digest(a,
+          firstSlot: true,
+          allowed: (k) => !k.startsWith('proj:'),
+          tr: tr,
+          money: money);
       expect(n!.kind, 'tight');
       expect(n.route, '/personal/savings-detail/a');
     });
@@ -631,6 +640,277 @@ void main() {
       expect(out.containsKey('old'), isFalse); // > 30 days
       expect(out['past']?.day, '20261123'); // delivered: kept
       expect(out['budget:x:over']?.day, '20261125');
+    });
+  });
+
+  group('smarter money nudges', () {
+    InsightObligation bill(String id, double amount, int inDays,
+            {String kind = 'recurring', bool reminded = false}) =>
+        InsightObligation(
+          id: id,
+          kind: kind,
+          name: 'Bill $id',
+          amountBase: amount,
+          amountNative: amount,
+          currency: 'SAR',
+          due: DateTime(now.year, now.month, now.day + inDays),
+          reminded: reminded,
+        );
+
+    SaraInsightInput withExtras({
+      List<InsightTx>? txs,
+      List<InsightGoal> goals = const [],
+      double? liquid,
+      List<InsightObligation> obligations = const [],
+      List<InsightRecurring> recurring = const [],
+      List<InsightIncomeEvent> scheduled = const [],
+    }) =>
+        SaraInsightInput(
+          now: now,
+          baseCurrency: 'SAR',
+          transactions: txs ?? regularHistory(),
+          goals: goals,
+          liquidBalance: liquid,
+          obligations: obligations,
+          recurring: recurring,
+          scheduledIncomes: scheduled,
+        );
+
+    test('monthly payday steps by calendar month (same day-of-month)', () {
+      final txs = [
+        for (final m in [8, 9, 10])
+          tx('income', 9000, DateTime(2026, m, 26, 9), cat: 'Salary'),
+        for (var d = DateTime(2026, 8, 26); d.isBefore(day(0));
+            d = d.add(const Duration(days: 1)))
+          tx('expense', 150, DateTime(d.year, d.month, d.day, 21)),
+      ];
+      final a = SaraInsightEngine.analyze(withExtras(txs: txs));
+      expect(a.incomeCadenceDays, 30);
+      expect(a.nextIncomeDate, DateTime(2026, 11, 26));
+      expect(a.daysUntilNextIncome, 1);
+    });
+
+    test('one-off small incomes never skew the payday cadence', () {
+      final txs = [
+        ...regularHistory(),
+        for (final d in [5, 10, 15, 20])
+          tx('income', 100, DateTime(2026, 11, d, 12), cat: 'Gift'),
+      ];
+      final a = SaraInsightEngine.analyze(withExtras(txs: txs));
+      expect(a.incomeCadenceDays, 30);
+      expect(a.nextIncomeDate, DateTime(2026, 12, 1));
+    });
+
+    test('a scheduled (recurring) income defines the next payday', () {
+      final a = SaraInsightEngine.analyze(withExtras(
+          scheduled: [InsightIncomeEvent(DateTime(2026, 11, 28), 9000)]));
+      expect(a.nextIncomeDate, DateTime(2026, 11, 28));
+      expect(a.daysUntilNextIncome, 3);
+    });
+
+    test('bills due before payday reduce what can be saved', () {
+      final free = SaraInsightEngine.analyze(withExtras(liquid: 2500));
+      final billed = SaraInsightEngine.analyze(
+          withExtras(liquid: 2500, obligations: [bill('r1', 1500, 3)]));
+      expect(billed.obligationsBeforePayday, 1500);
+      expect(billed.affordableToday, lessThan(free.affordableToday));
+      expect(billed.billRisk, isNull); // 2500 still covers the bill itself
+    });
+
+    test('a bill the balance cannot cover is the top warning', () {
+      final a = SaraInsightEngine.analyze(withExtras(
+        liquid: 1200,
+        goals: [goal('g', 5000, deadlineInDays: 60)],
+        obligations: [bill('r1', 1000, 2)],
+      ));
+      expect(a.billRisk, isNotNull);
+      expect(a.billRisk!.obligation.id, 'r1');
+      expect(a.affordableToday, 0);
+      final n = SaraNoticeComposer.digest(a,
+          firstSlot: true, allowed: (_) => true, tr: tr, money: money)!;
+      expect(n.kind, 'bill');
+      expect(n.title, 'saraNotifBillTitle');
+      expect(n.body, contains('when=saraNotifWhenTwoDays'));
+      expect(n.route, '/personal/recurring/detail?id=r1');
+      expect(n.cooldownKey, 'bill:recurring:r1:20261127');
+      // Same bill on cooldown → it is not repeated.
+      final again = SaraNoticeComposer.digest(a,
+          firstSlot: true,
+          allowed: (k) => !k.startsWith('bill:'),
+          tr: tr,
+          money: money)!;
+      expect(again.kind, isNot('bill'));
+    });
+
+    test('debt due tomorrow without a reminder → nudge opens the debt', () {
+      final a = SaraInsightEngine.analyze(withExtras(
+          obligations: [bill('d1', 700, 1, kind: 'debt')]));
+      final n = SaraNoticeComposer.digest(a,
+          firstSlot: true, allowed: (_) => true, tr: tr, money: money)!;
+      expect(n.kind, 'debt');
+      expect(n.body, startsWith('saraNotifDebtDue'));
+      expect(n.body, contains('when=saraNotifWhenTomorrow'));
+      expect(n.route, '/personal/debts?debtId=d1');
+      // The user's own debt alarm already covers it → Sara stays quiet.
+      final quiet = SaraInsightEngine.analyze(withExtras(
+          obligations: [bill('d1', 700, 1, kind: 'debt', reminded: true)]));
+      expect(quiet.debtsDue, isEmpty);
+    });
+
+    test('overdue debt uses the overdue wording', () {
+      final a = SaraInsightEngine.analyze(withExtras(
+          obligations: [bill('d2', 300, -4, kind: 'debt')]));
+      final n = SaraNoticeComposer.digest(a,
+          firstSlot: true, allowed: (_) => true, tr: tr, money: money)!;
+      expect(n.kind, 'debt');
+      expect(n.body, startsWith('saraNotifDebtOverdue'));
+      expect(n.body, contains('n=4'));
+      expect(n.cooldownKey, 'debt:late:d2');
+    });
+
+    test('month-end outlook praises a healthy month (late in the month)', () {
+      final a = SaraInsightEngine.analyze(withExtras(
+          txs: [...regularHistory(), tx('expense', 150, day(0, 9))]));
+      expect(a.projection, isNotNull);
+      expect(a.projection!.net, greaterThan(0));
+      final n = SaraNoticeComposer.digest(a,
+          firstSlot: true, allowed: (_) => true, tr: tr, money: money)!;
+      expect(n.kind, 'projection');
+      expect(n.body, startsWith('saraNotifProjGood'));
+      expect(n.cooldownKey, 'proj:good:202611');
+    });
+
+    test('payday: pay yourself first, capped by the pay after spending', () {
+      final txs = [
+        for (final m in [8, 9, 10])
+          tx('income', 9000, DateTime(2026, m, 25, 9), cat: 'Salary'),
+        for (var d = DateTime(2026, 8, 25); d.isBefore(day(0));
+            d = d.add(const Duration(days: 1)))
+          tx('expense', 150, DateTime(d.year, d.month, d.day, 21)),
+      ];
+      final a = SaraInsightEngine.analyze(withExtras(
+          txs: txs, goals: [goal('g', 5000, deadlineInDays: 60)]));
+      expect(a.isPayday, isTrue);
+      expect(a.paydaySave, greaterThan(0));
+      // Never more than 80% of what the pay leaves after a cycle of spending.
+      expect(a.paydaySave, lessThanOrEqualTo((9000 - 150 * 30 * 1.1) * 0.8));
+      final n = SaraNoticeComposer.digest(a,
+          firstSlot: true, allowed: (_) => true, tr: tr, money: money)!;
+      expect(n.kind, 'payday');
+      expect(n.body, startsWith('saraNotifPaydayGoals'));
+      expect(n.route, '/personal/savings-detail/g');
+      expect(n.cooldownKey, 'payday:20261125');
+    });
+
+    test('a forgotten monthly charge is spotted unless it is a rule', () {
+      InsightTx netflix(DateTime d) => InsightTx(
+            id: 'n${d.month}',
+            type: 'expense',
+            amount: 45,
+            category: 'Entertainment',
+            date: d,
+            note: 'Netflix',
+          );
+      final txs = [
+        ...regularHistory(),
+        tx('expense', 150, day(0, 9)),
+        for (final m in [9, 10, 11]) netflix(DateTime(2026, m, 10, 8)),
+      ];
+      final a = SaraInsightEngine.analyze(withExtras(txs: txs));
+      expect(a.subscriptions.map((h) => h.label), ['Netflix']);
+      final n = SaraNoticeComposer.digest(a,
+          firstSlot: true,
+          allowed: (k) => !k.startsWith('proj:'),
+          tr: tr,
+          money: money)!;
+      expect(n.kind, 'subscription');
+      expect(n.route, '/personal/recurring');
+      final known = SaraInsightEngine.analyze(withExtras(txs: txs, recurring: [
+        const InsightRecurring(
+            id: 'r',
+            name: 'Netflix',
+            category: 'Entertainment',
+            isIncome: false,
+            amountBase: 45,
+            monthlyBase: 45),
+      ]));
+      expect(known.subscriptions, isEmpty);
+    });
+
+    test('no-spend streak only counts for active daily loggers', () {
+      final txs = [
+        ...regularHistory(untilOffset: -4),
+        tx('income', 50, day(0, 9), cat: 'Gift'),
+      ];
+      final a = SaraInsightEngine.analyze(withExtras(txs: txs));
+      expect(a.noSpendDays, 3);
+      final n = SaraNoticeComposer.digest(a,
+          firstSlot: true,
+          allowed: (k) => k == 'nospend',
+          tr: tr,
+          money: money)!;
+      expect(n.kind, 'noSpend');
+      expect(n.body, contains('n=3'));
+      // Nothing logged lately → silence is missing data, not a streak.
+      final idle = SaraInsightEngine.analyze(
+          withExtras(txs: regularHistory(untilOffset: -4)));
+      expect(idle.noSpendDays, 0);
+    });
+
+    test('rare insights have longer quiet periods', () {
+      expect(SaraDailyPlanner.cooldownFor('subs:x'), 45);
+      expect(SaraDailyPlanner.cooldownFor('proj:short:202611'), 7);
+      expect(SaraDailyPlanner.cooldownFor('nospend'), 7);
+      expect(SaraDailyPlanner.cooldownFor('budget:x:over'), 3);
+      final cd = {'subs:x': const SaraCooldownEntry('20261101', 'digest')};
+      expect(SaraDailyPlanner.cooldownAllows(cd, 'subs:x', '20261125'), isFalse);
+      expect(SaraDailyPlanner.cooldownAllows(cd, 'subs:x', '20261220'), isTrue);
+    });
+
+    test('builder maps recurring bills, incomes and debts (converted)', () {
+      double? convert(double a, String from, String to) =>
+          from == 'USD' && to == 'SAR' ? a * 3.75 : null;
+      final i = SaraInsightInputBuilder.build(
+        now: now,
+        baseCurrency: 'SAR',
+        transactions: const [],
+        goals: const [],
+        recurring: [
+          RecurringTransaction(
+              id: 'net', name: 'Internet', type: 'expense', amount: 20,
+              category: 'Bills', currency: 'USD',
+              nextDate: DateTime(2026, 11, 27)),
+          RecurringTransaction(
+              id: 'sal', name: 'Salary', type: 'income', amount: 9000,
+              category: 'Salary', nextDate: DateTime(2026, 12, 1)),
+          RecurringTransaction(
+              id: 'off', type: 'expense', amount: 5, category: 'x',
+              isActive: false, nextDate: DateTime(2026, 11, 26)),
+        ],
+        debts: [
+          PersonalDebt(
+              id: 'd1', type: 'payable', personName: 'Ali', amount: 500,
+              paid: 200, dueDate: DateTime(2026, 11, 26)),
+          PersonalDebt(
+              id: 'd2', type: 'receivable', personName: 'Sami', amount: 80,
+              dueDate: DateTime(2026, 11, 25)),
+          PersonalDebt(
+              id: 'd3', type: 'payable', personName: 'Paid', amount: 80,
+              isPaid: true, dueDate: DateTime(2026, 11, 25)),
+        ],
+        convert: convert,
+      );
+      expect(i.recurring.map((r) => r.id), ['net', 'sal']);
+      final internet = i.obligations.where((o) => o.id == 'net').toList();
+      expect(internet.first.amountBase, 75);
+      expect(internet.first.due, DateTime(2026, 11, 27));
+      expect(internet.length, greaterThanOrEqualTo(2)); // Nov 27 + Dec 27
+      expect(i.scheduledIncomes.first.date, DateTime(2026, 12, 1));
+      final debt = i.obligations.firstWhere((o) => o.id == 'd1');
+      expect(debt.kind, 'debt');
+      expect(debt.amountNative, 300);
+      expect(i.obligations.firstWhere((o) => o.id == 'd2').kind, 'debtIn');
+      expect(i.obligations.any((o) => o.id == 'd3'), isFalse);
     });
   });
 }

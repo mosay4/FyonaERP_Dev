@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/localization/app_localizations.dart';
@@ -34,7 +35,7 @@ String? _label(List<Map<String, dynamic>> companies,
     );
 
 Future<void> _pump(WidgetTester tester, List<Map<String, dynamic>> companies,
-    {ThemeMode mode = ThemeMode.dark}) async {
+    {ThemeMode mode = ThemeMode.dark, double width = 240}) async {
   AppColors.setLightMode(mode == ThemeMode.light);
   await tester.runAsync(() => AppLocalizations.preload('ar'));
   await tester.pumpWidget(ProviderScope(
@@ -46,11 +47,19 @@ Future<void> _pump(WidgetTester tester, List<Map<String, dynamic>> companies,
       locale: const Locale('ar'),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      home: const Scaffold(
-        body: SizedBox(width: 220, child: Row(children: [
-          Flexible(child: Text('قسم الأعمال')),
-          Flexible(child: BusinessBranchChip()),
-        ])),
+      // Mirrors HomeHeader: the chip sits on its own line UNDER the title.
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(width: width, child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('قسم الأعمال', key: ValueKey('title')),
+              BusinessBranchChip(),
+            ],
+          )),
+        ),
       ),
     ),
   ));
@@ -106,6 +115,39 @@ void main() {
       expect(find.text(long), findsOneWidget);
       expect(tester.takeException(), isNull); // no overflow
     }
+  });
+
+  testWidgets('chip sits below the title and shows the full branch name',
+      (tester) async {
+    BranchScope.organizationId = _org;
+    BranchScope.branchId = 'b1';
+    const name = 'فرع المدينة الرئيسي';
+    for (final mode in [ThemeMode.dark, ThemeMode.light]) {
+      await _pump(tester, [_company(['Main', name])], mode: mode, width: 360);
+      final title = tester.getRect(find.byKey(const ValueKey('title')));
+      final chip =
+          tester.getRect(find.byKey(const ValueKey('business-branch-chip')));
+      expect(chip.top, greaterThanOrEqualTo(title.bottom),
+          reason: 'chip is on its own line under «قسم الأعمال»');
+      final paragraph = tester.renderObject<RenderParagraph>(find.text(name));
+      expect(paragraph.didExceedMaxLines, isFalse,
+          reason: 'a normal branch name is never cut');
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('a truly long name is ellipsized within the header width',
+      (tester) async {
+    BranchScope.organizationId = _org;
+    BranchScope.branchId = 'b1';
+    final long = 'فرع ${'طويل جدا ' * 20}'.trim();
+    await _pump(tester, [_company(['Main', long])], width: 400);
+    final chip =
+        tester.getRect(find.byKey(const ValueKey('business-branch-chip')));
+    expect(chip.width, lessThanOrEqualTo(BranchChipView.maxWidth));
+    expect(tester.renderObject<RenderParagraph>(find.text(long))
+        .didExceedMaxLines, isTrue);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('chip updates when the branch switches', (tester) async {

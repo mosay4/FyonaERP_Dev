@@ -183,14 +183,6 @@ class PersonalReportSections {
               color: Colors.white,
             ),
           ),
-          Text(
-            l10n.translate('prepNetWorthHint'),
-            style: TextStyle(
-              fontFamily: 'Cairo',
-              fontSize: 10.5,
-              color: Colors.white.withAlpha(190),
-            ),
-          ),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -258,7 +250,6 @@ class PersonalReportSections {
             currency: ccy,
             color: personalIncomeColor,
             icon: Icons.south_west_rounded,
-            change: PersonalReportData.change(data.income, data.prevIncome),
           ),
           PrKpi(
             label: l10n.translate('prepSpending'),
@@ -266,8 +257,6 @@ class PersonalReportSections {
             currency: ccy,
             color: personalSpendColor,
             icon: Icons.north_east_rounded,
-            goodWhenUp: false,
-            change: PersonalReportData.change(data.spending, data.prevSpending),
           ),
         ),
         const SizedBox(height: 10),
@@ -278,12 +267,6 @@ class PersonalReportSections {
             currency: ccy,
             color: data.net >= 0 ? AppColors.textPrimary : AppColors.danger,
             icon: Icons.account_balance_wallet_outlined,
-            caption: data.toGoals > 0
-                ? '${l10n.translate('prepToGoals')}: ${money(data.toGoals)}'
-                : l10n.translate(
-                    'prepOps',
-                    params: {'n': '${data.operations}'},
-                  ),
           ),
           PrKpi(
             label: l10n.translate('prepSavingsRate'),
@@ -296,8 +279,6 @@ class PersonalReportSections {
                       ? AppColors.warning
                       : AppColors.danger),
             icon: Icons.savings_outlined,
-            caption:
-                '${l10n.translate('prepAvgDaily')}: ${money(data.dailySpending)}',
           ),
         ),
       ],

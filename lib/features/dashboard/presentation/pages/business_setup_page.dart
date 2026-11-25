@@ -7,7 +7,8 @@ import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/responsive/r_api.dart';
 import '../../../../core/router/route_names.dart';
-import '../../../../core/services/currency/enabled_currencies_service.dart';
+import '../../../../core/services/currency/business_currency_scope.dart'
+    show bizEnabledCurrenciesProvider;
 import '../../../../core/theme/app_colors.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../inventory/presentation/providers/warehouse_settings.dart';
@@ -82,7 +83,7 @@ class _BusinessSetupPageState extends ConsumerState<BusinessSetupPage> {
     final ws = ref.watch(warehouseSettingsProvider);
     final notifier = ref.read(warehouseSettingsProvider.notifier);
     final currencies =
-        (ref.watch(enabledCurrenciesProvider).valueOrNull ??
+        (ref.watch(bizEnabledCurrenciesProvider).valueOrNull ??
                 const <String>['SAR'])
             .toList();
     if (currencies.isNotEmpty && !currencies.contains(_currency)) {

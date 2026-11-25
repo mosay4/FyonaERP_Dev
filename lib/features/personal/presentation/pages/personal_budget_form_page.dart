@@ -370,9 +370,9 @@ class _PersonalBudgetFormPageState extends ConsumerState<PersonalBudgetFormPage>
     final enabledAsync = ref.watch(enabledCurrenciesProvider);
     return enabledAsync.when(
       data: (enabled) {
-        final currencies = enabled.where((code) =>
-            ExchangeRateService.supportedCurrencies.containsKey(code)).toList();
-        if (currencies.isEmpty) currencies.addAll(['SAR', 'USD', 'YER']);
+        // Exactly the currencies enabled in Profile › preferences.
+        final currencies = enabled.toList();
+        if (currencies.isEmpty) currencies.addAll(defaultEnabledCurrencies);
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,

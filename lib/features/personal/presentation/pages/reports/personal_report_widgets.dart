@@ -48,12 +48,12 @@ String prPercent(double fraction) {
 
 // ───────────────────────────────────────────────────────── currency picker
 
-/// Report currency sheet: the user's own currencies first, then every
-/// currency the device can value (searchable by name or code).
+/// Report currency sheet: ONE clean list of exactly the currencies the user
+/// enabled for Personal (Profile › preferences), with flags — no section
+/// headers, nothing added, nothing dropped. Search appears only for long sets.
 Future<String?> showPersonalReportCurrencyPicker(
   BuildContext context, {
-  required List<String> mine,
-  required List<String> all,
+  required List<String> currencies,
   required String current,
 }) {
   return showModalBottomSheet<String>(
@@ -63,18 +63,17 @@ Future<String?> showPersonalReportCurrencyPicker(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
     ),
-    builder: (_) => _CurrencySheet(mine: mine, all: all, current: current),
+    builder: (_) => _CurrencySheet(currencies: currencies, current: current),
   );
 }
 
 class _CurrencySheet extends StatefulWidget {
-  const _CurrencySheet({
-    required this.mine,
-    required this.all,
-    required this.current,
-  });
-  final List<String> mine, all;
+  const _CurrencySheet({required this.currencies, required this.current});
+  final List<String> currencies;
   final String current;
+
+  /// Above this many currencies the sheet shows a search field.
+  static const searchThreshold = 8;
   @override
   State<_CurrencySheet> createState() => _CurrencySheetState();
 }
@@ -97,22 +96,15 @@ class _CurrencySheetState extends State<_CurrencySheet> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final lang = l10n.locale.languageCode;
-    final mine = widget.mine.where((c) => _match(c, lang)).toList();
-    final rest = widget.all
-        .where((c) => !widget.mine.contains(c) && _match(c, lang))
-        .toList();
-    Widget header(String text) => Padding(
-      padding: const EdgeInsets.fromLTRB(18, 12, 18, 4),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontFamily: 'Cairo',
-          fontSize: 12,
-          fontWeight: FontWeight.w800,
-          color: AppColors.textSecondary,
-        ),
-      ),
-    );
+    final seen = <String>{};
+    final codes = [
+      for (final c in widget.currencies)
+        if (seen.add(c.trim().toUpperCase())) c.trim().toUpperCase(),
+    ];
+    final searchable = codes.length > _CurrencySheet.searchThreshold;
+    final shown = searchable
+        ? codes.where((c) => _match(c, lang)).toList()
+        : codes;
     Widget tile(String c) {
       final selected = c == widget.current;
       final flag = currencyFlagEmoji(c);
@@ -183,43 +175,36 @@ class _CurrencySheetState extends State<_CurrencySheet> {
               color: AppColors.textPrimary,
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-            child: TextField(
-              onChanged: (v) => setState(() => _q = v.trim()),
-              style: const TextStyle(fontFamily: 'Cairo', fontSize: 13),
-              decoration: InputDecoration(
-                isDense: true,
-                prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                hintText: l10n.translate('prepCurrencySearch'),
-                hintStyle: TextStyle(
-                  fontFamily: 'Cairo',
-                  fontSize: 12.5,
-                  color: AppColors.textSecondary,
-                ),
-                filled: true,
-                fillColor: AppColors.background,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
+          if (searchable)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+              child: TextField(
+                onChanged: (v) => setState(() => _q = v.trim()),
+                style: const TextStyle(fontFamily: 'Cairo', fontSize: 13),
+                decoration: InputDecoration(
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  hintText: l10n.translate('prepCurrencySearch'),
+                  hintStyle: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: 12.5,
+                    color: AppColors.textSecondary,
+                  ),
+                  filled: true,
+                  fillColor: AppColors.background,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
                 ),
               ),
             ),
-          ),
+          const SizedBox(height: 6),
           Expanded(
             child: ListView(
               controller: scroll,
               padding: const EdgeInsets.only(bottom: 20),
-              children: [
-                if (mine.isNotEmpty) ...[
-                  header(l10n.translate('prepCurrencyMine')),
-                  ...mine.map(tile),
-                ],
-                if (rest.isNotEmpty) ...[
-                  header(l10n.translate('prepCurrencyAll')),
-                  ...rest.map(tile),
-                ],
-              ],
+              children: [...shown.map(tile)],
             ),
           ),
         ],
@@ -279,6 +264,8 @@ class PrSectionTitle extends StatelessWidget {
 }
 
 /// A small KPI: label, animated amount, optional change chip.
+/// A KPI tile: the title and the amount (or percentage) — nothing else.
+/// Owner rule: no descriptions, captions or side stats on these tiles.
 class PrKpi extends StatelessWidget {
   const PrKpi({
     super.key,
@@ -287,9 +274,6 @@ class PrKpi extends StatelessWidget {
     required this.currency,
     required this.color,
     this.icon,
-    this.change,
-    this.goodWhenUp = true,
-    this.caption,
     this.percent = false,
   });
   final String label;
@@ -297,9 +281,6 @@ class PrKpi extends StatelessWidget {
   final String currency;
   final Color color;
   final IconData? icon;
-  final double? change;
-  final bool goodWhenUp;
-  final String? caption;
   final bool percent;
 
   @override
@@ -350,22 +331,6 @@ class PrKpi extends StatelessWidget {
                   currency: currencyLabel(currency, locale: lang),
                   style: style,
                 ),
-          if (change != null) ...[
-            const SizedBox(height: 4),
-            PrChange(change: change!, goodWhenUp: goodWhenUp),
-          ] else if (caption != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              caption!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontFamily: 'Cairo',
-                fontSize: 10.5,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ],
         ],
       ),
     );

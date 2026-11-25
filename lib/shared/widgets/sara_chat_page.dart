@@ -63,6 +63,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/ai/domain/services/ai_service.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 import '../../features/branches/data/branch_pictures.dart';
+import '../../features/ai/presentation/widgets/sara_offline_notice.dart';
 
 /// ── Sara adaptive palette ──────────────────────────────────────────
 /// Dark theme keeps the original blacks exactly as they were.
@@ -241,6 +242,9 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
   final _audioRecorder = AudioRecorder();
   final _audioPlayer = AudioPlayer();
   bool _busy = false;
+  // Personal Sara is online-only: offline → calm notice, no local loop.
+  bool _offline = false;
+  StreamSubscription<bool>? _netSub;
   String? _pendingFileName;
   XFile? _pendingImage;
   bool _isRecording = false;
@@ -302,10 +306,21 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
       final show = max > 0 && max - current > 300;
       if (show != _showScrollDown) setState(() => _showScrollDown = show);
     });
+    if (widget.accountType == 'personal') {
+      try {
+        final net = ref.read(connectivityServiceProvider);
+        _offline = !net.isOnline;
+        _netSub = net.onConnectivityChanged.listen((online) {
+          if (mounted && _offline == online) setState(() => _offline = !online);
+        });
+      } catch (_) {}
+    }
     // Offline guard: Sara (AI Assistant) needs the network to talk to the
     // cloud. Show a centered modal and DO NOT enter the conversation UI.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
+      // Personal shows the in-chat offline card instead (one notice only).
+      if (widget.accountType == 'personal') return;
       try {
         final connectivity = ref.read(connectivityServiceProvider);
         if (!connectivity.isOnline) {
@@ -326,6 +341,7 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
 
   @override
   void dispose() {
+    _netSub?.cancel();
     _composerFocus.removeListener(_ambientFocusChanged);
     _composerFocus.dispose();
     _ambient.dispose();
@@ -1280,10 +1296,33 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
     }
   }
 
+  /// Live network state (true when unknown, so a provider hiccup never
+  /// silences Sara).
+  bool _isOnline() {
+    try {
+      return ref.read(connectivityServiceProvider).isOnline;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Personal + offline: show the calm offline notice and refuse the turn.
+  /// Nothing runs locally (no device-data answers, no direct commands).
+  bool _blockedOffline() {
+    final blocked = SaraOnlinePolicy.chatBlocked(
+        accountType: widget.accountType, online: _isOnline());
+    if (blocked) {
+      HapticFeedback.selectionClick();
+      if (mounted && !_offline) setState(() => _offline = true);
+    }
+    return blocked;
+  }
+
   Future<void> _send({String? text}) async {
     final msg = text ?? _inputCtrl.text.trim();
     if (msg.isEmpty && _pendingFileName == null && _pendingImage == null && _audioPath == null) return;
     if (_busy) return;
+    if (_blockedOffline()) return;
     _autoFollow = true;
     _ambient.send();
     final visualGeneration = _ambient.generation;
@@ -1825,6 +1864,7 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
 
   void _handleConfirmAction(_ChatMessage msg) {
     if (msg.confirmToolName == null) return;
+    if (_blockedOffline()) return;
     final params = msg.confirmParams ?? {};
     final toolName = msg.confirmToolName!;
 
@@ -2527,6 +2567,7 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
   }
 
   void _retry(String query) {
+    if (_blockedOffline()) return;
     _ambient.send();
     final visualGeneration = _ambient.generation;
     _busy = true;
@@ -2705,6 +2746,7 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
 
   void _sendPendingAudio() {
     if (_pendingAudioPath == null) return;
+    if (_blockedOffline()) return;
     _audioPath = _pendingAudioPath;
     _pendingAudioPath = null;
     _isPlayingPreview = false;
@@ -2794,6 +2836,10 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
               if (_dynamicSuggestions.isNotEmpty) _buildDynamicSuggestions()
               else if (widget.suggestedQuestions.isNotEmpty && _messages.length <= 2) _buildSuggestedGrid(),
               _buildPreviewBar(),
+              if (widget.accountType == 'personal' && _offline)
+                SaraOfflineNotice(onRetry: () {
+                  if (_isOnline()) setState(() => _offline = false);
+                }),
               _buildInputBar(),
             ]),
             Positioned.fill(child: SaraAmbientAccents(controller: _ambient, business: widget.accountType == 'business')),
@@ -3417,20 +3463,109 @@ class _AnimatedMessage extends StatefulWidget {
 class _AnimatedMessageState extends State<_AnimatedMessage> with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
   late Animation<double> _anim;
+  late Animation<Offset> _slide;
+  late Animation<double> _scale;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
+    // Soft entrance: a short fade + a few pixels of rise + a whisper of
+    // scale. Runs once (never loops) so the chat always settles.
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 340));
     _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
+    _slide = Tween(begin: const Offset(0, .06), end: Offset.zero).animate(_anim);
+    _scale = Tween(begin: .985, end: 1.0).animate(_anim);
     _ctrl.forward();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) _ctrl.value = 1;
   }
 
   @override
   void dispose() { _ctrl.dispose(); super.dispose(); }
 
   @override
-  Widget build(BuildContext context) => FadeTransition(opacity: _anim, child: widget.child);
+  Widget build(BuildContext context) => FadeTransition(
+        opacity: _anim,
+        child: SlideTransition(
+          position: _slide,
+          child: ScaleTransition(scale: _scale, child: widget.child),
+        ),
+      );
+}
+
+/// Brief soft light around a just-sent user bubble (fades out once, ~0.9 s).
+class _SendGlow extends StatelessWidget {
+  final bool fresh;
+  final Widget child;
+  const _SendGlow({required this.fresh, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!fresh || (MediaQuery.maybeOf(context)?.disableAnimations ?? false)) return child;
+    final light = _saraLight(context);
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 1, end: 0),
+      duration: const Duration(milliseconds: 900),
+      curve: Curves.easeOutCubic,
+      child: child,
+      builder: (_, v, c) => v <= 0.001
+          ? c!
+          : DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: (light ? .20 : .32) * v),
+                    blurRadius: 22 * v + 2,
+                    spreadRadius: 1.5 * v,
+                  ),
+                ],
+              ),
+              child: c,
+            ),
+    );
+  }
+}
+
+/// Quiet press / hover feedback for Sara's action chips: a slight scale
+/// on press and a soft tint on hover — both short implicit animations.
+class _SaraPressable extends StatefulWidget {
+  final VoidCallback onTap;
+  final Widget Function(bool active) builder;
+  const _SaraPressable({required this.onTap, required this.builder});
+  @override
+  State<_SaraPressable> createState() => _SaraPressableState();
+}
+
+class _SaraPressableState extends State<_SaraPressable> {
+  bool _down = false, _hover = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (_) => setState(() => _down = true),
+          onTapCancel: () => setState(() => _down = false),
+          onTapUp: (_) => setState(() => _down = false),
+          onTap: () {
+            HapticFeedback.selectionClick();
+            widget.onTap();
+          },
+          child: AnimatedScale(
+            scale: _down ? .96 : 1,
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOut,
+            child: widget.builder(_down || _hover),
+          ),
+        ),
+      );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3475,7 +3610,9 @@ class _UserBubble extends StatelessWidget {
                       ));
                     }
                   },
-                  child: Container(
+                  child: _SendGlow(
+                    fresh: anchorKey != null && DateTime.now().difference(time).inMilliseconds.abs() < 2500,
+                    child: Container(
                     key: anchorKey,
                     constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
                     padding: const EdgeInsets.all(12),
@@ -3491,6 +3628,7 @@ class _UserBubble extends StatelessWidget {
                       boxShadow: [BoxShadow(color: AppColors.primary.withAlpha(45), blurRadius: 14, offset: const Offset(0, 5))],
                     ),
                     child: Text(text, style: const TextStyle(fontFamily: 'Cairo', fontSize: 14, color: Colors.white, height: 1.4)),
+                  ),
                   ),
                 ),
                 Padding(
@@ -4196,20 +4334,34 @@ class _AssistantBubble extends StatelessWidget {
               children: [
                 GestureDetector(
                   onLongPress: onCopy,
-                child: Container(
+                // While Sara's words stream in, the bubble wears a gentle
+                // glow edge in the brand tone; it eases back when done.
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 520),
+                  curve: Curves.easeOutCubic,
                   key: anchorKey,
                   constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
                     padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                     decoration: BoxDecoration(
                       color: _saraBubble(context),
-                      border: Border.all(color: _saraLine(context), width: 0.6),
+                      border: Border.all(
+                          color: animate
+                              ? AppColors.primary.withAlpha(_saraLight(context) ? 70 : 95)
+                              : _saraLine(context),
+                          width: animate ? 0.9 : 0.6),
                       borderRadius: BorderRadius.only(
                         topLeft: isGrouped ? const Radius.circular(8) : const Radius.circular(20),
                         topRight: const Radius.circular(20),
                         bottomLeft: const Radius.circular(6),
                         bottomRight: const Radius.circular(20),
                       ),
-                      boxShadow: [BoxShadow(color: Colors.black.withAlpha(_saraLight(context) ? 10 : 30), blurRadius: 16, offset: const Offset(0, 4))],
+                      boxShadow: [
+                        BoxShadow(color: Colors.black.withAlpha(_saraLight(context) ? 10 : 30), blurRadius: 16, offset: const Offset(0, 4)),
+                        BoxShadow(
+                            color: AppColors.primary.withAlpha(animate ? (_saraLight(context) ? 26 : 40) : 0),
+                            blurRadius: 22,
+                            spreadRadius: animate ? 0.5 : 0),
+                      ],
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -4253,14 +4405,21 @@ class _AssistantBubble extends StatelessWidget {
                             runSpacing: 6,
                             children: actions.where((a) => a.type != SaraActionType.refreshData).map((a) {
                               final label = (a.label?.isNotEmpty ?? false) ? a.label! : _defaultActionLabel(a, l10n);
-                              return GestureDetector(
+                              return _SaraPressable(
                                 onTap: () => onAction(a),
-                                child: Container(
+                                builder: (active) => AnimatedContainer(
+                                  duration: const Duration(milliseconds: 160),
                                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                                   decoration: BoxDecoration(
-                                    color: AppColors.primary.withAlpha(22),
+                                    color: AppColors.primary.withAlpha(active ? 38 : 22),
                                     borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: AppColors.primary.withAlpha(60), width: 0.8),
+                                    border: Border.all(color: AppColors.primary.withAlpha(active ? 110 : 60), width: 0.8),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: AppColors.primary.withAlpha(active ? 40 : 0),
+                                        blurRadius: 12,
+                                      ),
+                                    ],
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,

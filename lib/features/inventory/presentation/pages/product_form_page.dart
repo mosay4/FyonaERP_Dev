@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../core_business/presentation/widgets/business_number_field.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/shared/widgets/biz_currency_items.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -871,34 +872,28 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
 
   Future<String?> _pickCurrency(String current) async {
     final l10n = AppLocalizations.of(context);
+    // Exactly the Business currencies enabled in profile settings.
+    final codes = await readBizCurrencies(ref);
+    if (!mounted) return null;
     return showBusinessSelectionSheet<String>(
       context: context,
       title: l10n.translate('invCurrency'),
       selected: current,
-      items: [
-        for (final c in const ['SAR', 'USD', 'YER_NEW', 'YER_OLD'])
-          BizSheetItem(value: c, title: '$c - ${currencyName(c)}', icon: Icons.monetization_on_outlined),
-      ],
+      items: bizCurrencySheetItems(codes),
     );
   }
 
   Future<void> _addPriceRow() async {
     final l10n = AppLocalizations.of(context);
     final used = {for (final e in _prices) e.currency};
-    final available = const ['SAR', 'USD', 'YER_NEW', 'YER_OLD']
+    final available = (await readBizCurrencies(ref))
         .where((c) => !used.contains(c))
         .toList();
-    if (available.isEmpty) return;
+    if (available.isEmpty || !mounted) return;
     final c = await showBusinessSelectionSheet<String>(
       context: context,
       title: l10n.translate('invCurrency'),
-      items: [
-        for (final cur in available)
-          BizSheetItem(
-              value: cur,
-              title: '$cur - ${currencyName(cur)}',
-              icon: Icons.monetization_on_outlined),
-      ],
+      items: bizCurrencySheetItems(available),
     );
     if (c == null || !mounted) return;
     setState(() => _prices.add(_PriceEntry(c)));

@@ -4,6 +4,7 @@ import 'package:fyona_flutter/features/core_business/presentation/widgets/debt_s
 
 import '../../../../shared/widgets/account_type_bar.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fyona_flutter/shared/widgets/biz_currency_items.dart';
 import '../../../../../core/localization/app_localizations.dart';
 import '../../../../../core/responsive/r_api.dart';
 import '../../../../../core/services/currency/currency_engine.dart';
@@ -152,9 +153,9 @@ class SalePaymentSection extends ConsumerWidget {
               placeholder: l10n.translate('invChooseInvoiceCurrency'),
               onTap: () async {
                 final accounts = accountsAsync.valueOrNull ?? const [];
-                final currencies = _distinctCurrencies(accounts).toList()
-                  ..sort();
-                if (currencies.isEmpty) return;
+                final currencies = await limitToBizCurrencies(
+                    ref, _distinctCurrencies(accounts));
+                if (currencies.isEmpty || !context.mounted) return;
                 final picked = await showBusinessSelectionSheet<String>(
                   context: context,
                   title: l10n.translate('invCurrency'),
@@ -863,10 +864,11 @@ Future<void> _changeInvoiceCurrency(
   SaleDraft draft,
 ) async {
   final l10n = AppLocalizations.of(context);
-  final currencies = <String>{
+  final currencies = await limitToBizCurrencies(ref, [
     for (final a in accounts)
-      if ((a['currency'] ?? '').isNotEmpty) (a['currency']!).toUpperCase(),
-  }.toList()..sort();
+      if ((a['currency'] ?? '').isNotEmpty) a['currency']!,
+  ]);
+  if (!context.mounted) return;
   final picked = await showBusinessSelectionSheet<String>(
     context: context,
     title: l10n.translate('saleChangeInvoiceCurrency'),

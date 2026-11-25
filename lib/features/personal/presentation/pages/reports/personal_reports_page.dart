@@ -54,11 +54,7 @@ class _PersonalReportsPageState extends ConsumerState<PersonalReportsPage> {
     if (!mounted) return;
     final picked = await showPersonalReportCurrencyPicker(
       context,
-      mine: [
-        for (final c in PersonalReportSource.mine(ref))
-          if (enabled.contains(c)) c,
-      ],
-      all: enabled,
+      currencies: enabled,
       current: _ccy,
     );
     if (picked == null || picked == _ccy || !mounted) return;

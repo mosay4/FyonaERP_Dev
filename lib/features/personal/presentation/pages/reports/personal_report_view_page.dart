@@ -96,7 +96,9 @@ class _PersonalReportViewPageState
       if (widget.playScene) {
         _openScene();
       } else {
-        unawaited(PersonalReportSource.warm(ref).then((_) => _maybeAutoExport()));
+        unawaited(
+          PersonalReportSource.warm(ref).then((_) => _maybeAutoExport()),
+        );
       }
     });
   }
@@ -160,11 +162,7 @@ class _PersonalReportViewPageState
     if (!mounted) return;
     final picked = await showPersonalReportCurrencyPicker(
       context,
-      mine: [
-        for (final c in PersonalReportSource.mine(ref))
-          if (enabled.contains(c)) c,
-      ],
-      all: enabled,
+      currencies: enabled,
       current: _ccy,
     );
     if (picked == null || picked == _ccy || !mounted) return;

@@ -83,7 +83,14 @@ void _expectApprovedDialog(WidgetTester tester) {
     find.text(l10n.translate('offlineSectionRequiresInternet')),
     findsOneWidget,
   );
-  expect(find.text(l10n.translate('offlineAutoSyncHint')), findsOneWidget);
+  expect(
+    find.text('هذه الخدمة تحتاج إلى اتصال بالإنترنت.'),
+    findsOneWidget,
+  );
+  expect(find.text('لا يوجد اتصال بالإنترنت'), findsOneWidget);
+  // The auto-sync promise is no longer part of this notice.
+  expect(find.text(l10n.translate('offlineAutoSyncHint')), findsNothing);
+  expect(find.textContaining('ستتم المزامنة'), findsNothing);
   expect(find.byType(OfflineSignalArt), findsOneWidget);
 }
 
