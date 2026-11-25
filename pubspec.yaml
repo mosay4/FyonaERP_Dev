@@ -98,7 +98,6 @@ flutter:
     - assets/images/international/
     - assets/images/connect/
     - assets/l10n/
-    - assets/audio/crystal_echo.mp3
     - assets/audio/sound_2.wav
     - assets/audio/barcode_capture.wav
     - assets/audio/product_alert.wav
@@ -122,7 +121,6 @@ flutter:
     - assets/audio/financial_debts.ogg
     - assets/audio/financial_executive.ogg
     - assets/audio/financial_precision.ogg
-    - assets/audio/financial_balance.ogg
     - assets/audio/report_overview_tiles.wav
     - assets/audio/report_overview_ring.wav
     - assets/audio/report_overview_settle.wav
