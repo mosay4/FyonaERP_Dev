@@ -261,3 +261,6 @@ Commit a18fc9e, backend business-6193-relay.194a6734, APK 35,646,282 bytes. RULE
 
 ## 25. Round 18 (2026-11-25)
 Commit a18fc9e, backend business-6193-relay.194a6734, APK 35,646,282 bytes Telegram 1314 + report 1315. OWNER RULE: user data never persisted on server (relay + delete after delivery). Account type now via peer-relay self-push (account_types / account_types_request), lib/features/personal/data/account_type_store.dart; round-17 server column code reverted (QA DB may still hold an empty unused personal_bank_accounts.account_type column). App lock is an overlay in app.dart (no pushed route); splash uses lockForStartup instead of biometric→login; token refresh only signs out on 400/401/403. NOTE: Personal entities (transactions/banks/debts...) are still persisted server-side by the pre-existing personal sync — conflicts with owner rule, raised to owner. Full suite under -j2 OOMs on this host; rerun failures with -j1.
+
+## 26. Round 19 (2026-11-25)
+Commit 89e5445 (no backend change). APK 35,837,963 bytes (36MB guard close!). sound_2 now WAV calm chime; NotificationRouter maps inventory/reminders/admin + waits on /account-entry; currencyShort/Symbol/Name follow language (AR names, EN codes); help clicker rewritten (lib/core/help/help_detector.dart + catalog/); recon_scenes.dart; Sara chat redesign (gap fix via MediaQuery.removePadding).
