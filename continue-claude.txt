@@ -252,3 +252,6 @@ OPEN ITEMS (need owner decision or next round)
 Commit 7d1695a, backend release business-6193-relay.dff7931e. APK 35,560,074 bytes sent Telegram 1308, report 1309 (../verification/claude-phase16/FYONA-report-rounds15-16.txt).
 Build OOM on 8GB host: needed a temporary 4GB swap file (/swapfile-fyona-build, swapoff done; file deletion left to owner). Kill orphan frontend_server after a failed build.
 Round 16: Sara smart Personal notifications (lib/features/personal/services/smart_insights, on-device, no AI), Personal categories in personal_entity_cache, Sara tools for categories/tree/merchant (contract 1.7.0), same-currency bank accounts (personal_account_choice.dart), welcome dedupe, live plan badge + subscription_changed push, invoice cashier (ledger schema 19), branch chip, intro every 72h, forced-dark auth.
+
+## 24. Round 17 (2026-11-25)
+Commit e5dcfe1, backend release business-6193-relay.525902d6 (not built per owner). Network quality monitor (lib/core/services/network_quality_monitor.dart), Personal Sara online-only, Sara notif engine v2 + largeIcon sara_avatar_notif, brand entry view/handoff, fresh_invoice_scroll, biz_currency_items, bank account_type server column (migration 122 + init_db missing-column list). Flaky under -j2: income_provider_race, instant_paint, sara_currency_exchange (pass alone).
