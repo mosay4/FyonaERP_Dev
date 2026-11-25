@@ -258,3 +258,6 @@ Commit e5dcfe1, backend release business-6193-relay.525902d6 (not built per owne
 
 ## 25. Round 18 (2026-11-25)
 Commit a18fc9e, backend business-6193-relay.194a6734, APK 35,646,282 bytes. RULE: user data never stored on server (memory fyona-local-only-data). Account type via /peer-relay/self-push (delete after delivery), app lock overlay in app.dart, token refresh only expires on 400/401/403. QA DB still has an unused empty personal_bank_accounts.account_type column from round 17 init_db.
+
+## 25. Round 18 (2026-11-25)
+Commit a18fc9e, backend business-6193-relay.194a6734, APK 35,646,282 bytes Telegram 1314 + report 1315. OWNER RULE: user data never persisted on server (relay + delete after delivery). Account type now via peer-relay self-push (account_types / account_types_request), lib/features/personal/data/account_type_store.dart; round-17 server column code reverted (QA DB may still hold an empty unused personal_bank_accounts.account_type column). App lock is an overlay in app.dart (no pushed route); splash uses lockForStartup instead of biometric→login; token refresh only signs out on 400/401/403. NOTE: Personal entities (transactions/banks/debts...) are still persisted server-side by the pre-existing personal sync — conflicts with owner rule, raised to owner. Full suite under -j2 OOMs on this host; rerun failures with -j1.
