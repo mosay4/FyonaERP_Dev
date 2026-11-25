@@ -238,3 +238,12 @@ OPEN ITEMS (need owner decision or next round)
    proves before 60,500 / after 50,000 / decrease 10,500 on both devices.
 4) Owner will test everything (checklist Telegram 1279) and send all
    problems in one list; fix them together.
+
+## 22. Round 15 (commit 4b05902, backend deployed, NOT built — waiting for next batch, then build once)
+- Personal reports currency picker = only enabled Personal currencies (PersonalReportSource.enabled → loadEnabledCurrencies).
+- Sara: calm background (_calm in sara_ambient_scene.dart; aurora shader still loaded but unused), no theme focus frame in input.
+- Sara Personal: backend sara_screen_links.missing_open_action + prompt rule; client sara_link_fallback.saraEnsureScreenAction; new tools delete_bank, skip_recurring, postpone_recurring; execute_recurring_now bank param; export_report → /personal/reports/view?export=1. Contract 1.6.0. No PIN in Sara (identityGate left unwired by rule).
+- Personal categories add/edit/delete are no-ops in PersonalFinanceService (real bug, needs decision). Financial tree / merchant links tools not done.
+- Offline dialog: compact 64px cloud+slash tile.
+- Invoice picker: showCategories (بدون تصنيف / مع التصنيف + category tiles, InventoryCategoryTile public). Previous-debt chips: debtRowAmount (device rows use 'total').
+- Full suite: 1560 passed, 10 known + 1 (fixed after).
