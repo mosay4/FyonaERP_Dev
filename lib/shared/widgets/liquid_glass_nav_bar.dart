@@ -138,28 +138,9 @@ class _LiquidGlassNavBarState extends State<LiquidGlassNavBar>
             return Stack(
               clipBehavior: Clip.none,
               children: [
-                // Outer glow of the whole capsule.
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(34),
-                      boxShadow: [
-                        BoxShadow(
-                          color: accent.withAlpha(dark ? 40 : 22),
-                          blurRadius: 36,
-                          spreadRadius: -10,
-                          offset: const Offset(0, 10),
-                        ),
-                        BoxShadow(
-                          color: Colors.black.withAlpha(dark ? 90 : 14),
-                          blurRadius: 24,
-                          spreadRadius: -12,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                // No outer glow / shadow: it tinted the app background
+                // around the capsule (a visible band). The capsule's own rim
+                // is its only edge; around it is the page itself.
                 ClipRRect(
                   borderRadius: BorderRadius.circular(34),
                   child: Stack(
@@ -552,18 +533,11 @@ class _Tab extends StatelessWidget {
 }
 
 
-/// The colour behind the app's bottom navigation (the shell background).
-/// A page docked right above the bar (e.g. Sara's composer) paints its
-/// bottom surface with it, so the screen reads as one background with the
-/// bar floating over it — no rectangle behind the bar.
-class NavBarBackdrop extends InheritedWidget {
-  const NavBarBackdrop({super.key, required this.color, required super.child});
-
-  final Color color;
-
-  static Color? maybeOf(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<NavBarBackdrop>()?.color;
-
-  @override
-  bool updateShouldNotify(NavBarBackdrop old) => old.color != color;
+/// What is painted behind the floating bottom bar. By default nothing (the
+/// app background shows through). A page whose bottom surface differs from
+/// the app background (Sara's composer) sets its colour while it is shown,
+/// so the strip around the bar continues that surface — one background, the
+/// capsule floating on it.
+abstract final class NavBarBackdrop {
+  static final ValueNotifier<Color?> color = ValueNotifier<Color?>(null);
 }

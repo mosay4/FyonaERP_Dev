@@ -2,6 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>FYONA uses Bluetooth to find and print to your receipt printer.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>FYONA looks for printers on your local network to print invoices.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ipp._tcp</string>
+		<string>_ipps._tcp</string>
+		<string>_pdl-datastream._tcp</string>
+		<string>_printer._tcp</string>
+	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Sara listens to your voice requests.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

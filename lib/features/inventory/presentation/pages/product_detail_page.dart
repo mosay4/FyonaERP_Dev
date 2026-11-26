@@ -1396,8 +1396,11 @@ class _CollapsibleUnitsState extends State<_CollapsibleUnits> {
                         fontSize: 14,
                         fontWeight: FontWeight.w800)),
               ),
+              // Not flexible: the title takes the free space, so the arrow
+              // sits at the card's edge whether open or folded.
               if (!_open && widget.summary.isNotEmpty) ...[
-                Flexible(
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 140),
                   child: Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 3),

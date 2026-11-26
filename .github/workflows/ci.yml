@@ -110,6 +110,44 @@ jobs:
           flutter test --no-pub --machine $QA_DEFINES test/ > results.jsonl || true
           python3 tools/ci/check_regressions.py < results.jsonl
 
+  printing:
+    name: Print Center (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Analyze the Print Center (errors fail)
+        shell: bash
+        run: flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings lib/features/printing test/printing
+      # A REAL printer in the Windows spooler ("Generic / Text Only" driver)
+      # on a Standard TCP/IP port at 127.0.0.1:9100, where the test listens:
+      # FYONA must find it (EnumPrinters) and print RAW through it.
+      - name: Install a test printer in the Windows spooler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $driver = 'Generic / Text Only'
+          if (-not (Get-PrinterDriver -Name $driver -ErrorAction SilentlyContinue)) { Add-PrinterDriver -Name $driver }
+          Add-PrinterPort -Name 'FYONA_TEST_9100' -PrinterHostAddress '127.0.0.1' -PortNumber 9100
+          Add-Printer -Name 'FYONA POS Test' -DriverName $driver -PortName 'FYONA_TEST_9100'
+          Get-Printer | Format-Table Name, DriverName, PortName
+          "FYONA_SPOOLER_PRINTER=FYONA POS Test" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Print engine, transports, IPP, discovery, page and motion
+        shell: bash
+        run: flutter test --no-pub $QA_DEFINES test/printing
+
   backend-tests:
     name: Backend relay, local mode, guard (PostgreSQL)
     needs: changes
@@ -166,11 +204,11 @@ jobs:
         run: >-
           flutter build apk --release --target-platform android-arm64 $QA_DEFINES
           --dart-define=FYONA_DIRECTORY_SETUP_URL=https://qa.fyonacompany.com:18443/api/v1
-      - name: Size gate (< 35,000,000 bytes)
+      - name: Size gate (< 36,000,000 bytes, same as the release guard)
         run: |
           size=$(stat -c %s build/app/outputs/flutter-apk/app-release.apk)
           echo "APK size: $size"
-          test "$size" -lt 35000000
+          test "$size" -lt 36000000
       - uses: actions/upload-artifact@v4
         # The account's artifact quota can be full; the build itself passed.
         continue-on-error: true

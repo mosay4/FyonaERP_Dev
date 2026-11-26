@@ -98,13 +98,20 @@ void main() {
     tester,
   ) async {
     await pump(tester, extra: true, open: false);
+    final arrow = find.descendant(
+        of: find.byKey(const ValueKey('unitDetailsToggle')),
+        matching: find.byIcon(Icons.keyboard_arrow_down_rounded));
+    final foldedAt = tester.getCenter(arrow);
     // Folded: the unit rows are hidden, the stock stays in the header.
     expect(find.text('باكيت'), findsNothing);
     expect(find.text('74 قطعة'), findsOneWidget);
     await openUnits(tester);
     expect(find.text('باكيت'), findsWidgets);
+    // The arrow never moves between the two states (card edge).
+    expect(tester.getCenter(arrow), foldedAt);
     await openUnits(tester); // second tap folds them again
     expect(find.text('باكيت'), findsNothing);
+    expect(tester.getCenter(arrow), foldedAt);
   });
 
   testWidgets('header shows ONLY the product name; base unit box has qty', (

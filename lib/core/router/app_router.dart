@@ -2381,11 +2381,7 @@ class _MainShellState extends ConsumerState<MainShell>
         key: shellScaffoldKey,
         backgroundColor: isPersonal ? AppColors.background : null,
         drawer: AppDrawer(user: user, currentRoute: currentRoute),
-        body: NavBarBackdrop(
-          color: isPersonal
-              ? AppColors.background
-              : Theme.of(context).scaffoldBackgroundColor,
-          child: Column(
+        body: Column(
           children: [
             // Same top bar for personal and business (identical widget).
             HomeHeader(),
@@ -2494,17 +2490,22 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
           ],
         ),
+        bottomNavigationBar: ValueListenableBuilder<Color?>(
+          valueListenable: NavBarBackdrop.color,
+          builder: (context, backdrop, bar) => backdrop == null
+              ? bar!
+              : ColoredBox(color: backdrop, child: bar),
+          child: isPersonal
+              ? HomeBottomNav(
+                  currentIndex: navIndex,
+                  onTap: (i) {
+                    if (i < activeNav.length) {
+                      context.go(activeNav[i].route);
+                    }
+                  },
+                )
+              : const BusinessBottomNav(),
         ),
-        bottomNavigationBar: isPersonal
-            ? HomeBottomNav(
-                currentIndex: navIndex,
-                onTap: (i) {
-                  if (i < activeNav.length) {
-                    context.go(activeNav[i].route);
-                  }
-                },
-              )
-            : const BusinessBottomNav(),
       ),
     );
   }

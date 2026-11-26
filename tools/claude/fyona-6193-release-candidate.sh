@@ -108,7 +108,10 @@ with ZipFile(apk) as new, ZipFile(reference) as old:
                                       if l.startswith("application-label"))
             assert labels(apk) == labels(reference), (labels(apk), labels(reference))
             diff = [l for l in difflib.ndiff(tree(reference), tree(apk)) if l[:2] in ("+ ", "- ")]
-            allowed = re.compile(r'^\+ \s*(E: intent|E: action|A: android:name\(0x01010003\)="android\.speech\.RecognitionService".*)$')
+            # Approved additions only (owner): the speech RecognitionService
+            # <queries> entry (round 20) and neverForLocation on BLUETOOTH_SCAN
+            # (Print Center, round 22: printer discovery without location).
+            allowed = re.compile(r'^\+ \s*(E: intent|E: action|A: android:name\(0x01010003\)="android\.speech\.RecognitionService".*|A: android:usesPermissionFlags\(0x[0-9a-f]+\)=\(type 0x11\)0x10000)$')
             bad = [l for l in diff if not allowed.match(l)]
             assert not bad and any("RecognitionService" in l for l in diff), bad[:10]
         assert set(check_output([aapt, "dump", "permissions", apk], text=True).splitlines()) == \

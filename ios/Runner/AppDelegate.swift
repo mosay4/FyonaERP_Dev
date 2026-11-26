@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreBluetooth
 import AuthenticationServices
 import CryptoKit
 import Flutter
@@ -11,6 +12,7 @@ import UIKit
   private var speech: FyonaSpeech?
   private var deviceIdentity: FyonaDeviceIdentity?
   private var appleSignIn: FyonaAppleSignIn?
+  private var printer: FyonaPrinterBle?
 
   override func application(
     _ application: UIApplication,
@@ -29,6 +31,9 @@ import UIKit
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "FyonaAppleSignIn") {
       appleSignIn = FyonaAppleSignIn(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "FyonaPrinterBle") {
+      printer = FyonaPrinterBle(messenger: registrar.messenger())
     }
   }
 }
@@ -432,5 +437,214 @@ final class FyonaSpeech: NSObject {
     task?.cancel()
     request?.endAudio()
     finish()
+  }
+}
+
+
+/// Print Center on iOS: Bluetooth Low Energy receipt printers (CoreBluetooth).
+/// Channel `com.fyona.erp/printer` — scan / connect / write / read /
+/// disconnect with transport "ble" (same contract as Android). Network
+/// printers (raw TCP, IPP) are reached from Dart directly. Work runs on a
+/// private queue; the UI thread never waits.
+final class FyonaPrinterBle: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+  private let channel: FlutterMethodChannel
+  private let queue = DispatchQueue(label: "fyona.printer.ble")
+  private let work = DispatchQueue(label: "fyona.printer.work")
+  private var central: CBCentralManager!
+  private var found: [UUID: CBPeripheral] = [:]
+  private var names: [UUID: String] = [:]
+  private var peripheral: CBPeripheral?
+  private var writeChar: CBCharacteristic?
+  private var powered = DispatchSemaphore(value: 0)
+  private var connected = DispatchSemaphore(value: 0)
+  private var discovered = DispatchSemaphore(value: 0)
+  private var wrote = DispatchSemaphore(value: 0)
+  private var ready = DispatchSemaphore(value: 0)
+  private var pendingChars = 0
+
+  private static let printServices: [CBUUID] = [
+    "18F0", "E7810A71-73AE-499D-8C15-FAA9AEF0C3F2", "49535343-FE7D-4AE5-8FA9-9FAFD205E455",
+    "FF00", "FFE0", "FEE7",
+  ].map { CBUUID(string: $0) }
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "com.fyona.erp/printer", binaryMessenger: messenger)
+    super.init()
+    channel.setMethodCallHandler { [weak self] call, result in
+      self?.handle(call, result: result)
+    }
+  }
+
+  private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let args = call.arguments as? [String: Any] ?? [:]
+    guard (args["transport"] as? String) == "ble" else {
+      result(FlutterMethodNotImplemented)
+      return
+    }
+    work.async {
+      let reply: Any?
+      switch call.method {
+      case "scan":
+        reply = self.scan(timeout: (args["timeoutMs"] as? Int ?? 6000))
+      case "connect":
+        reply = self.connect(address: args["address"] as? String ?? "")
+      case "write":
+        let data = (args["bytes"] as? FlutterStandardTypedData)?.data ?? Data()
+        reply = self.write(data)
+      case "read":
+        reply = nil
+      case "disconnect":
+        self.disconnect()
+        reply = true
+      default:
+        DispatchQueue.main.async { result(FlutterMethodNotImplemented) }
+        return
+      }
+      DispatchQueue.main.async { result(reply) }
+    }
+  }
+
+  private func ensureCentral() -> Bool {
+    if central == nil {
+      powered = DispatchSemaphore(value: 0)
+      central = CBCentralManager(delegate: self, queue: queue)
+    }
+    if central.state == .poweredOn { return true }
+    _ = powered.wait(timeout: .now() + 3)
+    return central.state == .poweredOn
+  }
+
+  private func scan(timeout: Int) -> Any {
+    guard ensureCentral() else { return [[String: Any]]() }
+    queue.sync { found.removeAll(); names.removeAll() }
+    central.scanForPeripherals(withServices: nil,
+                               options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+    Thread.sleep(forTimeInterval: Double(min(timeout, 8000)) / 1000)
+    central.stopScan()
+    return queue.sync {
+      found.map { id, p in ["name": names[id] ?? p.name ?? "", "address": id.uuidString] as [String: Any] }
+    }
+  }
+
+  private func connect(address: String) -> Any {
+    guard ensureCentral(), let id = UUID(uuidString: address) else {
+      return FlutterError(code: "connect", message: "bluetooth", details: nil)
+    }
+    disconnect()
+    let p = queue.sync { found[id] } ?? central.retrievePeripherals(withIdentifiers: [id]).first
+    guard let target = p else { return FlutterError(code: "connect", message: "not found", details: nil) }
+    connected = DispatchSemaphore(value: 0)
+    discovered = DispatchSemaphore(value: 0)
+    peripheral = target
+    target.delegate = self
+    central.connect(target, options: nil)
+    if connected.wait(timeout: .now() + 10) == .timedOut || target.state != .connected {
+      disconnect()
+      return FlutterError(code: "connect", message: "timeout", details: nil)
+    }
+    target.discoverServices(nil)
+    if discovered.wait(timeout: .now() + 10) == .timedOut || writeChar == nil {
+      disconnect()
+      return FlutterError(code: "unsupported", message: "no writable characteristic", details: nil)
+    }
+    return true
+  }
+
+  private func write(_ data: Data) -> Any {
+    guard let p = peripheral, let c = writeChar, p.state == .connected else {
+      return FlutterError(code: "lost", message: "not connected", details: nil)
+    }
+    let withResponse = !c.properties.contains(.writeWithoutResponse)
+    let type: CBCharacteristicWriteType = withResponse ? .withResponse : .withoutResponse
+    let size = max(20, min(512, p.maximumWriteValueLength(for: type)))
+    var offset = 0
+    while offset < data.count {
+      let end = min(offset + size, data.count)
+      let slice = data.subdata(in: offset..<end)
+      if withResponse {
+        wrote = DispatchSemaphore(value: 0)
+        p.writeValue(slice, for: c, type: .withResponse)
+        if wrote.wait(timeout: .now() + 5) == .timedOut {
+          return FlutterError(code: "write", message: "ble timeout", details: nil)
+        }
+      } else {
+        while !p.canSendWriteWithoutResponse {
+          ready = DispatchSemaphore(value: 0)
+          if ready.wait(timeout: .now() + 5) == .timedOut {
+            return FlutterError(code: "write", message: "ble busy", details: nil)
+          }
+        }
+        p.writeValue(slice, for: c, type: .withoutResponse)
+      }
+      if p.state != .connected { return FlutterError(code: "lost", message: "disconnected", details: nil) }
+      offset = end
+    }
+    return true
+  }
+
+  private func disconnect() {
+    if let p = peripheral { central?.cancelPeripheralConnection(p) }
+    peripheral = nil
+    writeChar = nil
+  }
+
+  // MARK: CBCentralManagerDelegate
+  func centralManagerDidUpdateState(_ central: CBCentralManager) {
+    if central.state == .poweredOn { powered.signal() }
+  }
+
+  func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
+                      advertisementData: [String: Any], rssi RSSI: NSNumber) {
+    let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name ?? ""
+    let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
+    let looksLikePrinter = services.contains(where: { FyonaPrinterBle.printServices.contains($0) }) ||
+      name.range(of: "print|pos|mpt|ptp|rpp|xp-|mtp|thermal|receipt",
+                 options: [.regularExpression, .caseInsensitive]) != nil
+    if looksLikePrinter {
+      found[peripheral.identifier] = peripheral
+      names[peripheral.identifier] = name
+    }
+  }
+
+  func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+    connected.signal()
+  }
+
+  func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+    connected.signal()
+  }
+
+  func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+    if peripheral == self.peripheral { writeChar = nil }
+    wrote.signal()
+    ready.signal()
+  }
+
+  // MARK: CBPeripheralDelegate
+  func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+    let services = peripheral.services ?? []
+    if services.isEmpty { discovered.signal(); return }
+    pendingChars = services.count
+    for s in services { peripheral.discoverCharacteristics(nil, for: s) }
+  }
+
+  func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+    let writable = (service.characteristics ?? []).first {
+      $0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)
+    }
+    // Known printer services win over any other writable characteristic.
+    if let w = writable, writeChar == nil || FyonaPrinterBle.printServices.contains(service.uuid) {
+      writeChar = w
+    }
+    pendingChars -= 1
+    if pendingChars <= 0 { discovered.signal() }
+  }
+
+  func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+    wrote.signal()
+  }
+
+  func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+    ready.signal()
   }
 }

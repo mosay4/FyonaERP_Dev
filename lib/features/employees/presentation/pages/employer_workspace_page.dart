@@ -31,6 +31,8 @@ class EmployerWorkspacePage extends ConsumerWidget {
         from: 'الشخصي',
         to: '${org['name'] ?? 'مساحة العمل'}',
         arabic: true,
+        arrived: () =>
+            router.routerDelegate.currentConfiguration.uri.path.startsWith('/dashboard'),
         action: () async {
           final api = container.read(branchApiProvider);
           final ids = invitation['branch_ids'] as List?;

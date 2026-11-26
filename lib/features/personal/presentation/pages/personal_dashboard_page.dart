@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import '../../../../shared/widgets/premium_switch_transition.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -63,7 +64,8 @@ class _PersonalDashboardPageState extends ConsumerState<PersonalDashboardPage>
     ).animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic));
     _prevLoading = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(personalFinanceProvider.notifier).load();
+      // A section switch keeps its curtain closed until the wallet is here.
+      PremiumSwitch.hold(ref.read(personalFinanceProvider.notifier).load());
       _seedCountryCash();
       ref.read(budgetProvider.notifier).load();
       ref.read(recurringProvider.notifier).load();

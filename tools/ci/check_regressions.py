@@ -13,6 +13,7 @@ known = {line.strip() for line in Path(__file__).with_name("known_failures.txt")
          .read_text(encoding="utf-8").splitlines() if line.strip()}
 root = str(Path.cwd()) + "/"
 tests, suites, failed, passed = {}, {}, set(), set()
+errors = {}
 for raw in sys.stdin:
     try:
         event = json.loads(raw)
@@ -30,7 +31,10 @@ for raw in sys.stdin:
         name = tests.get(event["testID"], "?")
         (failed if event["result"] != "success" else passed).add(name)
     elif kind == "error":
-        failed.add(tests.get(event["testID"], "?"))
+        name = tests.get(event["testID"], "?")
+        failed.add(name)
+        detail = f'{event.get("error", "")}\n{event.get("stackTrace", "")}'
+        errors[name] = (errors.get(name, "") + detail)[:1500]
 new = sorted(f for f in failed if f not in known)
 fixed = sorted(k for k in known if k in passed)
 print(f"passed={len(passed)} failed={len(failed)} known={len(known)}")
@@ -38,6 +42,10 @@ for name in fixed:
     print(f"::notice::Known failure now passes (remove from known_failures.txt): {name}")
 for name in new:
     print(f"::error::New test failure: {name}")
+    if name in errors:
+        print(f"::group::{name}")
+        print(errors[name])
+        print("::endgroup::")
 if not passed:
     print("::error::No test results (the test run crashed)")
 sys.exit(1 if new or not passed else 0)

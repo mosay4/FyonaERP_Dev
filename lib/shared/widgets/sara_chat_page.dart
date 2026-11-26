@@ -393,6 +393,10 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
 
   @override
   void dispose() {
+    // After the frame: notifying listeners while the tree is locked throws.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      NavBarBackdrop.color.value = null;
+    });
     _netSub?.cancel();
     _composerFocus.removeListener(_ambientFocusChanged);
     _composerFocus.dispose();
@@ -2984,6 +2988,16 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
 
   @override
   Widget build(BuildContext context) {
+    // The strip around the floating bottom bar continues Sara's composer
+    // surface while this page is the one on screen.
+    final backdrop = (ModalRoute.of(context)?.isCurrent ?? true)
+        ? _saraBar(context)
+        : null;
+    if (NavBarBackdrop.color.value != backdrop) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) NavBarBackdrop.color.value = backdrop;
+      });
+    }
     // Page direction follows the app language: RTL for Arabic (natural
     // message layout, emojis and mixed names render correctly), LTR for
     // English. Previously forced to LTR which mirrored Arabic content.
@@ -3328,11 +3342,9 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
 
     // Docked composer: the bar's surface runs edge to edge under a single
     // hairline, flush with the bottom navigation (no floating island).
-    // Inside the app shell it takes the shell background, so the screen and
-    // the area around the floating bar are one colour (no rectangle).
     return Container(
       decoration: BoxDecoration(
-        color: NavBarBackdrop.maybeOf(context) ?? _saraBar(context),
+        color: _saraBar(context),
         border: Border(top: BorderSide(color: _saraLine(context), width: .8)),
       ),
       padding: EdgeInsets.only(

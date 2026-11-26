@@ -40,7 +40,7 @@ void main() {
     final re = RegExp(
         r'''(?:route|_route|invite_route|party_route|push_route|action_payload)\s*[=:]\s*f?["'](/?[a-z][^"'\s{]*)''');
     final re2 = RegExp(r'''["']route["']\s*:\s*f?["'](/?[a-z][^"'\s{]*)''');
-    for (final f in Directory('../implementation/backend/app').listSync(recursive: true)) {
+    for (final f in Directory('backend/app').listSync(recursive: true)) {
       if (f is! File || !f.path.endsWith('.py')) continue;
       final s = f.readAsStringSync();
       for (final m in [...re.allMatches(s), ...re2.allMatches(s)]) {

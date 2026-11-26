@@ -65,6 +65,46 @@ void main() {
     },
   );
 
+  testWidgets(
+    'curtain stays closed until the destination arrived and its data is held',
+    (tester) async {
+      var arrived = false;
+      final destinationData = Completer<void>();
+      await tester.pumpWidget(
+        const MaterialApp(home: PremiumSwitchHost(child: Text('old'))),
+      );
+      var done = false;
+      final result = PremiumSwitch.run(
+        kind: PremiumSwitchKind.business,
+        from: 'Personal',
+        to: 'Business',
+        arabic: false,
+        arrived: () => arrived,
+        action: () async {
+          // The destination registers its first load while the switch runs.
+          PremiumSwitch.hold(destinationData.future);
+        },
+      ).then((_) => done = true);
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 1500));
+      // The action is over but the router has not reached the destination.
+      expect(PremiumSwitch.current.value, isNotNull);
+      expect(done, isFalse);
+      arrived = true;
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      // Arrived, but its data is still loading: still covered.
+      expect(PremiumSwitch.current.value, isNotNull);
+      destinationData.complete();
+      await tester.pumpAndSettle();
+      await result;
+      expect(done, isTrue);
+      expect(PremiumSwitch.current.value, isNull);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('failure dismisses overlay, propagates error and permits retry', (
     tester,
   ) async {

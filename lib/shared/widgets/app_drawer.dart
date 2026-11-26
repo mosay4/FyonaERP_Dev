@@ -1150,6 +1150,7 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
           from: company?['organization_name']?.toString() ?? from,
           to: l10n.translate('branchMain'),
           arabic: l10n.locale.languageCode == 'ar',
+          arrived: () => router.routerDelegate.currentConfiguration.uri.path.startsWith('/personal'),
           action: () async {
             // Keep the branch selection: returning from Personal must land on
             // the same branch the user left, never on the main one.
@@ -1181,6 +1182,7 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
         from: from,
         to: _branchLabels[picked] ?? l10n.translate('branchAllShort'),
         arabic: l10n.locale.languageCode == 'ar',
+        arrived: () => router.routerDelegate.currentConfiguration.uri.path.startsWith(RouteNames.dashboard),
         action: () async {
           container.read(branchSwitchingProvider.notifier).state = true;
           try {
@@ -1376,6 +1378,7 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
             from: l10n.translate(isPersonal ? 'personal' : 'business'),
             to: l10n.translate(newMode),
             arabic: l10n.locale.languageCode == 'ar',
+            arrived: () => router.routerDelegate.currentConfiguration.uri.path.startsWith(isPersonal ? RouteNames.dashboard : RouteNames.personalDashboard),
             action: () async {
               // Returning does not select (or reselect) a saved branch over
               // the network. A first-time merchant entry has no branch yet.

@@ -72,8 +72,11 @@ class FYONAApp extends ConsumerWidget {
                 // bottom bar all repaint synchronously — no 1-2s lag.
                 // The overlay itself sits ABOVE this key, so the smoke keeps
                 // playing without restarting.
+                // Keyed on the EFFECTIVE mode: entering the always-dark
+                // sign-in flow (login, OTP / verification, reset) remounts it
+                // dark at once — the static AppColors palette is re-read.
                 child: KeyedSubtree(
-                  key: ValueKey('nav_${themeMode == ThemeMode.light ? 'light' : 'dark'}'),
+                  key: ValueKey('nav_${effectiveMode == ThemeMode.light ? 'light' : 'dark'}'),
                   child: child ?? const SizedBox.shrink(),
                 ),
               ),

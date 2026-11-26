@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../shared/widgets/premium_switch_transition.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'widgets/business_recent_ops.dart';
@@ -33,6 +34,11 @@ class BusinessDashboardPage extends ConsumerWidget {
     final balances = ref.watch(employeeCanProvider('banks.balances'));
     final local = ref.watch(localBusinessBankingProvider);
     final accountsAsync = balances ? ref.watch(businessAccountsProvider) : null;
+    // A branch / section switch keeps its curtain closed until the balances
+    // are here (no reveal of the previous screen, then a jump).
+    if (accountsAsync is AsyncLoading) {
+      PremiumSwitch.hold(ref.read(businessAccountsProvider.future));
+    }
     final reducedMotion = MediaQuery.disableAnimationsOf(context);
     return FyonaRefresh(
       onRefresh: () async {

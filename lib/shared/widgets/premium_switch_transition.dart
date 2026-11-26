@@ -32,12 +32,53 @@ class PremiumSwitch {
   static Duration maxWait = const Duration(seconds: 15);
   static int _hosts = 0;
 
+  /// Loading work of the destination screen: the curtain stays closed until
+  /// it is done (bounded by [maxHold]) — never reveal the old screen and then
+  /// jump to the new one.
+  static final List<Future<void>> _holds = [];
+  static Duration maxHold = const Duration(seconds: 6);
+
+  /// Called by a destination screen while a switch is running (e.g. its
+  /// first data load). No effect outside a switch.
+  static void hold(Future<void> work) {
+    if (current.value == null) return;
+    _holds.add(work.then((_) {}, onError: (_) {}));
+  }
+
+  /// After the action: the router has reached [target] (when given), the
+  /// new screen has built and its [hold]s are done, then a couple of calm
+  /// frames — only then the curtain opens.
+  static Future<void> _settle(bool Function()? arrived) async {
+    final binding = WidgetsBinding.instance;
+    final deadline = DateTime.now().add(maxHold);
+    // go_router commits a `go` a few frames later.
+    for (var i = 0; i < 3; i++) {
+      await binding.endOfFrame;
+    }
+    while (arrived != null && !arrived() && DateTime.now().isBefore(deadline)) {
+      binding.scheduleFrame();
+      await binding.endOfFrame;
+    }
+    while (_holds.isNotEmpty && DateTime.now().isBefore(deadline)) {
+      final pending = List<Future<void>>.of(_holds);
+      _holds.clear();
+      await Future.wait(pending)
+          .timeout(deadline.difference(DateTime.now()), onTimeout: () => []);
+      // The finished load rebuilds the screen (and may register more).
+      await binding.endOfFrame;
+    }
+    _holds.clear();
+    await binding.endOfFrame;
+    await binding.endOfFrame;
+  }
+
   static Future<void> run({
     required PremiumSwitchKind kind,
     required String from,
     required String to,
     required bool arabic,
     required Future<void> Function() action,
+    bool Function()? arrived,
   }) async {
     if (current.value != null) return;
     if (_hosts == 0) {
@@ -58,7 +99,7 @@ class PremiumSwitch {
       // Never leave the user behind a frozen curtain: past [maxWait] the
       // motion completes and the switch finishes on its own.
       await action().timeout(maxWait, onTimeout: () {});
-      await WidgetsBinding.instance.endOfFrame;
+      await _settle(arrived);
     } catch (e, st) {
       failure = e;
       trace = st;
