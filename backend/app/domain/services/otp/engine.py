@@ -332,7 +332,7 @@ async def can_request_sms(db: AsyncSession, ch: OtpChallenge, now: Optional[date
     now = now or utcnow()
     if ch.purpose not in SMS_PURPOSES or ch.sms_sent or ch.status in TERMINAL:
         return False
-    if ch.status_reason == "denied" or _aw(ch.expires_at) <= now:
+    if ch.status_reason in ("denied", "whatsapp_setup") or _aw(ch.expires_at) <= now:
         return False
     if ch.channel == "sms" or ch.wa_status in DELIVERED or ch.status in DELIVERED:
         return False
@@ -637,6 +637,13 @@ async def _whatsapp_failed(db: AsyncSession, ch: OtpChallenge, error_code: Optio
     if ch.status in TERMINAL or ch.sms_sent or ch.channel == "sms":
         return  # SMS already under way: a late WhatsApp failure changes nothing
     ch.status = "failed"
+    if not providers.sms_fallback_allowed(error_code):
+        # Our WhatsApp setup is broken (template / token / account): no SMS,
+        # automatic or requested, so a Meta misconfiguration costs nothing.
+        ch.status_reason = "whatsapp_setup"
+        logger.warning("otp_whatsapp_setup_error", code=error_code)
+        await _event(db, ch.id, "wa_setup_error", "whatsapp", error_code)
+        return
     ch.status_reason = "whatsapp_failed"
     if ch.purpose in SMS_PURPOSES and await can_request_sms(db, ch, now):
         ch.status = "fallback_sms"

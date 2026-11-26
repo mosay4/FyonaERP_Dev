@@ -82,13 +82,13 @@ async def whatsapp_events(request: Request, db: AsyncSession = Depends(get_db)):
         payload = json.loads(raw.decode("utf-8") or "{}")
     except ValueError:
         return JSONResponse({"ok": False}, status_code=400)
-    engine.note_receipt()
     to_process = []
     applied = 0
     for message_id, status, code, _ts in iter_whatsapp_statuses(payload):
         cid = await engine.apply_whatsapp_status(
             db, message_id=message_id, status=status, error_code=code)
         applied += 1
+        engine.note_receipt()  # a real message status from Meta: receipts flow
         if cid is not None:
             to_process.append(cid)
     await db.commit()

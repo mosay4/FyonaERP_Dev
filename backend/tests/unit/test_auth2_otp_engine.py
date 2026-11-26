@@ -186,6 +186,58 @@ class TestFallback:
         assert (await _get(env, cid)).status == "fallback_sms"
         assert len(env.sms.sent) == 1
 
+    @pytest.mark.parametrize("code", ["132001", "132015", "190", "10", "131031", "131042",
+                                      "133010", "100", "not_configured", "budget_exceeded",
+                                      "http_400", "http_401"])
+    async def test_setup_errors_never_cost_an_sms(self, env, code):
+        # Template not approved / token / account problems: our fault, no SMS.
+        env.wa.results = [SendResult(ok=False, error_code=code, permanent=True)]
+        cid = await _start(env)
+        await drain(env)
+        ch = await _get(env, cid)
+        assert ch.status == "failed" and ch.status_reason == "whatsapp_setup"
+        env.clock.advance(120)
+        await drain(env)
+        assert (await _view(env, cid))["can_request_sms"] is False
+        async with env.factory() as db:
+            with pytest.raises(OtpError) as e:
+                await engine.resend(db, await engine.get(db, cid), "sms")
+        assert e.value.code == "sms_not_allowed"
+        assert env.sms.sent == [] and await _sms_rows(env, cid) == 0
+
+    async def test_async_template_failure_webhook_no_sms(self, env):
+        cid = await _start(env)
+        await drain(env)
+        await _wa_status(env, (await _get(env, cid)).wa_message_id, "failed", "132001")
+        env.clock.advance(120)
+        await drain(env)
+        assert (await _get(env, cid)).status_reason == "whatsapp_setup"
+        assert env.sms.sent == []
+
+    async def test_meta_outage_after_retries_allows_one_sms(self, env):
+        env.wa.results = [SendResult(ok=False, error_code="transport_timeout")] * 10
+        cid = await _start(env)
+        for _ in range(10):
+            await drain(env)
+            env.clock.advance(5)
+        await drain(env)
+        assert len(env.sms.sent) == 1
+
+    async def test_empty_signed_post_does_not_prove_receipts(self, env):
+        import hashlib as _h, hmac as _m
+        body = b'{"object":"whatsapp_business_account","entry":[]}'
+        sig = _m.new(b"test-webhook-secret", body, _h.sha256).hexdigest()
+        r = await env.client.post("/webhooks/whatsapp", content=body,
+                                  headers={"X-Hub-Signature-256": f"sha256={sig}"})
+        assert r.status_code == 200
+        assert engine.receipts_recently_seen(env.clock()) is False
+
+    def test_fallback_policy_table(self):
+        from app.domain.services.otp.providers import sms_fallback_allowed
+        assert sms_fallback_allowed(None) and sms_fallback_allowed("131026")
+        assert sms_fallback_allowed("http_503") and sms_fallback_allowed("131000")
+        assert not sms_fallback_allowed("132001") and not sms_fallback_allowed("http_403")
+
     async def test_temporary_error_is_retried_on_whatsapp(self, env):
         env.wa.results = [SendResult(ok=False, error_code="130429", permanent=False)]
         cid = await _start(env)

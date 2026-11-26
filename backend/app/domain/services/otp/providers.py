@@ -85,6 +85,41 @@ META_TEMPORARY = frozenset({
     133004,   # server temporarily unavailable
 })
 
+# The ONLY permanent failures that justify an SMS: about this recipient (not
+# on WhatsApp / not reachable there). Everything else permanent is our setup
+# (template not approved, token, permissions, account, number, budget...):
+# an SMS would just burn credit on a Meta misconfiguration.
+META_RECIPIENT = frozenset({
+    131026,   # undeliverable: not on WhatsApp / old app
+    131049,   # not delivered (ecosystem engagement)
+    131050,   # user stopped messages from this business
+    130497,   # business may not message users in this country
+})
+
+
+def sms_fallback_allowed(error_code: Optional[str]) -> bool:
+    """May a WhatsApp failure with [error_code] lead to an SMS?
+
+    None (silent timeout, receipts proven), recipient errors and transient
+    outages (Meta down / rate limited, retries exhausted) -> yes. Setup and
+    configuration errors -> never."""
+    if error_code is None:
+        return True
+    raw = str(error_code)
+    if raw.startswith("transport_") or raw == "no_message_id":
+        return True
+    if raw.startswith("http_"):
+        try:
+            status = int(raw[5:])
+        except ValueError:
+            return False
+        return status >= 500 or status == 429
+    try:
+        num = int(raw)
+    except ValueError:
+        return False  # not_configured, budget_exceeded, ...
+    return num in META_RECIPIENT or num in META_TEMPORARY
+
 
 def classify_meta_error(code: Optional[int], http_status: Optional[int] = None) -> bool:
     """True when the Meta error is permanent for this message."""
