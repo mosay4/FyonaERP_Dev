@@ -27,6 +27,7 @@ from .api.v1.health import router as health_router
 from .api.v1.auth import router as auth_router
 from .api.v1.auth2 import router as auth2_router
 from .api.v1.otp_webhooks import router as otp_webhooks_router
+from .api.v1.storage import router as storage_router
 from .api.v1.business import router as business_router
 from .api.v1.branches import router as branches_router
 from .api.v1.business_media_transit import router as media_transit_router
@@ -371,6 +372,8 @@ app.include_router(health_router, prefix=settings.API_PREFIX, tags=["Health"])
 app.include_router(auth_router, prefix=f"{settings.API_PREFIX}/auth", tags=["Auth"])
 app.include_router(auth2_router, prefix=f"{settings.API_PREFIX}/auth2", tags=["Auth v2"])
 app.include_router(otp_webhooks_router, prefix=settings.API_PREFIX, tags=["Webhooks"])
+# Cloudflare R2: presigned URLs only (media, chat files, encrypted backups).
+app.include_router(storage_router, prefix=settings.API_PREFIX, tags=["Storage"])
 app.include_router(business_router, prefix=f"{settings.API_PREFIX}", tags=["Business"], dependencies=_business_maint)
 app.include_router(branches_router, prefix=f"{settings.API_PREFIX}", tags=["Branches"])
 app.include_router(media_transit_router,

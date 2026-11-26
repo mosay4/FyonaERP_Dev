@@ -472,6 +472,17 @@ def main():
         env.setdefault("HTTPS_PROXY", "http://127.0.0.1:18990")
         if env["HTTPS_PROXY"] == "http://127.0.0.1:1":
             env["HTTPS_PROXY"] = "http://127.0.0.1:18990"
+    # Cloudflare R2 (media, chat files, encrypted backups): the S3 keys the
+    # server needs to SIGN short-lived URLs. Admin API tokens in the same file
+    # are never loaded into the server.
+    cloudflare_env = root / "cloudflare.env"
+    if managed and cloudflare_env.is_file():
+        for line in cloudflare_env.read_text().splitlines():
+            name, _, value = line.partition("=")
+            name = name.strip()
+            if name in ("CLOUDFLARE_ACCOUNT_ID", "R2_ACCESS_KEY_ID",
+                        "R2_SECRET_ACCESS_KEY", "R2_BUCKET") and value.strip():
+                env[name] = value.strip()
     apple_key = root / "apple-authkey.p8"
     if managed and apple_key.is_file():
         env["APPLE_PRIVATE_KEY_PATH"] = str(apple_key)
