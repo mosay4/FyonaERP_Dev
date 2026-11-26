@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/media/media_api.dart';
+import '../../../../core/media/media_store.dart';
 import '../../../../shared/widgets/secure_image.dart';
 import '../../../core_business/data/local_directory/directory_pilot.dart';
 import '../../../core_business/data/local_directory/directory_database.dart'
@@ -15,6 +17,8 @@ const _prefix = businessInventoryImagePrefix;
 const _maxBytes = businessInventoryImageMaxBytes;
 
 Uint8List? decodeBusinessProductImage(String? source) {
+  // A media reference: the file on this device (null until downloaded).
+  if (MediaStore.isRef(source)) return MediaStore.ready?.readSync(source!);
   if (source == null ||
       !source.startsWith(_prefix) ||
       source.length > _prefix.length + ((_maxBytes + 2) ~/ 3) * 4)
@@ -49,6 +53,16 @@ class BusinessProductImage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final source = url;
     final fallback = placeholder ?? const Icon(Icons.inventory_2_outlined);
+    if (MediaStore.isRef(source)) {
+      return MediaImage(
+        mediaRef: source!,
+        section: MediaSection.business,
+        width: width,
+        height: height,
+        fit: fit,
+        fallback: fallback,
+      );
+    }
     final bytes = decodeBusinessProductImage(source);
     if (bytes != null) {
       final px = (width == null || !width!.isFinite)

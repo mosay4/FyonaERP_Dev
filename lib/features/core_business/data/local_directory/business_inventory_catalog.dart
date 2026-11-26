@@ -323,16 +323,20 @@ const businessInventoryImageWriteMaxBytes = 1024 * 1024;
 
 // Do not turn a legacy URL, filesystem path or another tenant's image cache
 // into a local read. The encrypted rows keep the original snapshot as evidence.
+// New images are files in the media store: the row keeps only
+// `media:<sha256>` (see core/media/media_store.dart).
 String? _deviceInventoryImage(Object? value) =>
     value is String &&
-        value.startsWith(businessInventoryImagePrefix) &&
-        value.length <=
-            businessInventoryImagePrefix.length +
-                ((businessInventoryImageMaxBytes + 2) ~/ 3) * 4
+        (MediaStore.isRef(value) ||
+            (value.startsWith(businessInventoryImagePrefix) &&
+                value.length <=
+                    businessInventoryImagePrefix.length +
+                        ((businessInventoryImageMaxBytes + 2) ~/ 3) * 4))
     ? value
     : null;
 
 List<int> _checkInventoryImage(String value) {
+  if (MediaStore.isRef(value)) return const [];
   if (_deviceInventoryImage(value) == null) {
     throw const FormatException('Invalid inventory image');
   }

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fyona_flutter/core/media/media_store.dart';
 import 'package:fyona_flutter/core/config/directory_pilot_build.dart';
 import 'package:fyona_flutter/core/network/api_client.dart';
 import 'package:fyona_flutter/features/core_business/data/local_commerce/local_commerce_api.dart';
@@ -427,7 +428,9 @@ void main() {
       (u) => u['id'] == unit['id'],
     );
     final stored = unitOf(await api.productUnits(id))['image'] as String;
-    expect(stored, startsWith(businessInventoryImagePrefix));
+    // The ledger keeps only the media reference; the photo is a file.
+    expect(MediaStore.isRef(stored), isTrue);
+    expect((await MediaStore.instance()).readSync(stored), photo.readAsBytesSync());
     expect(unitOf(await api.getProduct(id))['image'], stored);
     // The base unit keeps showing the product image (none here).
     final base = (await api.productUnits(id))['units'] as List;
