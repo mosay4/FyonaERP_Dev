@@ -92,7 +92,24 @@ class PrinterDiscovery {
       };
 
   // ── mDNS / Bonjour ──
-  Future<void> _mdns(void Function(PrinterDevice) emit) async {
+  /// mDNS runs in its own guarded zone: the multicast socket reports send
+  /// failures (no multicast route, e.g. some Wi-Fi / VPN setups) as
+  /// asynchronous errors outside any try/catch — they must end this one
+  /// search quietly, never surface as app errors.
+  Future<void> _mdns(void Function(PrinterDevice) emit) {
+    final done = Completer<void>();
+    void finish() {
+      if (!done.isCompleted) done.complete();
+    }
+
+    runZonedGuarded(() {
+      _mdnsSearch(emit).whenComplete(finish);
+    }, (error, stack) => finish());
+    // Hard stop: whatever the socket does, the search ends.
+    return done.future.timeout(timeout + const Duration(seconds: 6), onTimeout: () {});
+  }
+
+  Future<void> _mdnsSearch(void Function(PrinterDevice) emit) async {
     final client = MDnsClient();
     try {
       await client.start();
