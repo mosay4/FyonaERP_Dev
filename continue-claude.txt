@@ -270,3 +270,6 @@ Stages 1-6 committed (f983118, a097f18, 50e8411 + asset trim), backend business-
 
 ## 28. Round 20 (2026-11-26)
 Commits cfd8088 + voice manifest fix; backend business-6193-relay.df9025be (service ~850 MB with STT preload); APK 35,299,047 bytes Telegram 1320/1321 (approx). Manifest contract: do NOT add <queries>; on-device SpeechRecognizer (API31+) used instead. financial_balance.ogg IS used (dynamic financial_${scene}.ogg) — never delete. time_format.dart builds clock strings without intl locale data.
+
+## 29. Auth v2 (2026-11-26)
+Commit 019c982 (not built per owner). Backend business-6193-relay.ba021f18. Spec+contract: docs/AUTH_PLAN.md. Secrets: /var/lib/private/fyona-directory-qa-enroll/run/auth-providers.env + apple-authkey.p8 (loaded by run_directory_pilot_lab.py). Public webhooks on 443: transient unit fyona-qa-webhooks (Caddyfile.webhooks, webhook paths only) — verified hub.challenge OK. Meta: token = SYSTEM_USER of app 1802660714075080 (WABA subscribed to it); template fyona_login_code ar/en PENDING. PENDING: egress allow-list (graph.facebook.com, api.sms.to, auth.sms.to, appleid.apple.com, www.googleapis.com, oauth2.googleapis.com) — my edit to the egress unit was refused by the permission classifier; owner must approve. /tmp is RAM tmpfs: stale /tmp/flutter_tools.* and pytest-of-root caused test hangs/OOM — clean after killed runs.
