@@ -172,8 +172,8 @@ class Settings(BaseSettings):
     WHATSAPP_TEMPLATE_LANG_EN: str = "en"
     META_APP_ID: Optional[str] = None
     META_APP_SECRET: Optional[str] = None
-    # Secret of the Meta app the WABA webhooks are subscribed to (falls back
-    # to META_APP_SECRET).
+    # Secret of the Meta app the WABA webhooks are subscribed to. Required for
+    # receipts and automatic SMS fallback; META_APP_SECRET is not used for it.
     META_WEBHOOK_APP_SECRET: Optional[str] = None
 
     # ── SMS.to ──

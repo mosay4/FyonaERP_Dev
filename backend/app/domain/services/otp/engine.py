@@ -145,7 +145,24 @@ def cooldowns() -> list[int]:
 
 
 def webhook_receipts_enabled() -> bool:
-    return bool(settings.META_WEBHOOK_APP_SECRET or settings.META_APP_SECRET)
+    # Only the explicit secret of the Meta app the WABA is subscribed to.
+    # META_APP_SECRET may belong to another app: its receipts never arrive.
+    return bool(settings.META_WEBHOOK_APP_SECRET)
+
+
+# Last time a correctly signed WhatsApp status receipt reached us (process
+# memory only). Proof that receipts flow; never persisted.
+_last_receipt_at: Optional[datetime] = None
+RECEIPT_HEALTH_WINDOW = timedelta(hours=6)
+
+
+def note_receipt(now: Optional[datetime] = None) -> None:
+    global _last_receipt_at
+    _last_receipt_at = now or utcnow()
+
+
+def receipts_recently_seen(now: datetime) -> bool:
+    return _last_receipt_at is not None and now - _last_receipt_at <= RECEIPT_HEALTH_WINDOW
 
 
 def auto_fallback_active() -> bool:
@@ -540,7 +557,12 @@ async def _process(db: AsyncSession, challenge_id) -> None:
     if ch.status == "sent" and ch.channel == "whatsapp":
         # Deadline reached without a delivery receipt.
         ch.next_action_at = None
-        if (ch.purpose in SMS_PURPOSES and auto_fallback_active()
+        # Cost guard: a silent timeout only means "not delivered" when receipts
+        # are proven to flow (one arrived for this message, or recently for
+        # another). Otherwise no automatic SMS: the user can ask for one.
+        receipts_proven = (ch.wa_status not in (None, "accepted")
+                           or receipts_recently_seen(now))
+        if (ch.purpose in SMS_PURPOSES and auto_fallback_active() and receipts_proven
                 and ch.wa_status not in DELIVERED and await can_request_sms(db, ch, now)):
             ch.status = "fallback_sms"
             ch.status_reason = "whatsapp_timeout"

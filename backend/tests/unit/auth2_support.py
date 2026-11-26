@@ -131,6 +131,7 @@ async def env(tmp_path, monkeypatch):
     monkeypatch.setattr(otp_engine, "utcnow", clock)
     monkeypatch.setattr(otp_engine, "session_factory", factory)
     monkeypatch.setattr(otp_engine, "kick_enabled", False)
+    monkeypatch.setattr(otp_engine, "_last_receipt_at", None)
 
     pushes: list = []
 

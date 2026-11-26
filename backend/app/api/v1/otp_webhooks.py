@@ -3,8 +3,8 @@
 * GET  /webhooks/whatsapp — Meta verification (hub.challenge echo when
   hub.verify_token matches WHATSAPP_VERIFY_TOKEN, constant time).
 * POST /webhooks/whatsapp — X-Hub-Signature-256 = HMAC-SHA256(app secret,
-  raw body); secret = META_WEBHOOK_APP_SECRET (falls back to
-  META_APP_SECRET). Status receipts are applied idempotently.
+  raw body); secret = META_WEBHOOK_APP_SECRET only (the app the WABA is
+  subscribed to). Status receipts are applied idempotently.
 * POST /webhooks/smsto/{token} — per-message callback URL; ``token`` =
   ``<delivery_id>.<HMAC(delivery_id)>`` (SMS.to has no global secret).
   Parsing is tolerant (JSON or form; several field spellings).
@@ -34,7 +34,7 @@ MAX_BODY = 512 * 1024
 
 
 def _webhook_secret() -> Optional[str]:
-    return settings.META_WEBHOOK_APP_SECRET or settings.META_APP_SECRET
+    return settings.META_WEBHOOK_APP_SECRET
 
 
 def valid_meta_signature(raw: bytes, header: Optional[str], secret: Optional[str]) -> bool:
@@ -82,6 +82,7 @@ async def whatsapp_events(request: Request, db: AsyncSession = Depends(get_db)):
         payload = json.loads(raw.decode("utf-8") or "{}")
     except ValueError:
         return JSONResponse({"ok": False}, status_code=400)
+    engine.note_receipt()
     to_process = []
     applied = 0
     for message_id, status, code, _ts in iter_whatsapp_statuses(payload):

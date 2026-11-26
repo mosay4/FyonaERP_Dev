@@ -105,6 +105,8 @@ class TestFallback:
     async def test_deadline_without_receipt_falls_back_to_sms_once(self, env):
         cid = await _start(env)
         await drain(env)
+        # Meta confirmed it sent the message (receipts flow) but not delivery.
+        await _wa_status(env, (await _get(env, cid)).wa_message_id, "sent")
         assert (await _view(env, cid))["can_request_sms"] is False  # WhatsApp still likely
         env.clock.advance(env.settings.AUTH_OTP_DELIVERY_DEADLINE_SECONDS + 1)
         await drain(env)
@@ -133,6 +135,39 @@ class TestFallback:
         assert env.sms.sent == []
         # ...but the user may still ask for SMS after the deadline.
         assert (await _view(env, cid))["can_request_sms"] is True
+
+    async def test_no_auto_sms_when_receipts_never_arrive(self, env):
+        # Webhooks pointed at another app / broken: silence is not "undelivered".
+        cid = await _start(env)
+        await drain(env)
+        env.clock.advance(env.settings.AUTH_OTP_DELIVERY_DEADLINE_SECONDS + 1)
+        await drain(env)
+        ch = await _get(env, cid)
+        assert ch.status == "sent" and env.sms.sent == [] and await _sms_rows(env, cid) == 0
+        assert (await _view(env, cid))["can_request_sms"] is True
+
+    async def test_recent_receipt_elsewhere_proves_pipeline(self, env):
+        engine.note_receipt(env.clock())
+        cid = await _start(env)
+        await drain(env)
+        env.clock.advance(env.settings.AUTH_OTP_DELIVERY_DEADLINE_SECONDS + 1)
+        await drain(env)
+        assert (await _get(env, cid)).status == "fallback_sms" and len(env.sms.sent) == 1
+
+    async def test_stale_receipt_health_does_not_count(self, env):
+        engine.note_receipt(env.clock())
+        env.clock.advance(7 * 3600)
+        cid = await _start(env)
+        await drain(env)
+        env.clock.advance(env.settings.AUTH_OTP_DELIVERY_DEADLINE_SECONDS + 1)
+        await drain(env)
+        assert env.sms.sent == []
+
+    async def test_general_app_secret_alone_enables_nothing(self, env, monkeypatch):
+        monkeypatch.setattr(env.settings, "META_WEBHOOK_APP_SECRET", None)
+        monkeypatch.setattr(env.settings, "META_APP_SECRET", "other-app-secret")
+        assert engine.webhook_receipts_enabled() is False
+        assert engine.auto_fallback_active() is False
 
     @pytest.mark.parametrize("code", ["131026", "131049", "131050"])
     async def test_permanent_whatsapp_failure_webhook_triggers_sms(self, env, code):
@@ -179,6 +214,7 @@ class TestFallback:
         cid = await _start(env)
         await drain(env)
         wamid = (await _get(env, cid)).wa_message_id
+        await _wa_status(env, wamid, "sent")
         env.clock.advance(env.settings.AUTH_OTP_DELIVERY_DEADLINE_SECONDS + 1)
         await drain(env)
         assert (await _get(env, cid)).status == "fallback_sms"

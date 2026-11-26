@@ -385,6 +385,7 @@ class TestPhoneChangeAndReset:
         assert r.status_code == 200, r.text
         start = r.json()
         await drain(env)
+        engine.note_receipt(env.clock())  # receipts are flowing (cost guard)
         env.clock.advance(env.settings.AUTH_OTP_DELIVERY_DEADLINE_SECONDS + 1)
         await drain(env)
         status = (await env.client.post("/auth2/otp/status",
