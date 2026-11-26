@@ -592,7 +592,11 @@ class TtsPreparation {
     // Bare numbers: only convert if they look like a financial amount
     // (e.g., "5000 ريال" already handled, so remaining bare numbers are likely not financial)
     // Keep normal text numbers as digits for natural speech
-    // result = _speakArabicBareNumbers(result); // disabled for natural speech
+    // Bare numbers are spoken as Arabic words (exact value, sign and
+    // decimals): a TTS voice reading raw digits switches language or reads
+    // "2500000000" digit by digit. IDs, codes, dates and mixed tokens were
+    // already stashed or verbalized above, so they are not touched here.
+    result = _speakArabicBareNumbers(result);
     result = _canonArabicOrdinals(result);
     result = _restoreMixedTokens(result);
 

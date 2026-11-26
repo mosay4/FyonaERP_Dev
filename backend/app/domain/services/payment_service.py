@@ -421,6 +421,33 @@ class PaymentService:
         except Exception:
             pass
 
+        _min_msg = (
+            "المبلغ المستحق بعد الخصم أقل من الحد الأدنى "
+            "للدفع الإلكتروني (0.50 دولار أمريكي أو ما يعادله). "
+            "ارفع سعر الباقة أو خفّض نسبة الخصم ثم أعد المحاولة."
+        )
+
+        # Same currency as the plan (and Stripe can settle it): no exchange
+        # rate is involved, so the charge never depends on the FX service.
+        if base and float(base) > 0 and charge_allowed and target.upper() == base_cur:
+            minor_units = self.STRIPE_CURRENCY_MINOR_UNITS.get(target, 100)
+            amount_minor = int(round(float(base) * minor_units))
+            if amount_minor < 50:
+                raise ValueError(_min_msg)
+            return {
+                "amount_minor": amount_minor,
+                "currency": target,
+                "display_amount": float(base),
+                "display_currency": target.upper(),
+                "source": "live_fx",
+                "charge_source": "live_fx",
+                "base_amount": float(base),
+                "base_currency": base_cur,
+                "exchange_rate": 1.0,
+                "fx_source": "same_currency",
+                "fallback_to_usd": False,
+            }
+
         if base and float(base) > 0:
             try:
                 from app.domain.services.currency_service import CurrencyService
@@ -485,11 +512,7 @@ class PaymentService:
                             # doing so silently charged the OLD list price
                             # (e.g. 9900 SAR) instead of the admin's current
                             # discounted price. Fail with a clear reason.
-                            raise ValueError(
-                                "المبلغ المستحق بعد الخصم أقل من الحد الأدنى "
-                                "للدفع الإلكتروني (0.50 دولار أمريكي أو ما يعادله). "
-                                "ارفع سعر الباقة أو خفّض نسبة الخصم ثم أعد المحاولة."
-                            )
+                            raise ValueError(_min_msg)
                         return {
                             "amount_minor": amount_minor,
                             "currency": charge_currency,
@@ -507,7 +530,12 @@ class PaymentService:
                 raise
             except Exception as exc:
                 logger.warning("fx_charge_resolution_failed", error=str(exc), plan_id=str(plan.id))
+            # The admin price exists: never charge the plan's stored Stripe
+            # Price instead (it can be an old list price without the current
+            # price / discount). Without a rate, fail with a clear reason.
+            raise ValueError("تعذر تحديد مبلغ الدفع: أسعار الصرف غير متوفرة حاليًا، حاول لاحقًا")
 
+        # Legacy plans with no admin price: their Stripe Price is the price.
         stripe = await self._stripe()
         if price_id:
             try:

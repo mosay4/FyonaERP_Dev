@@ -6,8 +6,10 @@ import 'package:fyona_flutter/features/ai/domain/agent/tts_preparation.dart';
 void main() {
   test('decimal numbers stay whole; sentences still get their pause', () {
     final out = TtsPreparation.prepare('السعر 19.99 اليوم.التالي', lang: 'ar');
-    expect(out, contains('19.99'));
+    // One number with its decimals (spoken), never "19" then "99".
+    expect(out, contains('تسعة عشر فاصلة تسعة تسعة'));
     expect(out, isNot(contains('19. 99')));
+    expect(out, isNot(contains('تسعة عشر. ')));
     expect(out, contains('اليوم. التالي'));
   });
 }

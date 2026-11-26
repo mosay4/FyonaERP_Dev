@@ -224,10 +224,21 @@ async def test_unknown_currency_rejected():
 
 
 @pytest.mark.asyncio
-async def test_currency_mismatch_single_currency_converts_at_stored_rate():
+async def test_currency_mismatch_single_currency_converts_at_stored_rate(monkeypatch):
     # Rule change: a single-currency bank auto-converts the requested amount
-    # at the stored rate instead of refusing. 50 USD -> SAR at the real
-    # engine rate; nothing is ever written in the foreign currency.
+    # at the stored rate instead of refusing. 50 USD -> SAR at the engine
+    # rate; nothing is ever written in the foreign currency. The stored rates
+    # are fixed here (no network / rate table in unit tests).
+    from app.domain.services.currency_service import CurrencyService
+
+    async def stored_rates(self, *a, **k):
+        return {"global": {"USD": 1.0, "SAR": 3.75}, "yemen": {}}
+
+    monkeypatch.setattr(CurrencyService, "get_all_rates", stored_rates)
+    # The shared instance may carry its own (instance-level) override from
+    # another test: pin it too.
+    shared = CurrencyService.get_instance()
+    monkeypatch.setattr(shared, "get_all_rates", stored_rates.__get__(shared), raising=False)
     acc = _acct("A", "SAR", 1000)
     db = FakeDb([acc])
     svc, _ = _svc(db)
@@ -239,6 +250,7 @@ async def test_currency_mismatch_single_currency_converts_at_stored_rate():
     assert db.rows[0].amount == acc.balance - Decimal("1000")
     assert Decimal(str(db.rows[0].amount)) == Decimal("50") * Decimal(str(out["conversion"]["rate"]))
     assert out["conversion"]["from_currency"] == "USD"
+    assert Decimal(str(db.rows[0].amount)) == Decimal("187.5")
 
 
 @pytest.mark.asyncio

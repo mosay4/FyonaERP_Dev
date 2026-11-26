@@ -1,6 +1,7 @@
 import time
 import asyncio
 import uuid
+import weakref
 from collections import defaultdict
 from typing import Optional, Tuple
 
@@ -14,11 +15,21 @@ from app.core.redis import get_redis
 class InMemoryRateLimiter:
     """Fallback rate limiter when Redis is unavailable."""
 
+    # Every live limiter (weakly held): lets tests start from a clean window.
+    _instances: "weakref.WeakSet[InMemoryRateLimiter]" = weakref.WeakSet()
+
     def __init__(self, requests: int, window_seconds: int):
         self.requests = requests
         self.window_seconds = window_seconds
         self._buckets: dict[str, list[float]] = defaultdict(list)
         self._lock = asyncio.Lock()
+        InMemoryRateLimiter._instances.add(self)
+
+    @classmethod
+    def reset_all(cls) -> None:
+        """Forget every counted request (test isolation only)."""
+        for limiter in list(cls._instances):
+            limiter._buckets.clear()
 
     async def check(self, key: str) -> None:
         now = time.time()

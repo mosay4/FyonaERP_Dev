@@ -10,6 +10,16 @@ from app.domain.models.invoice_models import (
 )
 from app.domain.services.invoice_service import InvoiceService
 from app.domain.entities.invoice_entities import Invoice, InvoiceItem, Payment
+# Invoice / Payment relate to models in other modules (Customer, Supplier,
+# BankAccount…): register every mapper before a Payment is built, also when
+# this file runs on its own.
+import importlib
+import pkgutil
+
+import app.domain.entities as _entities
+
+for _m in pkgutil.iter_modules(_entities.__path__):
+    importlib.import_module(f"app.domain.entities.{_m.name}")
 
 
 @pytest.fixture
@@ -43,6 +53,12 @@ def make_mock_item(**overrides):
     item.discount = 0
     item.tax_rate = 0
     item.total = 100
+    # Unit columns added to InvoiceItem later: a spec'd MagicMock would
+    # otherwise hand the response a mock where it expects a value.
+    item.unit_id = None
+    item.unit_name = None
+    item.base_quantity = 0
+    item.is_service = False
     for k, v in overrides.items():
         setattr(item, k, v)
     return item
@@ -58,6 +74,10 @@ def make_mock_payment(**overrides):
     p.reference = None
     p.notes = None
     p.created_at = datetime.now(timezone.utc)
+    # Bank columns added to Payment later (cash payment: none).
+    p.bank_account_id = None
+    p.bank_account = None
+    p.bank_account_name = None
     for k, v in overrides.items():
         setattr(p, k, v)
     return p
@@ -69,6 +89,8 @@ def make_mock_invoice(org_id, **overrides):
     inv.organization_id = org_id
     inv.invoice_number = "INV-20260714-0001"
     inv.invoice_type = "sale"
+    inv.currency = "SAR"
+    inv.branch_id = None
     inv.customer_id = None
     inv.customer = None
     inv.supplier_id = None

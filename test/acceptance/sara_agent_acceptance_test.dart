@@ -129,17 +129,18 @@ void main() {
       );
     });
 
-    test('customer with id -> customer detail', () {
+    test('customer -> the customers screen (no detail route by id)', () {
       expect(
         SaraActionDispatcher.resolveRouteFromActions([action('customer', id: 'c-9')]),
-        RouteNames.customersDetail.replaceFirst(':id', 'c-9'),
+        RouteNames.customers,
       );
+      expect(SaraActionDispatcher.resolveRouteFromActions([action('supplier')]), RouteNames.suppliers);
     });
 
-    test('invoice with id -> sales view, without -> sales list', () {
+    test('invoice -> the sales invoices list (the view needs the record)', () {
       expect(
         SaraActionDispatcher.resolveRouteFromActions([action('invoice', id: 'inv-7')]),
-        RouteNames.salesView,
+        RouteNames.sales,
       );
       expect(
         SaraActionDispatcher.resolveRouteFromActions([action('invoice')]),
@@ -149,9 +150,9 @@ void main() {
 
     test('product -> inventory, expense -> expenses, recurring -> recurring tab', () {
       expect(SaraActionDispatcher.resolveRouteFromActions([action('product')]), RouteNames.inventory);
-      expect(SaraActionDispatcher.resolveRouteFromActions([action('expense')]), RouteNames.expenses);
-      // Recurring entities open the transactions page with the recurring tab.
-      expect(SaraActionDispatcher.resolveRouteFromActions([action('recurring')]), RouteNames.personalTransactions);
+      expect(SaraActionDispatcher.resolveRouteFromActions([action('expense')]), RouteNames.businessIncomeExpense);
+      // Recurring entities have their own page.
+      expect(SaraActionDispatcher.resolveRouteFromActions([action('recurring')]), RouteNames.personalRecurring);
       expect(SaraActionDispatcher.resolveRouteFromActions([action('budget')]), RouteNames.personalBudget);
     });
 

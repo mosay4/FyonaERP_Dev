@@ -135,6 +135,21 @@ String? saraEntityRoute(Map<String, dynamic> params) {
     case 'report':
     case 'reports':
       return saraPersonalReportsRoute;
+    // Business entities open the real Business screens. Their detail pages
+    // need the record itself (not just an id), so Sara opens the list the
+    // record lives in.
+    case 'customer':
+      return RouteNames.customers;
+    case 'supplier':
+      return RouteNames.suppliers;
+    case 'invoice':
+    case 'sale':
+      return RouteNames.sales;
+    case 'product':
+      return RouteNames.inventory;
+    case 'expense':
+    case 'income':
+      return RouteNames.businessIncomeExpense;
   }
   return null;
 }

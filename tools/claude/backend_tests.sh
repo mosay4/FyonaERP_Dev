@@ -22,6 +22,7 @@ runuser -u postgres -- "$pg/pg_ctl" -D "$cut/data" -l "$cut/data/server.log" -o 
 "$pg/createdb" -h "$cut/socket" -U root fyona_cutover_fixture
 cd "$work"
 env -i PATH="$PATH" HOME="$HOME" LANG=C.UTF-8 TMPDIR=/tmp/opencode PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$work/backend" \
+  ALLOWED_HOSTS='["127.0.0.1","localhost","test","testserver"]' \
   JWT_SECRET_KEY=synthetic-test-only-key-6193 DATABASE_URL="postgresql+asyncpg://root@/fyona_cutover_fixture?host=$cut/socket" \
   REDIS_URL="unix://$cut/socket/test-only-redis.sock" CELERY_BROKER_URL=memory:// CELERY_RESULT_BACKEND=cache+memory:// \
   FYONA_TEST_CUTOVER_SOCKET="$cut/socket" \
