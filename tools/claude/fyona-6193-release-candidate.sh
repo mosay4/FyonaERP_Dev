@@ -92,7 +92,18 @@ with ZipFile(apk) as new, ZipFile(reference) as old:
     assert b"/business/employee-finance" in code
     assert b"api.jeetak-lounge.com" not in code
     if arch == "arm64":
-        assert new.read("AndroidManifest.xml") == old.read("AndroidManifest.xml")
+        # Manifest contract: identical to the reference except the ONE approved
+        # addition (owner, round 20): the speech RecognitionService <queries>
+        # entry Sara's on-phone voice needs on Android 11+.
+        if new.read("AndroidManifest.xml") != old.read("AndroidManifest.xml"):
+            import difflib, re
+            tree = lambda p: [re.sub(r"\(line=\d+\)", "", l).rstrip() for l in
+                              check_output([aapt, "dump", "xmltree", p, "AndroidManifest.xml"],
+                                           text=True).splitlines()]
+            diff = [l for l in difflib.ndiff(tree(reference), tree(apk)) if l[:2] in ("+ ", "- ")]
+            allowed = re.compile(r'^\+ \s*(E: intent|E: action|A: android:name\(0x01010003\)="android\.speech\.RecognitionService".*)$')
+            bad = [l for l in diff if not allowed.match(l)]
+            assert not bad and any("RecognitionService" in l for l in diff), bad[:10]
         assert set(check_output([aapt, "dump", "permissions", apk], text=True).splitlines()) == \
                set(check_output([aapt, "dump", "permissions", reference], text=True).splitlines())
         # Guard against accidental bloat (e.g. a debug/unshrunk build). Raised
