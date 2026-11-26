@@ -53,7 +53,15 @@ void main() {
     'barcodes': [],
   };
 
-  Future<void> pump(WidgetTester tester, {required bool extra}) async {
+  Future<void> openUnits(WidgetTester tester) async {
+    final toggle = find.byKey(const ValueKey('unitDetailsToggle'));
+    await tester.ensureVisible(toggle);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> pump(WidgetTester tester,
+      {required bool extra, bool open = true}) async {
     await tester.runAsync(() => AppLocalizations.preload('ar'));
     await tester.pumpWidget(
       ProviderScope(
@@ -83,7 +91,21 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    if (open) await openUnits(tester);
   }
+
+  testWidgets('unit details start folded; the arrow opens and closes them', (
+    tester,
+  ) async {
+    await pump(tester, extra: true, open: false);
+    // Folded: the unit rows are hidden, the stock stays in the header.
+    expect(find.text('باكيت'), findsNothing);
+    expect(find.text('74 قطعة'), findsOneWidget);
+    await openUnits(tester);
+    expect(find.text('باكيت'), findsWidgets);
+    await openUnits(tester); // second tap folds them again
+    expect(find.text('باكيت'), findsNothing);
+  });
 
   testWidgets('header shows ONLY the product name; base unit box has qty', (
     tester,

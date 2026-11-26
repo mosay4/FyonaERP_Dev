@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 import '../services/section_scope.dart';
 import 'package:flutter/material.dart';
+import '../../shared/widgets/liquid_glass_nav_bar.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -2380,7 +2381,11 @@ class _MainShellState extends ConsumerState<MainShell>
         key: shellScaffoldKey,
         backgroundColor: isPersonal ? AppColors.background : null,
         drawer: AppDrawer(user: user, currentRoute: currentRoute),
-        body: Column(
+        body: NavBarBackdrop(
+          color: isPersonal
+              ? AppColors.background
+              : Theme.of(context).scaffoldBackgroundColor,
+          child: Column(
           children: [
             // Same top bar for personal and business (identical widget).
             HomeHeader(),
@@ -2488,6 +2493,7 @@ class _MainShellState extends ConsumerState<MainShell>
               ),
             ),
           ],
+        ),
         ),
         bottomNavigationBar: isPersonal
             ? HomeBottomNav(

@@ -373,9 +373,10 @@ class _NetWorthCard extends ConsumerWidget {
     final positive = netWorth >= 0;
     final l10n = AppLocalizations.of(context);
 
+    // Same width as the folded pill (no own margin): the pinned arrow sits
+    // inside the card in both states.
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, kNetWorthCardTopPadding, 16, 16),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),

@@ -83,6 +83,7 @@ void main() {
 
     test('every planned day carries a notice (check-in when nothing new)', () {
       final slots = SaraDailyPlanner.plan(
+        days: 3,
         input: _input(),
         now: _now,
         minutesOfDay: 14 * 60,

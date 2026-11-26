@@ -434,7 +434,7 @@ void main() {
       await c.read(saraSmartCoordinatorProvider).run();
       final sched =
           calls.where((x) => x.method == 'scheduleReminderAlarm').toList();
-      expect(sched.length, 3);
+      expect(sched.length, SaraDailyPlanner.daysAhead);
       for (final x in sched) {
         expect((x.arguments as Map)['kind'], 'sara');
       }
@@ -466,12 +466,37 @@ void main() {
           [77]);
     });
 
-    test('Personal data not loaded yet → keeps the existing schedule',
+    test('Personal data not loaded, nothing pending → daily check-ins at the '
+        'chosen time (Sara never goes silent)', () async {
+      SharedPreferences.setMockInitialValues({});
+      final c = container();
+      await c.read(saraSmartCoordinatorProvider).run();
+      final sched =
+          calls.where((x) => x.method == 'scheduleReminderAlarm').toList();
+      expect(sched.length, SaraDailyPlanner.daysAhead);
+      expect(calls.where((x) => x.method == 'cancelReminderAlarm'), isEmpty);
+    });
+
+    test('Personal data not loaded, days already planned → schedule kept',
         () async {
       SharedPreferences.setMockInitialValues({});
       final c = container();
       await c.read(saraSmartCoordinatorProvider).run();
+      calls.clear();
+      await c.read(saraSmartCoordinatorProvider).run();
       expect(calls, isEmpty);
+    });
+
+    test('planner check-ins: the chosen time each day', () {
+      final slots = SaraDailyPlanner.planCheckIns(
+        now: DateTime(2026, 11, 26, 9),
+        minutesOfDay: 21 * 60,
+        lastFiredDay: null,
+        tr: (k, [_]) => k,
+      );
+      expect(slots.length, SaraDailyPlanner.daysAhead);
+      expect(slots.first.fireAt, DateTime(2026, 11, 26, 21));
+      expect(slots.every((s) => s.notice.kind == 'checkIn'), isTrue);
     });
   });
 }

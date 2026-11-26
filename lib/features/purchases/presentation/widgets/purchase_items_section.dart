@@ -793,7 +793,16 @@ class _ItemRow extends ConsumerWidget {
           await ref.read(purchaseApiProvider).productUnits(item.productId!);
       final units =
           ((u['units'] as List?)?.whereType<Map>() ?? const []).toList();
-      if (!context.mounted || units.length < 2) return;
+      if (!context.mounted) return;
+      if (units.length < 2) {
+        final ar = AppLocalizations.of(context).locale.languageCode != 'en';
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+          content: Text(ar
+              ? 'هذا المنتج له وحدة واحدة. أضف وحدات من المخزون ← المنتج ← تعديل.'
+              : 'This product has one unit. Add units from Inventory › product › Edit.'),
+        ));
+        return;
+      }
       String baseUnit = '${units.first['name'] ?? ''}';
       for (final e in units) {
         if (e['is_base'] == true) {

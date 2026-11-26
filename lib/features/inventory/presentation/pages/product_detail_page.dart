@@ -695,27 +695,14 @@ class _ProductDetailView extends ConsumerWidget {
     if (basePurchase.isEmpty && p['cost_price'] != null) {
       basePurchase.add((p['cost_price'], mainCurrency));
     }
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(14),
-      ),
+    // Folded by default (a tidy page); the arrow opens / closes the units.
+    return _CollapsibleUnits(
+      title: l10n.translate('invUnitDetails'),
+      // The stock stays visible at a glance while the units are folded.
+      summary: '${_fmt(stock)} $baseUnit'.trim(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            const Icon(Icons.straighten_rounded,
-                size: 18, color: AppColors.primary),
-            const SizedBox(width: 6),
-            Text(l10n.translate('invUnitDetails'),
-                style: const TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800)),
-          ]),
-          const SizedBox(height: 10),
           // The BASE unit is ALWAYS shown (its quantity now lives here instead
           // of the header).
           _unitBox(context, l10n,
@@ -1360,4 +1347,110 @@ String productUnitAvailableText(
   final unitPart = '${_fmt(whole)} $unitName'.trim();
   final remPart = '${_fmt(remainder)} $baseUnit'.trim();
   return '$unitPart + $remPart';
+}
+
+
+/// «تفاصيل الوحدات» card: the header (icon, title, arrow) always shows; the
+/// units slide open under it on tap and fold back on the next tap.
+class _CollapsibleUnits extends StatefulWidget {
+  const _CollapsibleUnits(
+      {required this.title, required this.summary, required this.child});
+
+  final String title;
+
+  /// Base-unit stock, shown in the header while folded.
+  final String summary;
+  final Widget child;
+
+  @override
+  State<_CollapsibleUnits> createState() => _CollapsibleUnitsState();
+}
+
+class _CollapsibleUnitsState extends State<_CollapsibleUnits> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            key: const ValueKey('unitDetailsToggle'),
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => setState(() => _open = !_open),
+            child: Row(children: [
+              const Icon(Icons.straighten_rounded,
+                  size: 18, color: AppColors.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(widget.title,
+                    style: const TextStyle(
+                        fontFamily: 'Cairo',
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800)),
+              ),
+              if (!_open && widget.summary.isNotEmpty) ...[
+                Flexible(
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceVariant,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(widget.summary,
+                          maxLines: 1,
+                          style: const TextStyle(
+                              fontFamily: 'Cairo',
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              AnimatedRotation(
+                turns: _open ? 0.5 : 0,
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeInOutCubic,
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withAlpha(18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.keyboard_arrow_down_rounded,
+                      size: 22, color: AppColors.primary),
+                ),
+              ),
+            ]),
+          ),
+          ClipRect(
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeInOutCubic,
+              alignment: Alignment.topCenter,
+              child: _open
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: widget.child,
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

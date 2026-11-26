@@ -368,6 +368,31 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Accounts made before phone sign-in (email + password, no phone yet):
+  /// the original `/auth/login`, kept while the phone codes are not live.
+  /// Returns true when signed in.
+  Future<bool> loginLegacyEmail({
+    required String email,
+    required String password,
+  }) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      final response = await _authService.loginWithEmailPassword(
+        email: email,
+        password: password,
+      );
+      await _applyAuthResponse(response, password: password);
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        status: AuthStatus.unauthenticated,
+        isLoading: false,
+        error: _toMessage(e),
+      );
+      return false;
+    }
+  }
+
   /// Google (Android) / Apple (iOS) sign-in through auth2 `/social`.
   /// Returns null when cancelled or failed ([state.error] set on failure).
   Future<Auth2LoginResult?> loginWithSocial({

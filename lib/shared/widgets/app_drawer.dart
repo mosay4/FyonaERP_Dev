@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'shrink_to_fit_text.dart';
 import 'secure_image.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -315,10 +316,10 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
                   mainAxisSize: MainAxisSize.max,
                   children: [
                     Flexible(
-                      child: Text(
+                      // Long branch names shrink to stay whole (never cut).
+                      child: ShrinkToFitText(
                         name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        minFontSize: 10.5,
                         textAlign: TextAlign.right,
                         style: TextStyle(
                           fontFamily: 'Cairo',
@@ -1094,9 +1095,11 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Popup rows are measured intrinsically (no LayoutBuilder
+                // here): a long name wraps onto a second line instead.
                 Text(
                   label,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontFamily: 'Cairo',

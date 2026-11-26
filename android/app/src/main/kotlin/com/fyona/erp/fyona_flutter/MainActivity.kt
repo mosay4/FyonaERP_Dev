@@ -424,6 +424,7 @@ class MainActivity : FlutterFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
         // Trusted-device key pair (Android Keystore, StrongBox/TEE).
         DeviceKeyChannel.register(this, flutterEngine.dartExecutor.binaryMessenger)
+        ExitDiagnostics.register(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "fyona/motion_audio")
             .setMethodCallHandler { call, result ->
                 if (call.method == "canPlay") {

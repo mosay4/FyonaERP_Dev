@@ -49,7 +49,9 @@ class SaraDailyPlanner {
   SaraDailyPlanner._();
 
   static const int cooldownDays = 3;
-  static const int daysAhead = 3;
+  /// Days pre-scheduled: Sara keeps showing up for a week even when the
+  /// app (or the Personal section) is not opened.
+  static const int daysAhead = 7;
 
   static String dayKey(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}';
@@ -107,6 +109,63 @@ class SaraDailyPlanner {
     int? lastFiredAtMs,
     int? timeChangedAtMs,
   }) {
+    return _slots(
+      now: now,
+      minutesOfDay: minutesOfDay,
+      lastFiredDay: lastFiredDay,
+      lastFiredAtMs: lastFiredAtMs,
+      timeChangedAtMs: timeChangedAtMs,
+      days: days,
+      notice: (fireAt, key, first) {
+        try {
+          final analysis = SaraInsightEngine.analyze(input.atTime(fireAt));
+          return SaraNoticeComposer.digest(
+                analysis,
+                firstSlot: first,
+                allowed: (k) => cooldownAllows(cooldown, k, key),
+                tr: tr,
+                money: money,
+              ) ??
+              checkIn(tr);
+        } catch (_) {
+          // Unexpected data must never cost the user their notification.
+          return checkIn(tr);
+        }
+      },
+    );
+  }
+
+  /// The chosen time with a calm check-in each day — used when the
+  /// Personal data is not available in this session (or could not be
+  /// analysed): Sara still shows up at the user's time.
+  static List<SaraSlot> planCheckIns({
+    required DateTime now,
+    required int minutesOfDay,
+    required String? lastFiredDay,
+    required SaraTr tr,
+    int days = daysAhead,
+    int? lastFiredAtMs,
+    int? timeChangedAtMs,
+  }) =>
+      _slots(
+        now: now,
+        minutesOfDay: minutesOfDay,
+        lastFiredDay: lastFiredDay,
+        lastFiredAtMs: lastFiredAtMs,
+        timeChangedAtMs: timeChangedAtMs,
+        days: days,
+        notice: (_, _, _) => checkIn(tr),
+      );
+
+  static List<SaraSlot> _slots({
+    required DateTime now,
+    required int minutesOfDay,
+    required String? lastFiredDay,
+    required int days,
+    required SaraNotice Function(DateTime fireAt, String key, bool first) notice,
+    int? lastFiredAtMs,
+    int? timeChangedAtMs,
+  }) {
     final out = <SaraSlot>[];
     // The time was changed after the last digest fired: its day may get
     // one more digest at the new time (the owner expects the new time to
@@ -125,16 +184,9 @@ class SaraDailyPlanner {
           !(retimed && key == lastFiredDay)) {
         continue;
       }
-      final analysis = SaraInsightEngine.analyze(input.atTime(fireAt));
-      final notice = SaraNoticeComposer.digest(
-        analysis,
-        firstSlot: first,
-        allowed: (k) => cooldownAllows(cooldown, k, key),
-        tr: tr,
-        money: money,
-      ) ?? checkIn(tr);
+      final n = notice(fireAt, key, first);
       first = false;
-      out.add(SaraSlot(fireAt: fireAt, dayKey: key, notice: notice));
+      out.add(SaraSlot(fireAt: fireAt, dayKey: key, notice: n));
     }
     return out;
   }

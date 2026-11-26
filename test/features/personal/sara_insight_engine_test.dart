@@ -555,6 +555,7 @@ void main() {
   group('daily planner', () {
     test('one digest per day for the next 3 days at the chosen time', () {
       final slots = SaraDailyPlanner.plan(
+        days: 3,
         input: input(goals: [goal('a', 3000, deadlineInDays: 60)]),
         now: now,
         minutesOfDay: 20 * 60 + 30,

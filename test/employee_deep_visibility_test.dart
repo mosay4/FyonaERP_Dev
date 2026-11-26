@@ -95,7 +95,12 @@ void main() {
         'inventory.edit': false,
         'inventory.delete': false,
       });
-      // Header + the base unit row (each unit row names the product).
+      // Header + the base unit row (each unit row names the product); the
+      // units card opens with its arrow.
+      final toggle = find.byKey(const ValueKey('unitDetailsToggle'));
+      await tester.ensureVisible(toggle);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
       expect(find.text('Product'), findsNWidgets(2));
       expect(find.byIcon(Icons.edit_outlined), findsNothing);
       expect(find.byIcon(Icons.delete_outline), findsNothing);

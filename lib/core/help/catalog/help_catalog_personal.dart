@@ -2588,4 +2588,11 @@ const List<HelpEntry> kHelpPersonal = [
     ar: 'تخلي سارة تختار أنسب وقت لك.',
     en: 'Let Sara pick the best time for you.',
   ),
+  HelpEntry(
+    id: 'p.sara.smartNotifTest',
+    keys: ['saraSmartNotifTest'],
+    icon: Icons.notifications_active_outlined,
+    ar: 'يرسل لك تنبيه تجربة من سارة بعد دقيقة، حتى لو قفلت التطبيق أو فصلت الإنترنت.',
+    en: 'Sends you a test notification from Sara in a minute, even with the app closed or offline.',
+  ),
 ];

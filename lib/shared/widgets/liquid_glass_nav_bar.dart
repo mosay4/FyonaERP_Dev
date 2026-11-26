@@ -550,3 +550,20 @@ class _Tab extends StatelessWidget {
     );
   }
 }
+
+
+/// The colour behind the app's bottom navigation (the shell background).
+/// A page docked right above the bar (e.g. Sara's composer) paints its
+/// bottom surface with it, so the screen reads as one background with the
+/// bar floating over it — no rectangle behind the bar.
+class NavBarBackdrop extends InheritedWidget {
+  const NavBarBackdrop({super.key, required this.color, required super.child});
+
+  final Color color;
+
+  static Color? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<NavBarBackdrop>()?.color;
+
+  @override
+  bool updateShouldNotify(NavBarBackdrop old) => old.color != color;
+}

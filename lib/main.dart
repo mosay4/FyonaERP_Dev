@@ -4,6 +4,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'core/diagnostics/exit_report.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -386,6 +387,10 @@ class _AppWithSyncState extends ConsumerState<_AppWithSync>
       try { ref.read(fcmServiceProvider).init(); } catch (_) {}
       // Sara smart notifications: silent on-device planner (no AI calls).
       try { ref.read(saraSmartCoordinatorProvider).start(); } catch (_) {}
+      // A freeze / crash last time: offer the system report (real cause).
+      Future.delayed(const Duration(seconds: 4), () {
+        if (mounted) ExitReport.checkAndOffer(() => rootNavigatorKey.currentContext);
+      });
     });
   }
 

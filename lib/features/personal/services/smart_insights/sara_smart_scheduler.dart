@@ -219,12 +219,35 @@ class SaraSmartScheduler {
   /// Replaces every pending digest with [slots]. Old entries that are not
   /// re-planned are cancelled; entries that already fired are dropped
   /// from the store (their day is remembered as fired).
-  static Future<void> apply(List<SaraSlot> slots) async {
+  ///
+  /// [keepPlanned]: days that already have a pending digest keep it (it
+  /// was planned from real data); only the missing days get [slots].
+  static Future<void> apply(List<SaraSlot> slots,
+      {bool keepPlanned = false}) async {
     try {
       await lastFiredDay(); // harvest before overwriting the store
       final old = _decode(await PersonalReminderStore.read(storeKey));
-      final keep = slots.map((s) => requestCodeForDay(s.dayKey)).toSet();
       final nowMs = DateTime.now().millisecondsSinceEpoch;
+      if (keepPlanned) {
+        final pending = <String, Map<String, dynamic>>{
+          for (final e in old.entries)
+            if (((e.value['millis'] as num?)?.toInt() ?? 0) > nowMs &&
+                (e.value['day']?.toString() ?? '').length == 8)
+              e.key: e.value,
+        };
+        final days = pending.values.map((e) => e['day'].toString()).toSet();
+        slots = [for (final s in slots) if (!days.contains(s.dayKey)) s];
+        if (slots.isEmpty) return;
+        final store = <String, Map<String, dynamic>>{...pending};
+        for (final s in slots) {
+          final entry = _entry(s);
+          store['sara_${s.dayKey}'] = entry;
+          await _schedule(entry, s.fireAt);
+        }
+        await PersonalReminderStore.write(storeKey, jsonEncode(store));
+        return;
+      }
+      final keep = slots.map((s) => requestCodeForDay(s.dayKey)).toSet();
       for (final e in old.values) {
         final rc = (e['requestCode'] as num?)?.toInt() ?? 0;
         final millis = (e['millis'] as num?)?.toInt() ?? 0;
@@ -236,22 +259,82 @@ class SaraSmartScheduler {
       }
       final store = <String, Map<String, dynamic>>{};
       for (final s in slots) {
-        final rc = requestCodeForDay(s.dayKey);
-        final entry = ReminderCodec.buildEntry(
-          millis: s.fireAt.millisecondsSinceEpoch,
-          title: s.notice.title,
-          body: s.notice.body,
-          kind: kind,
-          refId: 'digest-${s.dayKey}',
-          requestCode: rc,
-          route: s.notice.route,
-          extra: {'day': s.dayKey},
-        );
+        final entry = _entry(s);
         store['sara_${s.dayKey}'] = entry;
         await _schedule(entry, s.fireAt);
       }
       await PersonalReminderStore.write(storeKey, jsonEncode(store));
     } catch (_) {}
+  }
+
+  static Map<String, dynamic> _entry(SaraSlot s) => ReminderCodec.buildEntry(
+        millis: s.fireAt.millisecondsSinceEpoch,
+        title: s.notice.title,
+        body: s.notice.body,
+        kind: kind,
+        refId: 'digest-${s.dayKey}',
+        requestCode: requestCodeForDay(s.dayKey),
+        route: s.notice.route,
+        extra: {'day': s.dayKey},
+      );
+
+  /// True when a digest is pending for each of the next two days.
+  static Future<bool> coversDays(DateTime now) async {
+    try {
+      final all = _decode(await PersonalReminderStore.read(storeKey));
+      final ms = now.millisecondsSinceEpoch;
+      final days = {
+        for (final e in all.values)
+          if (((e['millis'] as num?)?.toInt() ?? 0) > ms) e['day']?.toString()
+      };
+      final tomorrow = DateTime(now.year, now.month, now.day + 1);
+      final after = DateTime(now.year, now.month, now.day + 2);
+      return days.contains(SaraDailyPlanner.dayKey(tomorrow)) &&
+          days.contains(SaraDailyPlanner.dayKey(after));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// The next pending digest (null when none) — shown in the settings.
+  /// Reads the boot copy in preferences (times only, no texts): cheap and
+  /// never opens the encrypted ledger.
+  static Future<DateTime?> nextDigest({DateTime? now}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final all = _decode(prefs.getString(storeKey));
+      final ms = (now ?? DateTime.now()).millisecondsSinceEpoch;
+      int? best;
+      for (final e in all.values) {
+        final m = (e['millis'] as num?)?.toInt() ?? 0;
+        if (m > ms && (best == null || m < best)) best = m;
+      }
+      return best == null ? null : DateTime.fromMillisecondsSinceEpoch(best);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Real end-to-end check from the settings: the same native alarm path
+  /// as a digest (fires with the app closed / offline) in [after].
+  static Future<bool> scheduleTest(SaraNotice n,
+      {Duration after = const Duration(minutes: 1)}) async {
+    try {
+      final at = DateTime.now().add(after);
+      final entry = ReminderCodec.buildEntry(
+        millis: at.millisecondsSinceEpoch,
+        title: n.title,
+        body: n.body,
+        kind: kind,
+        refId: 'test',
+        requestCode: ReminderCodec.requestCode('sara:test'),
+        route: n.route,
+      );
+      await _schedule(entry, at);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Cancels every pending Sara digest (switch off / logout).

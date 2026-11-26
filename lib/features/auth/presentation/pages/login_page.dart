@@ -125,6 +125,54 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         phoneE164: phone, password: password);
   }
 
+  bool _ar(BuildContext context) =>
+      Localizations.localeOf(context).languageCode != 'en';
+
+  /// Email + password for accounts created before phone sign-in.
+  Future<void> _legacyEmailLogin() async {
+    if (!await _ensureOnline() || !mounted) return;
+    final ar = _ar(context);
+    final email = TextEditingController();
+    final pass = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(ar ? 'الدخول بالبريد' : 'Sign in with email',
+            style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w800)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            key: const Key('legacy_email_field'),
+            controller: email,
+            keyboardType: TextInputType.emailAddress,
+            textDirection: TextDirection.ltr,
+            decoration: InputDecoration(labelText: ar ? 'البريد الإلكتروني' : 'Email'),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            key: const Key('legacy_password_field'),
+            controller: pass,
+            obscureText: true,
+            decoration: InputDecoration(labelText: ar ? 'كلمة المرور' : 'Password'),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: Text(ar ? 'إلغاء' : 'Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: Text(ar ? 'دخول' : 'Sign in')),
+        ],
+      ),
+    );
+    final e = email.text.trim();
+    final pw = pass.text;
+    email.dispose();
+    pass.dispose();
+    if (ok != true || e.isEmpty || pw.isEmpty || !mounted) return;
+    await ref.read(authProvider.notifier).loginLegacyEmail(email: e, password: pw);
+  }
+
   Future<void> _social({required bool apple}) async {
     if (!await _ensureOnline() || !mounted) return;
     setState(() => _socialBusy = true);
@@ -362,6 +410,26 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                                 label: a2(context, 'login'),
                                 loading: authState.isLoading,
                                 onPressed: isLoading ? null : _login,
+                              ),
+                              // Accounts made with an email (before phone
+                              // sign-in) keep signing in that way.
+                              Align(
+                                alignment: AlignmentDirectional.center,
+                                child: TextButton(
+                                  key: const Key('legacy_email_login'),
+                                  onPressed: isLoading ? null : _legacyEmailLogin,
+                                  child: Text(
+                                    _ar(context)
+                                        ? 'الدخول بالبريد (الحسابات القديمة)'
+                                        : 'Sign in with email (older accounts)',
+                                    style: TextStyle(
+                                      fontFamily: 'Cairo',
+                                      fontSize: R.fontSize(context, 12.5),
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                ),
                               ),
                               if (showGoogle || showApple) ...[
                                 const SizedBox(height: 14),

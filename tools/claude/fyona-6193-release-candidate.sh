@@ -97,9 +97,16 @@ with ZipFile(apk) as new, ZipFile(reference) as old:
         # entry Sara's on-phone voice needs on Android 11+.
         if new.read("AndroidManifest.xml") != old.read("AndroidManifest.xml"):
             import difflib, re
-            tree = lambda p: [re.sub(r"\(line=\d+\)", "", l).rstrip() for l in
+            # Resource IDs (=@0x7f…) renumber when any resource is added (e.g.
+            # strings generated from google-services.json); what they resolve
+            # to is checked below through the badging labels.
+            tree = lambda p: [re.sub(r"=@0x7f[0-9a-f]{6}", "=@res",
+                                     re.sub(r"\(line=\d+\)", "", l)).rstrip() for l in
                               check_output([aapt, "dump", "xmltree", p, "AndroidManifest.xml"],
                                            text=True).splitlines()]
+            labels = lambda p: sorted(l for l in badges(p).splitlines()
+                                      if l.startswith("application-label"))
+            assert labels(apk) == labels(reference), (labels(apk), labels(reference))
             diff = [l for l in difflib.ndiff(tree(reference), tree(apk)) if l[:2] in ("+ ", "- ")]
             allowed = re.compile(r'^\+ \s*(E: intent|E: action|A: android:name\(0x01010003\)="android\.speech\.RecognitionService".*)$')
             bad = [l for l in diff if not allowed.match(l)]

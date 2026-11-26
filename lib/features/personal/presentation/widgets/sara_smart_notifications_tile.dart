@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hugeicons/hugeicons.dart';
@@ -5,6 +7,8 @@ import 'package:hugeicons/hugeicons.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../services/debt_reminder_service.dart';
+import '../../services/smart_insights/sara_notice_composer.dart';
+import '../../services/smart_insights/sara_smart_scheduler.dart';
 import '../../services/smart_insights/sara_smart_settings.dart';
 import '../../../../core/utils/time_format.dart';
 
@@ -184,6 +188,10 @@ class SaraSmartNotificationsTile extends ConsumerWidget {
                     ],
                   ),
                 ),
+                _SaraNotifStatus(
+                  key: ValueKey(
+                      'saraNotifStatus-${s.effectiveMinutes}-${s.timeChangedAtMs}'),
+                ),
                 if (!s.isAuto)
                   Align(
                     alignment: AlignmentDirectional.centerEnd,
@@ -204,6 +212,119 @@ class SaraSmartNotificationsTile extends ConsumerWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+
+/// "Next notification: …" + a real end-to-end test (native alarm in one
+/// minute — arrives with the app closed or offline).
+class _SaraNotifStatus extends StatefulWidget {
+  const _SaraNotifStatus({super.key});
+
+  @override
+  State<_SaraNotifStatus> createState() => _SaraNotifStatusState();
+}
+
+class _SaraNotifStatusState extends State<_SaraNotifStatus> {
+  DateTime? _next;
+  bool _loaded = false;
+  Timer? _again;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+    // The re-plan after a time change lands a moment later.
+    _again = Timer(const Duration(seconds: 3), _refresh);
+  }
+
+  @override
+  void dispose() {
+    _again?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    final n = await SaraSmartScheduler.nextDigest();
+    if (!mounted) return;
+    setState(() {
+      _next = n;
+      _loaded = true;
+    });
+  }
+
+  String _label(AppLocalizations l10n) {
+    final n = _next;
+    if (n == null) return l10n.translate('saraSmartNotifNone');
+    final time = SaraSmartNotificationsTile.formatMinutes(
+        context, n.hour * 60 + n.minute);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(n.year, n.month, n.day);
+    final diff = day.difference(today).inDays;
+    final when = diff == 0
+        ? l10n.translate('saraSmartNotifToday').replaceAll('{time}', time)
+        : diff == 1
+            ? l10n.translate('saraSmartNotifTomorrow').replaceAll('{time}', time)
+            : '${n.day}/${n.month} $time';
+    return l10n.translate('saraSmartNotifNext').replaceAll('{time}', when);
+  }
+
+  Future<void> _test() async {
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final ok = await DebtReminderService.ensureNotificationPermission();
+    if (!ok) {
+      messenger?.showSnackBar(
+          SnackBar(content: Text(l10n.translate('saraSmartNotifBlocked'))));
+      return;
+    }
+    await SaraSmartScheduler.scheduleTest(SaraNotice(
+      kind: 'test',
+      title: l10n.translate('saraSmartNotifTestTitle'),
+      body: l10n.translate('saraSmartNotifTestBody'),
+      route: SaraRoutes.transactions,
+    ));
+    messenger?.showSnackBar(
+        SnackBar(content: Text(l10n.translate('saraSmartNotifTestDone'))));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              _loaded ? _label(l10n) : '',
+              key: const Key('saraSmartNotifNext'),
+              style: TextStyle(
+                fontFamily: 'Cairo',
+                fontSize: 11.5,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
+          TextButton.icon(
+            key: const Key('saraSmartNotifTest'),
+            onPressed: _test,
+            icon: const Icon(Icons.notifications_active_outlined,
+                size: 16, color: AppColors.primary),
+            label: Text(
+              l10n.translate('saraSmartNotifTest'),
+              style: const TextStyle(
+                fontFamily: 'Cairo',
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

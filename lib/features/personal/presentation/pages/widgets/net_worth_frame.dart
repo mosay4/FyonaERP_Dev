@@ -10,6 +10,11 @@ const double kNetWorthArrowGutter = 48;
 const double kNetWorthArrowSize = 32;
 const double kNetWorthArrowInset = 10;
 
+/// Top padding of the open card: its 36 px header row is centred exactly on
+/// the pinned arrow (10 + 32 / 2 = 8 + 36 / 2), like the folded pill.
+const double kNetWorthCardTopPadding =
+    kNetWorthArrowInset + kNetWorthArrowSize / 2 - 18;
+
 /// Hosts the wealth card and its collapsed pill and pins ONE collapse arrow
 /// at the card's physical top-left corner. The arrow lives outside the
 /// expand/collapse switch so it never moves between the two states (it only
@@ -49,6 +54,8 @@ class NetWorthFrame extends StatelessWidget {
             child: expanded ? expandedChild : collapsedChild,
           ),
         ),
+        // Same spot in both states, inside the card / pill, centred on the
+        // first row of each (see [kNetWorthCardTopPadding]).
         Positioned(
           left: kNetWorthArrowInset,
           top: kNetWorthArrowInset,

@@ -159,10 +159,46 @@ class SaraSmartCoordinator {
       return;
     }
     final pf = _ref.read(personalFinanceProvider);
-    // Personal data not loaded in this session yet: keep what is already
-    // scheduled (it was planned from the last known data).
-    if (pf.transactions.isEmpty && pf.savingsGoals.isEmpty) return;
+    final now0 = DateTime.now();
+    final hasData = pf.transactions.isNotEmpty ||
+        pf.savingsGoals.isNotEmpty ||
+        pf.bankAccounts.isNotEmpty ||
+        pf.debts.isNotEmpty;
+    if (!hasData) {
+      // Personal data not loaded in this session (e.g. the app was opened
+      // on the Business section): keep what was planned from real data,
+      // but never leave the user's time empty.
+      await _ensureCheckIns(settings, now0);
+      return;
+    }
+    try {
+      await _planFromData(uid, settings, pf);
+    } catch (_) {
+      // Unexpected data: the chosen time still gets its notification.
+      await _ensureCheckIns(settings, now0, force: true);
+    }
+  }
 
+  /// Schedules calm check-ins at the chosen time for the coming days that
+  /// have nothing pending yet ([force]: replace whatever is pending).
+  Future<void> _ensureCheckIns(SaraSmartSettings settings, DateTime now,
+      {bool force = false}) async {
+    if (!force && await SaraSmartScheduler.coversDays(now)) return;
+    final lastFired = await SaraSmartScheduler.lastFiredDay(now: now);
+    final lastFiredAt = await SaraSmartScheduler.lastFiredAt(now: now);
+    final slots = SaraDailyPlanner.planCheckIns(
+      now: now,
+      minutesOfDay: settings.minutes ?? settings.peakHour * 60,
+      lastFiredDay: lastFired,
+      lastFiredAtMs: lastFiredAt,
+      timeChangedAtMs: settings.timeChangedAtMs,
+      tr: _tr,
+    );
+    await SaraSmartScheduler.apply(slots, keepPlanned: !force);
+  }
+
+  Future<void> _planFromData(
+      String uid, SaraSmartSettings settings, PersonalFinanceState pf) async {
     final engine = _ref.read(currencyEngineProvider);
     final budgets = _ref.read(budgetProvider).budgets;
     final recurring = _ref.read(recurringProvider).recurring;

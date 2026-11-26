@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'business_number_field.dart';
 
@@ -195,7 +197,11 @@ class UnitLineField extends StatefulWidget {
 }
 
 class _UnitLineFieldState extends State<UnitLineField> {
-  static final Map<String, int> _countCache = {};
+  /// Short-lived: units added to a product (Inventory) must show in the
+  /// next invoice at once — a count cached for the app's lifetime kept a
+  /// product at «قطعة» only until a restart.
+  static final Map<String, (int, DateTime)> _countCache = {};
+  static const _ttl = Duration(seconds: 15);
   int? _count;
 
   @override
@@ -216,13 +222,14 @@ class _UnitLineFieldState extends State<UnitLineField> {
       setState(() => _count = 1);
       return;
     }
-    if (_countCache.containsKey(pid)) {
-      setState(() => _count = _countCache[pid]);
+    final hit = _countCache[pid];
+    if (hit != null && DateTime.now().difference(hit.$2) < _ttl) {
+      setState(() => _count = hit.$1);
       return;
     }
     try {
       final n = await widget.loadUnitCount!();
-      _countCache[pid] = n;
+      _countCache[pid] = (n, DateTime.now());
       if (mounted) setState(() => _count = n);
     } catch (_) {
       if (mounted) setState(() => _count = 1);
@@ -258,9 +265,16 @@ class _UnitLineFieldState extends State<UnitLineField> {
           const Icon(Icons.keyboard_arrow_down_rounded, size: 16),
       ]),
     );
-    if (!multiple) return child;
+    // A product line is always tappable: its units are read fresh on tap
+    // (the count shown here may predate units added a moment ago).
+    final pid = widget.productId;
+    if (widget.onTap == null || pid == null || pid.isEmpty) return child;
     return InkWell(
-      onTap: widget.onTap,
+      onTap: () {
+        _countCache.remove(pid);
+        unawaited(_load());
+        widget.onTap!();
+      },
       borderRadius: BorderRadius.circular(10),
       child: child,
     );

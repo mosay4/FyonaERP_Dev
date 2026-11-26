@@ -12,6 +12,7 @@ import '../../features/branches/data/branch_scope.dart';
 import '../../core/router/route_names.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart' hide TextDirection;
+import 'liquid_glass_nav_bar.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/utils/date_formatter.dart';
@@ -269,7 +270,25 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
   final _imagePicker = ImagePicker();
   final _audioRecorder = AudioRecorder();
   final _audioPlayer = AudioPlayer();
-  bool _busy = false;
+  bool _busyFlag = false;
+
+  /// A message sent while Sara is still answering is never dropped: it
+  /// waits here and goes out the moment she is free.
+  String? _queuedText;
+  bool _queued = false;
+
+  bool get _busy => _busyFlag;
+  set _busy(bool v) {
+    _busyFlag = v;
+    if (!v && _queued) {
+      final text = _queuedText;
+      _queued = false;
+      _queuedText = null;
+      scheduleMicrotask(() {
+        if (mounted && !_busyFlag) _send(text: text);
+      });
+    }
+  }
   // Personal Sara is online-only: offline → calm notice, no local loop.
   bool _offline = false;
   StreamSubscription<bool>? _netSub;
@@ -1360,7 +1379,20 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
   Future<void> _send({String? text}) async {
     final msg = text ?? _inputCtrl.text.trim();
     if (msg.isEmpty && _pendingFileName == null && _pendingImage == null && _audioPath == null) return;
-    if (_busy) return;
+    if (_busy) {
+      // Accepted at once (the input clears); sent right after the reply.
+      if (_queued) return;
+      _queued = true;
+      _queuedText = msg.isEmpty ? null : msg;
+      if (text == null) _inputCtrl.clear();
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+        duration: const Duration(seconds: 2),
+        content: Text(_isEn()
+            ? 'Sent — Sara will read it as soon as she finishes.'
+            : 'تم — بتوصل لسارة أول ما تخلص ردها.'),
+      ));
+      return;
+    }
     if (_blockedOffline()) return;
     _autoFollow = true;
     _ambient.send();
@@ -2796,6 +2828,7 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
         await _startAudioRecording();
       case SaraSpeechEnd.nothingHeard:
         _inputTransitionCtrl.reverse();
+        _inputCtrl.clear();
         // Next try records the audio and lets the server recognize it.
         _speechUnavailable = true;
         setState(() => _isRecording = false);
@@ -2828,7 +2861,12 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
   Future<void> _stopRecording() async {
     final speech = _speech;
     if (speech != null) {
-      // The recognizer finalizes what it heard; _onSpeechResult sends it.
+      // Instant response to the tap: the bar closes now; the recognized
+      // words go out as soon as they are final (_onSpeechResult).
+      _recordingTimer?.cancel();
+      _inputTransitionCtrl.reverse();
+      if (speech.partial.value.isNotEmpty) _inputCtrl.text = speech.partial.value;
+      setState(() => _isRecording = false);
       await speech.stop();
       return;
     }
@@ -3285,13 +3323,16 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
   Widget _buildInputBar() {
     final hasText = _inputCtrl.text.trim().isNotEmpty;
     final hasAttachment = _pendingImage != null || _pendingFileName != null;
-    final canSend = (hasText || hasAttachment) && !_busy;
+    // Sending while Sara answers is allowed: the message waits its turn.
+    final canSend = hasText || hasAttachment;
 
     // Docked composer: the bar's surface runs edge to edge under a single
     // hairline, flush with the bottom navigation (no floating island).
+    // Inside the app shell it takes the shell background, so the screen and
+    // the area around the floating bar are one colour (no rectangle).
     return Container(
       decoration: BoxDecoration(
-        color: _saraBar(context),
+        color: NavBarBackdrop.maybeOf(context) ?? _saraBar(context),
         border: Border(top: BorderSide(color: _saraLine(context), width: .8)),
       ),
       padding: EdgeInsets.only(

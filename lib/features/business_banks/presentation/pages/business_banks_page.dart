@@ -1953,34 +1953,23 @@ class _HeroCard extends StatelessWidget {
                   ),
                 ],
               ),
-              SizedBox(height: 24),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerRight,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Text(
-                      fmtNum(displayAmount),
-                      style: TextStyle(
-                        fontFamily: 'Cairo',
-                        fontSize: R.fontSize(context, 34),
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
-                    ),
-                    SizedBox(width: 6),
-                    Text(
-                      currencySymbol(selectedCurrency),
-                      style: TextStyle(
-                        fontFamily: 'Cairo',
-                        fontSize: R.fontSize(context, 18),
-                        fontWeight: FontWeight.w500,
-                        color: Colors.white.withAlpha(180),
-                      ),
-                    ),
-                  ],
+              SizedBox(height: 18),
+              // Calm size; number and currency shrink together for long
+              // amounts (20+ digits) — never cut, never oversized.
+              MoneyText(
+                amount: fmtNum(displayAmount),
+                currency: currencySymbol(selectedCurrency),
+                alignment: AlignmentDirectional.centerStart,
+                currencyScale: .5,
+                currencyStyle: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white.withAlpha(185),
+                ),
+                style: TextStyle(
+                  fontFamily: 'Cairo',
+                  fontSize: R.fontSize(context, 26),
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
                 ),
               ),
             ],

@@ -29,6 +29,7 @@ class PremiumSwitchSession {
 
 class PremiumSwitch {
   static final current = ValueNotifier<PremiumSwitchSession?>(null);
+  static Duration maxWait = const Duration(seconds: 15);
   static int _hosts = 0;
 
   static Future<void> run({
@@ -54,7 +55,9 @@ class PremiumSwitch {
     StackTrace? trace;
     try {
       await session.covered.future;
-      await action();
+      // Never leave the user behind a frozen curtain: past [maxWait] the
+      // motion completes and the switch finishes on its own.
+      await action().timeout(maxWait, onTimeout: () {});
       await WidgetsBinding.instance.endOfFrame;
     } catch (e, st) {
       failure = e;

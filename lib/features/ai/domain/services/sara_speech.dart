@@ -185,10 +185,18 @@ class SaraSpeechSession {
 
   /// The user tapped stop: the recognizer finalizes what it heard. If no
   /// final result arrives within [grace], the last partial is used.
-  Future<SaraSpeechResult> stop({Duration grace = const Duration(milliseconds: 1500)}) async {
+  ///
+  /// The user is waiting on the tap: when words were already recognized the
+  /// final result gets only [quick] to refine them, then they are sent.
+  Future<SaraSpeechResult> stop({
+    Duration grace = const Duration(milliseconds: 1500),
+    Duration quick = const Duration(milliseconds: 250),
+  }) async {
     if (_done.isCompleted) return _done.future;
     _stopping = true;
-    await _backend.stop();
+    if (_partial.isNotEmpty) grace = quick;
+    // Never wait on the platform call itself (it can be slow on some phones).
+    unawaited(_backend.stop());
     return _done.future.timeout(grace, onTimeout: () {
       _finish(_partial);
       unawaited(_backend.cancel());

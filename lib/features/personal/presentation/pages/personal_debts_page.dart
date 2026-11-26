@@ -1124,7 +1124,7 @@ class _DebtPaySheetState extends ConsumerState<_DebtPaySheet> {
         ? l10n.translate('payDebtOweTitle', params: {'name': widget.debt.personName})
         : l10n.translate('payDebtOwedTitle', params: {'name': widget.debt.personName});
     return Container(
-      height: MediaQuery.of(context).size.height * 0.62,
+      height: MediaQuery.of(context).size.height * 0.86,
       decoration: BoxDecoration(
         color: AppColors.background,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -1138,84 +1138,19 @@ class _DebtPaySheetState extends ConsumerState<_DebtPaySheet> {
         Padding(
           padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Row(children: [
-            Expanded(child: Text(title, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 14), fontWeight: FontWeight.w700, color: AppColors.textPrimary), overflow: TextOverflow.ellipsis)),
-            SizedBox(width: 8),
-            Text(l10n.translate('remainingAmount', params: {'amount': fmtNum(widget.debt.remaining)}), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 12), color: AppColors.textSecondary)),
+            Expanded(child: Text(title, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 15), fontWeight: FontWeight.w800, color: AppColors.textPrimary), overflow: TextOverflow.ellipsis)),
           ]),
         ),
         Expanded(child: ListView(
           padding: EdgeInsets.symmetric(horizontal: 20),
           children: [
-            FyonaTextField(
-              controller: _amountCtrl, keyboardType: TextInputType.number,
-              inputFormatters: [AmountInputFormatter()],
-              textAlign: TextAlign.right,
-              style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 14), color: AppColors.textPrimary),
-              decoration: InputDecoration(
-                hintText: l10n.translate('payAmountHint'),
-                hintStyle: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), color: AppColors.textPlaceholder),
-                prefixIcon: Padding(padding: EdgeInsets.only(left: 10), child: AppIconBadge(
-                  icon: TwoToneIcons.money.outline, size: 32, iconSize: 16,
-                  backgroundColor: AppColors.surfaceVariant, borderColor: AppColors.border,
-                )),
-                prefixIconConstraints: BoxConstraints(minWidth: 44, maxWidth: 44, minHeight: 32),
-                contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                filled: true, fillColor: AppColors.surfaceVariant,
-                border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.circular(10)),
-                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border, width: 0.5), borderRadius: BorderRadius.circular(10)),
-                focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: AppColors.primary, width: 1), borderRadius: BorderRadius.circular(10)),
-              ),
-            ),
-            SizedBox(height: 8),
-            Row(children: [
-              Text('${l10n.translate('paidAmount')}: ${fmtNum(widget.debt.paid)} ${currencySymbol(widget.debt.currency)}', style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textSecondary)),
-              Spacer(),
-              Text('${l10n.translate('remainingAfterPay')}: ${fmtNum(widget.debt.remaining)} ${currencySymbol(widget.debt.currency)}', style: TextStyle(fontFamily: 'Cairo', fontSize: 11, fontWeight: FontWeight.w700, color: widget.debt.type == 'payable' ? AppColors.danger : AppColors.success)),
-            ]),
-            SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                // Full remaining, expressed in the TYPED currency: raw debt
-                // currency for collections (typed in debt currency),
-                // converted to the account currency for payments (typed in
-                // account currency). Falls back to the raw remaining when
-                // the account — or a rate — is not known yet.
-                onPressed: () => setState(() {
-                    var fill = widget.debt.remaining;
-                    if (widget.debt.type == 'payable') {
-                      final acc = st.bankAccounts
-                          .where((a) => a.id == _bankId)
-                          .firstOrNull;
-                      if (acc != null &&
-                          acc.currency.toUpperCase() !=
-                              widget.debt.currency.toUpperCase()) {
-                        final manual = _manualFx.rateFor(
-                            acc.currency.toUpperCase(),
-                            widget.debt.currency.toUpperCase());
-                        final r = manual != null
-                            ? 1 / manual
-                            : _findRate(
-                                widget.debt.currency.toUpperCase(),
-                                acc.currency.toUpperCase(),
-                                st.exchangeRates);
-                        if (r != null && r > 0) {
-                          fill = widget.debt.remaining * r;
-                        }
-                      }
-                    }
-                    _amountCtrl.text = fill == fill.roundToDouble()
-                        ? fill.toStringAsFixed(0)
-                        : fill.toStringAsFixed(2);
-                  }),
-                icon: Icon(Icons.bolt, size: 14, color: AppColors.primary),
-                label: Text(l10n.translate('fullAmount'), style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.primary)),
-                style: OutlinedButton.styleFrom(side: BorderSide(color: AppColors.primary.withAlpha(60)), padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6), minimumSize: Size(0, 32)),
-              ),
-            ),
-            SizedBox(height: 16),
-            Text(l10n.translate('payMethodLabel'), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-            SizedBox(height: 8),
+            // 1. Where the debt stands.
+            _summaryCard(context),
+            SizedBox(height: 12),
+            // 2. How it is paid: method, then the cash currency / bank.
+            _section(context, step: 1, title: l10n.translate('payMethodLabel'), child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
             Row(children: [
               Expanded(child: _payMethodBtn(l10n.translate('payMethodCash'), TwoToneIcons.money, 'cash')),
               SizedBox(width: 10),
@@ -1338,6 +1273,73 @@ class _DebtPaySheetState extends ConsumerState<_DebtPaySheet> {
                 );
               }),
             ],
+              ],
+            )),
+            SizedBox(height: 12),
+            // 3. How much (typed in the currency chosen above).
+            _section(context, step: 2, title: l10n.translate('payAmountHint'), child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(children: [
+                  Expanded(child: FyonaTextField(
+              controller: _amountCtrl, keyboardType: TextInputType.number,
+              inputFormatters: [AmountInputFormatter()],
+              textAlign: TextAlign.right,
+              style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 14), color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                hintText: l10n.translate('payAmountHint'),
+                hintStyle: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), color: AppColors.textPlaceholder),
+                prefixIcon: Padding(padding: EdgeInsets.only(left: 10), child: AppIconBadge(
+                  icon: TwoToneIcons.money.outline, size: 32, iconSize: 16,
+                  backgroundColor: AppColors.surfaceVariant, borderColor: AppColors.border,
+                )),
+                prefixIconConstraints: BoxConstraints(minWidth: 44, maxWidth: 44, minHeight: 32),
+                contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                filled: true, fillColor: AppColors.surfaceVariant,
+                border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.circular(10)),
+                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border, width: 0.5), borderRadius: BorderRadius.circular(10)),
+                focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: AppColors.primary, width: 1), borderRadius: BorderRadius.circular(10)),
+              ),
+            )),
+                  SizedBox(width: 8),
+                  OutlinedButton.icon(
+                // Full remaining, expressed in the TYPED currency: raw debt
+                // currency for collections (typed in debt currency),
+                // converted to the account currency for payments (typed in
+                // account currency). Falls back to the raw remaining when
+                // the account — or a rate — is not known yet.
+                onPressed: () => setState(() {
+                    var fill = widget.debt.remaining;
+                    if (widget.debt.type == 'payable') {
+                      final acc = st.bankAccounts
+                          .where((a) => a.id == _bankId)
+                          .firstOrNull;
+                      if (acc != null &&
+                          acc.currency.toUpperCase() !=
+                              widget.debt.currency.toUpperCase()) {
+                        final manual = _manualFx.rateFor(
+                            acc.currency.toUpperCase(),
+                            widget.debt.currency.toUpperCase());
+                        final r = manual != null
+                            ? 1 / manual
+                            : _findRate(
+                                widget.debt.currency.toUpperCase(),
+                                acc.currency.toUpperCase(),
+                                st.exchangeRates);
+                        if (r != null && r > 0) {
+                          fill = widget.debt.remaining * r;
+                        }
+                      }
+                    }
+                    _amountCtrl.text = fill == fill.roundToDouble()
+                        ? fill.toStringAsFixed(0)
+                        : fill.toStringAsFixed(2);
+                  }),
+                icon: Icon(Icons.bolt, size: 14, color: AppColors.primary),
+                label: Text(l10n.translate('fullAmount'), style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.primary)),
+                style: OutlinedButton.styleFrom(side: BorderSide(color: AppColors.primary.withAlpha(60)), padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6), minimumSize: Size(0, 32)),
+              ),
+                ]),
             if (_fxPair(st) case final pair?) ...[
               SizedBox(height: 12),
               ValueListenableBuilder<TextEditingValue>(
@@ -1357,6 +1359,8 @@ class _DebtPaySheetState extends ConsumerState<_DebtPaySheet> {
                 },
               ),
             ],
+              ],
+            )),
             SizedBox(height: 12),
             FyonaTextField(
               controller: _notesCtrl,
@@ -1538,6 +1542,82 @@ class _DebtPaySheetState extends ConsumerState<_DebtPaySheet> {
             ),
           ],
         )),
+      ]),
+    );
+  }
+
+  /// Top of the sheet: what is left, what was paid, and how far along.
+  Widget _summaryCard(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final d = widget.debt;
+    final sym = currencySymbol(d.currency);
+    final color = d.type == 'payable' ? AppColors.danger : AppColors.success;
+    final progress = d.amount <= 0 ? 0.0 : (d.paid / d.amount).clamp(0.0, 1.0);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(l10n.translate('remainingAfterPay'),
+            textAlign: TextAlign.center,
+            style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 12), color: AppColors.textSecondary)),
+        const SizedBox(height: 2),
+        MoneyText(
+          amount: fmtNum(d.remaining),
+          currency: sym,
+          alignment: Alignment.center,
+          currencyScale: .55,
+          currencyStyle: TextStyle(color: AppColors.textSecondary),
+          style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 22), fontWeight: FontWeight.w800, color: color),
+        ),
+        const SizedBox(height: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 5,
+            backgroundColor: AppColors.surfaceVariant,
+            valueColor: AlwaysStoppedAnimation(color),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(children: [
+          Expanded(child: Text('${l10n.translate('paidAmount')}: ${fmtNum(d.paid)} $sym',
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textSecondary))),
+          Text('${fmtNum(d.amount)} $sym',
+              style: TextStyle(fontFamily: 'Cairo', fontSize: 11, color: AppColors.textTertiary)),
+        ]),
+      ]),
+    );
+  }
+
+  /// One numbered step of the sheet, in the same card style.
+  Widget _section(BuildContext context,
+      {required int step, required String title, required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Container(
+            width: 22, height: 22,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: AppColors.primary.withAlpha(22), shape: BoxShape.circle),
+            child: Text('$step', style: const TextStyle(fontFamily: 'Cairo', fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.primary)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(title, style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 13), fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
+        ]),
+        const SizedBox(height: 10),
+        child,
       ]),
     );
   }
