@@ -94,6 +94,13 @@ async def whatsapp_events(request: Request, db: AsyncSession = Depends(get_db)):
     await db.commit()
     for cid in to_process:
         engine.kick(cid)
+    # Diagnostics only: kinds and counts, never numbers or content.
+    fields = sorted({str((c or {}).get("field")) for e in (payload or {}).get("entry") or []
+                     for c in (e or {}).get("changes") or []})[:8]
+    incoming = sum(len(((c or {}).get("value") or {}).get("messages") or [])
+                   for e in (payload or {}).get("entry") or []
+                   for c in (e or {}).get("changes") or [])
+    logger.info("whatsapp_webhook", fields=fields, statuses=applied, incoming=incoming)
     return {"ok": True, "applied": applied}
 
 
