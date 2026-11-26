@@ -117,7 +117,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-2022]
+        # Targets: Android / iOS (builds above) and Windows; Linux runs the
+        # engine tests. macOS is not a target (and its CI minutes cost more).
+        os: [ubuntu-latest, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
