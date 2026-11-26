@@ -29,6 +29,7 @@ from app.core.security import (
     decode_token,
     hash_refresh_token,
     hash_password,
+    password_needs_rehash,
     verify_password,
     create_reset_token,
     decode_reset_token,
@@ -688,6 +689,8 @@ class AuthService:
             raise ValueError("البريد الإلكتروني أو كلمة المرور غير صحيحة")
         if not verify_password(password, user.password_hash):
             raise ValueError("البريد الإلكتروني أو كلمة المرور غير صحيحة")
+        if password_needs_rehash(user.password_hash):
+            user.password_hash = hash_password(password)
         if user.status != "active":
             raise ValueError("الحساب غير نشط. يرجى التواصل مع الدعم")
         if not user.email_verified:
@@ -989,6 +992,7 @@ class AuthService:
             ),
             refresh_token=raw_refresh_token,
             user=user_resp,
+            session_id=str(session.id),
         )
 
     async def _create_session(
@@ -1109,10 +1113,13 @@ class AuthService:
             full_name=user.full_name,
             organization_name=org.name if org else None,
             organization_avatar=(getattr(org, "avatar", None) if org else None),
-            email=user.email,
+            # Phone-first accounts carry an internal placeholder address.
+            email="" if (user.email or "").lower().endswith(".fyona.invalid") else user.email,
             phone=user.phone,
             phone_masked=mask_phone(user.phone),
             phone_complete=bool(user.phone),
+            phone_verified=bool(getattr(user, "phone_verified_at", None)
+                                and getattr(user, "phone_e164", None)),
             role=user.role,
             avatar=user.avatar,
             username=user.full_name,

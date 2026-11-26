@@ -186,7 +186,7 @@ const businessAllowedRoutes = <String>{
   '/ai', '/ai-suggestions', '/suggestions',
   '/onboarding', '/mfa/setup',
   '/receipt-preview',
-  '/change-password', '/sessions', '/customization',
+  '/change-password', '/sessions', '/security', '/customization',
   '/design/invoice', '/design/report', '/design/brand', '/design/print',
   // Reconciliation (قسم المطابقة) + Reports (قسم التقارير) — without these
   // the route guard bounces every press straight back to the dashboard.
@@ -222,7 +222,7 @@ const personalAllowedRoutes = <String>{
   '/personal/debt-notifications', '/debt-notifications',
   '/settings', '/notifications', '/reminders',
   '/subscription', '/subscription/pay',
-  '/change-password', '/profile', '/sessions', '/customization',
+  '/change-password', '/profile', '/sessions', '/security', '/customization',
   '/design/invoice', '/design/report', '/design/brand', '/design/print',
   '/suggestions',
   // Invitation taps must open the invitation card even before the user has
@@ -237,7 +237,7 @@ const staffAllowedRoutes = <String>{
   '/choose-usage',
   '/receipt-preview',
   '/suggestions',
-  '/change-password', '/sessions', '/customization',
+  '/change-password', '/sessions', '/security', '/customization',
   '/business/profile',
   '/design/invoice', '/design/report', '/design/brand', '/design/print',
   // Managers/accountants may open Reports + Reconciliation; the BACKEND
@@ -292,7 +292,7 @@ const personalRoleAllowedRoutes = <String>{
   '/subscription/phone-entry',
   '/change-password',
   '/profile',
-  '/sessions',
+  '/sessions', '/security',
   '/customization',
   '/suggestions',
   '/branches/invitations',
@@ -310,7 +310,7 @@ final allowedRoutes = <String, Set<String>>{
     '/notifications',
     '/reminders',
     '/profile',
-    '/sessions',
+    '/sessions', '/security',
     '/customization',
     '/design/invoice',
     '/design/report',

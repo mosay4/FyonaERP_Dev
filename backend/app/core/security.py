@@ -7,21 +7,66 @@ import bcrypt
 from .config import settings
 
 
+try:  # argon2id is the default; bcrypt hashes keep verifying (rehash on login)
+    from argon2 import PasswordHasher as _PasswordHasher
+    from argon2 import exceptions as _argon2_exc
+
+    _ARGON2 = _PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
+except Exception:  # pragma: no cover - argon2-cffi missing: bcrypt only
+    _ARGON2 = None
+    _argon2_exc = None
+
+# Verified against when the account does not exist, so a missing phone and a
+# wrong password cost the same time.
+_DUMMY_HASH: Optional[str] = None
+
+
 def hash_password(password: str) -> str:
-    """Hash a plain-text password using bcrypt."""
+    """Hash a plain-text password (argon2id; bcrypt when argon2 is absent)."""
+    if _ARGON2 is not None:
+        return _ARGON2.hash(password)
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(password: str, password_hash: Optional[str]) -> bool:
-    """Constant-time password check. Returns False when no hash exists."""
+    """Constant-time password check (argon2id or legacy bcrypt).
+
+    Returns False when no hash exists."""
     if not password_hash:
         return False
+    if password_hash.startswith("$argon2"):
+        if _ARGON2 is None:
+            return False
+        try:
+            return _ARGON2.verify(password_hash, password)
+        except Exception:
+            return False
     try:
         return bcrypt.checkpw(
             password.encode("utf-8"), password_hash.encode("utf-8")
         )
     except ValueError:
         return False
+
+
+def password_needs_rehash(password_hash: Optional[str]) -> bool:
+    """True for legacy bcrypt hashes or outdated argon2 parameters."""
+    if not password_hash or _ARGON2 is None:
+        return False
+    if not password_hash.startswith("$argon2id"):
+        return True
+    try:
+        return _ARGON2.check_needs_rehash(password_hash)
+    except Exception:
+        return False
+
+
+def burn_password_check(password: str) -> None:
+    """Spend the same time as a real verification (unknown account)."""
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = hash_password("fyona-dummy-password-never-used")
+    verify_password(password, _DUMMY_HASH)
 
 
 def hash_refresh_token(token: str) -> str:

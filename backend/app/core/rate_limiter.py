@@ -72,6 +72,16 @@ class RateLimiter:
             await self._fallback.check(key)
 
 
+_AUTH2_RELAXED = (
+    "/api/v1/auth2/otp/status",
+    "/api/v1/auth2/device/nonce",
+    "/api/v1/auth2/devices",
+    "/api/v1/auth2/approvals",
+    "/api/v1/auth2/refresh",
+    "/api/v1/auth2/admin",
+)
+
+
 class RateLimitMiddleware:
     """ASGI middleware enforcing per-IP and per-user request limits.
 
@@ -160,6 +170,10 @@ class RateLimitMiddleware:
         auth_sensitive = is_auth and not (
             path.startswith("/api/v1/auth/me")
             or path.startswith("/api/v1/auth/sessions")
+            # Auth v2: status polling, nonces and authenticated device
+            # management are not brute-force surfaces (the OTP engine has
+            # its own strict caps; codes lock after 5 wrong attempts).
+            or path.startswith(_AUTH2_RELAXED)
         )
 
         ip_limiter = self.auth_ip if auth_sensitive else self.general_ip

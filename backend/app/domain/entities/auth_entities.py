@@ -54,6 +54,10 @@ class User(Base):
     phone_carrier = Column(String(100))
     phone_added_at = Column(DateTime(timezone=True))
     phone_updated_at = Column(DateTime(timezone=True))
+    # Auth v2: the VERIFIED phone that owns the account (login identifier).
+    # Only an OTP-verified number is ever written here (unique).
+    phone_e164 = Column(String(20), unique=True, nullable=True, index=True)
+    phone_verified_at = Column(DateTime(timezone=True), nullable=True)
     password_hash = Column(String(255), nullable=True)
     # Stable 6-digit public code shown to other users (never the UUID).
     public_code = Column(String(6), unique=True, nullable=True, index=True)

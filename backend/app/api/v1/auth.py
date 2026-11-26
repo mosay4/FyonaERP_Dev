@@ -49,6 +49,25 @@ _phone_rate_limiter = RateLimiter(
 )
 
 
+def _legacy_route(name: str):
+    """Email register/login/reset/firebase are replaced by /auth2 (phone).
+
+    They answer 410 unless AUTH_LEGACY_EMAIL_ROUTES lists them ("login" for
+    QA scripts that sign in seeded fake users, "all" for old tests)."""
+
+    async def _gate() -> None:
+        allowed = {x.strip() for x in (settings.AUTH_LEGACY_EMAIL_ROUTES or "").split(",")}
+        if "all" in allowed or name in allowed:
+            return
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail={
+            "code": "gone",
+            "message_ar": "هذه الطريقة لم تعد مدعومة. حدّث التطبيق",
+            "message_en": "This method is no longer supported. Update the app.",
+        })
+
+    return Depends(_gate)
+
+
 def _get_auth_service(db: AsyncSession) -> AuthService:
     return AuthService(
         org_repo=SQLAlchemyOrganizationRepository(db),
@@ -146,7 +165,7 @@ async def _geo_lookup(ip: Optional[str]) -> dict:
         return empty
 
 
-@router.post("/register", response_model=OtpSentResponse)
+@router.post("/register", response_model=OtpSentResponse, dependencies=[_legacy_route("register")])
 async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
     service = _get_auth_service(db)
     try:
@@ -163,7 +182,7 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/verify-registration", response_model=AuthResponse)
+@router.post("/verify-registration", response_model=AuthResponse, dependencies=[_legacy_route("register")])
 async def verify_registration(
     request: VerifyRegistrationRequest, db: AsyncSession = Depends(get_db)
 ):
@@ -176,7 +195,7 @@ async def verify_registration(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/resend-otp", response_model=OtpSentResponse)
+@router.post("/resend-otp", response_model=OtpSentResponse, dependencies=[_legacy_route("register")])
 async def resend_otp(
     request: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)
 ):
@@ -188,7 +207,7 @@ async def resend_otp(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/login", response_model=AuthResponse)
+@router.post("/login", response_model=AuthResponse, dependencies=[_legacy_route("login")])
 async def login(
     request: LoginRequest,
     http_request: Request,
@@ -247,7 +266,7 @@ async def login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
 
-@router.post("/forgot-password", response_model=OtpSentResponse)
+@router.post("/forgot-password", response_model=OtpSentResponse, dependencies=[_legacy_route("reset")])
 async def forgot_password(
     request: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)
 ):
@@ -259,7 +278,7 @@ async def forgot_password(
     return OtpSentResponse(**data)
 
 
-@router.post("/verify-otp", response_model=ResetTokenResponse)
+@router.post("/verify-otp", response_model=ResetTokenResponse, dependencies=[_legacy_route("reset")])
 async def verify_otp(
     request: VerifyOtpRequest, db: AsyncSession = Depends(get_db)
 ):
@@ -273,7 +292,7 @@ async def verify_otp(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/reset-password", response_model=AuthResponse)
+@router.post("/reset-password", response_model=AuthResponse, dependencies=[_legacy_route("reset")])
 async def reset_password(
     request: ResetPasswordRequest, db: AsyncSession = Depends(get_db)
 ):
@@ -311,7 +330,7 @@ async def change_password(
     }
 
 
-@router.post("/email-change-otp")
+@router.post("/email-change-otp", dependencies=[_legacy_route("email_change")])
 async def email_change_otp(
     user_id: UUID = Depends(get_current_user_uuid),
     db: AsyncSession = Depends(get_db),
@@ -338,7 +357,7 @@ async def email_change_otp(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/email-change-verify")
+@router.post("/email-change-verify", dependencies=[_legacy_route("email_change")])
 async def email_change_verify(
     request: EmailChangeVerifyRequest,
     user_id: UUID = Depends(get_current_user_uuid),
@@ -359,7 +378,7 @@ async def email_change_verify(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/firebase", response_model=AuthResponse)
+@router.post("/firebase", response_model=AuthResponse, dependencies=[_legacy_route("firebase")])
 async def firebase_login(request: FirebaseAuthRequest, http_request: Request, db: AsyncSession = Depends(get_db)):
     service = _get_auth_service(db)
     info = _client_info(http_request)

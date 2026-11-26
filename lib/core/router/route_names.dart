@@ -7,6 +7,15 @@ class RouteNames {
   static const String register = '/register';
   static const String verifyEmail = '/verify-email';
   static const String forgotPassword = '/forgot-password';
+  // ── Phone-first sign-in (auth2) ──
+  static const String authOtp = '/auth/otp';
+  static const String verifyDevice = '/auth/verify-device';
+  static const String socialPhone = '/auth/social-phone';
+  static const String resetPassword = '/auth/reset-password';
+  // ── Trusted devices / security (authenticated) ──
+  static const String securityDevices = '/security/devices';
+  static const String securityApprovals = '/security/approvals';
+  static const String changePhone = '/security/change-phone';
   static const String changePassword = '/change-password';
   static const String chooseUsage = '/choose-usage';
   static const String maintenance = '/maintenance';

@@ -6525,5 +6525,10 @@
   "saraSmartNotifTime": "وقت الإشعار اليومي",
   "saraSmartNotifTimeDesc": "وقت الإشعار اليومي.",
   "saraSmartNotifAuto": "تلقائي ({time})",
-  "saraSmartNotifUseAuto": "استخدم الوقت التلقائي"
+  "saraSmartNotifUseAuto": "استخدم الوقت التلقائي",
+  "pinPasswordBody": "أدخل كلمة مرور حسابك لتأكيد أنك صاحب الحساب، ثم اختر رمزًا جديدًا لقفل التطبيق.",
+  "pinPasswordLabel": "كلمة مرور الحساب",
+  "pinPasswordWrong": "كلمة المرور غير صحيحة",
+  "pinPasswordNotSet": "حسابك بدون كلمة مرور. سجّل الخروج ثم ادخل مرة أخرى لإعادة ضبط الرمز.",
+  "pinPasswordContinue": "متابعة"
 }

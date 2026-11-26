@@ -22,6 +22,7 @@ import '../../../../shared/widgets/two_tone_icon.dart';
 import '../../../../shared/widgets/two_tone_icons.dart';
 import '../../data/models/session_model.dart';
 import '../providers/auth_provider.dart';
+import '../../auth2/auth2_strings.dart' show a2;
 import '../../../../core/utils/time_format.dart';
 
 /// Default device cap when an older server does not report one.
@@ -482,6 +483,8 @@ class _SessionsPageState extends ConsumerState<SessionsPage> {
                       _buildSummary(),
                       const SizedBox(height: 14),
                       for (final s in ordered) _buildSessionCard(s),
+                      const SizedBox(height: 4),
+                      _buildTrustedDevicesLink(),
                     ],
                   ),
                 ),
@@ -518,6 +521,29 @@ class _SessionsPageState extends ConsumerState<SessionsPage> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// Trusted devices (auth2): primary device, approvals, rename/revoke,
+  /// transfer primary — the device-key side of the same account devices.
+  Widget _buildTrustedDevicesLink() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: AppColors.surface,
+        borderRadius: AppRadius.mdBorder,
+        child: ListTile(
+          key: const Key('trustedDevicesLink'),
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.mdBorder),
+          leading: const Icon(Icons.verified_user_outlined, color: AppColors.primary),
+          title: Text(a2(context, 'devicesTitle'),
+              style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w700)),
+          subtitle: Text(a2(context, 'devicesSubtitle'),
+              style: const TextStyle(fontFamily: 'Cairo', fontSize: 11.5)),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => context.push(RouteNames.securityDevices),
+        ),
       ),
     );
   }

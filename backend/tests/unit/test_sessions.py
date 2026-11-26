@@ -43,7 +43,12 @@ PASSWORD = "S3ssions-Test!"
 
 
 @pytest_asyncio.fixture()
-async def client(tmp_path):
+async def client(tmp_path, monkeypatch):
+    # These tests drive the legacy email login, disabled (410) by default
+    # since auth v2; keep exercising the shared session machinery behind it.
+    from app.core.config import settings as _settings
+
+    monkeypatch.setattr(_settings, "AUTH_LEGACY_EMAIL_ROUTES", "all")
     user_id = uuid4()
     org_id = uuid4()
     email = f"sess_{user_id.hex[:8]}@example.com"

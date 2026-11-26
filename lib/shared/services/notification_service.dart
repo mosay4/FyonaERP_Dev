@@ -335,6 +335,48 @@ class NotificationService {
     );
   }
 
+  /// Sign-in approval alert on the trusted device. The text is GENERIC and
+  /// never contains the code; on Android the lock screen hides it
+  /// (VISIBILITY_PRIVATE), on iOS the system preview setting applies.
+  Future<void> showSecurityNotification({
+    required String title,
+    required String body,
+    required String payload,
+  }) async {
+    if (!_initialized) await init();
+    final androidDetails = AndroidNotificationDetails(
+      'suggestions_channel',
+      AppLocalizations.t('notifChannelSuggestName'),
+      channelDescription: AppLocalizations.t('notifChannelSuggestDesc'),
+      importance: Importance.high,
+      priority: Priority.high,
+      autoCancel: true,
+      icon: 'ic_launcher',
+      color: const Color(0xFF000000),
+      sound: const RawResourceAndroidNotificationSound('sound_1'),
+      visibility: NotificationVisibility.private,
+      category: AndroidNotificationCategory.status,
+      playSound: true,
+      enableVibration: true,
+    );
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+      sound: 'sound_1.mp3',
+    );
+    await _plugin.show(
+      id: _nextId++,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(
+        android: androidDetails,
+        iOS: iosDetails,
+      ),
+      payload: payload,
+    );
+  }
+
   /// Taps that arrive before the navigator exists (cold start) are queued
   /// and flushed once the app is ready — tapping never silently dies.
   final List<String> _pendingTapPayloads = [];

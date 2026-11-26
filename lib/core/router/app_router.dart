@@ -37,7 +37,13 @@ import '../../features/auth/presentation/pages/reentry_page.dart';
 import '../../features/splash/presentation/brand_entry_view.dart';
 import '../../features/splash/presentation/brand_handoff_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
-import '../../features/auth/presentation/pages/verify_email_page.dart';
+import '../../features/auth/presentation/pages/otp_page.dart';
+import '../../features/auth/presentation/pages/verify_device_page.dart';
+import '../../features/auth/presentation/pages/social_phone_page.dart';
+import '../../features/auth/presentation/pages/reset_password_page.dart';
+import '../../features/auth/auth2/security/approvals_page.dart';
+import '../../features/auth/auth2/security/change_phone_page.dart';
+import '../../features/auth/auth2/security/devices_page.dart';
 import '../../features/auth/presentation/pages/forgot_password_page.dart';
 import '../../features/auth/presentation/pages/change_password_page.dart';
 import '../../features/auth/presentation/pages/choose_usage_page.dart';
@@ -300,7 +306,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           state.matchedLocation == RouteNames.login ||
           state.matchedLocation == RouteNames.register ||
           state.matchedLocation == RouteNames.verifyEmail ||
-          state.matchedLocation == RouteNames.forgotPassword;
+          state.matchedLocation == RouteNames.forgotPassword ||
+          state.matchedLocation == RouteNames.authOtp ||
+          state.matchedLocation == RouteNames.verifyDevice ||
+          state.matchedLocation == RouteNames.socialPhone ||
+          state.matchedLocation == RouteNames.resetPassword;
       final isSetupRoute =
           state.matchedLocation == RouteNames.chooseUsage ||
           state.matchedLocation == '/account-entry' ||
@@ -710,15 +720,54 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         name: 'register',
         builder: (_, _) => const RegisterPage(),
       ),
+      // E-mail verification no longer exists: the old path lands on the
+      // phone OTP screen (which sends back to login without a challenge).
       GoRoute(
         path: RouteNames.verifyEmail,
         name: 'verifyEmail',
-        builder: (_, _) => const VerifyEmailPage(),
+        redirect: (_, _) => RouteNames.authOtp,
       ),
       GoRoute(
         path: RouteNames.forgotPassword,
         name: 'forgotPassword',
         builder: (_, _) => const ForgotPasswordPage(),
+      ),
+      GoRoute(
+        path: RouteNames.authOtp,
+        name: 'authOtp',
+        builder: (_, _) => const OtpPage(),
+      ),
+      GoRoute(
+        path: RouteNames.verifyDevice,
+        name: 'verifyDevice',
+        builder: (_, _) => const VerifyDevicePage(),
+      ),
+      GoRoute(
+        path: RouteNames.socialPhone,
+        name: 'socialPhone',
+        builder: (_, _) => const SocialPhonePage(),
+      ),
+      GoRoute(
+        path: RouteNames.resetPassword,
+        name: 'resetPassword',
+        builder: (_, _) => const ResetPasswordPage(),
+      ),
+      // Trusted devices / sign-in approvals / phone change (signed in).
+      GoRoute(
+        path: RouteNames.securityDevices,
+        name: 'securityDevices',
+        builder: (_, _) => const DevicesPage(),
+      ),
+      GoRoute(
+        path: RouteNames.securityApprovals,
+        name: 'securityApprovals',
+        builder: (_, state) =>
+            ApprovalsPage(focusId: state.uri.queryParameters['id']),
+      ),
+      GoRoute(
+        path: RouteNames.changePhone,
+        name: 'changePhone',
+        builder: (_, _) => const ChangePhonePage(),
       ),
       GoRoute(
         path: RouteNames.chooseUsage,

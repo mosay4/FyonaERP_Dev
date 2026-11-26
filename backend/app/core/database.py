@@ -198,6 +198,10 @@ async def init_db() -> None:
                 pass
         except Exception:  # noqa: BLE001
             pass
+    # Auth v2 columns on an existing users table (create_all adds no columns).
+    from .auth2_schema import install as _install_auth2
+
+    await _install_auth2(engine)
 
 
 async def close_db() -> None:

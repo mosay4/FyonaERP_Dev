@@ -14,6 +14,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/phone_format.dart';
 import '../../../../features/personal/data/merchant_api.dart';
 import '../../../../core/router/route_names.dart';
+import '../../../auth/auth2/auth2_strings.dart' show a2;
 import '../../../../core/services/connectivity_service.dart';
 import '../../../../core/services/sync_engine.dart';
 import '../../../../core/services/currency/money_format_service.dart';
@@ -1230,7 +1231,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     final hasPhone = phoneDisplay.isNotEmpty;
     return GestureDetector(
       onTap: () async {
-        await context.push(RouteNames.phoneEntry);
+        // A verified number is changed through the OTP flow (new number
+        // verified first); only a missing number uses the entry page.
+        await context.push(
+            hasPhone ? RouteNames.changePhone : RouteNames.phoneEntry);
         if (mounted) setState(() {});
       },
       child: Container(
@@ -2074,7 +2078,27 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           color: AppColors.textPrimary,
         ),
       ),
-      children: [_buildChangePwdTile(), _buildChangeEmailTile()],
+      // Phone-first accounts: e-mail change is gone; phone change and the
+      // trusted devices live here instead (docs/AUTH_PLAN.md).
+      children: [
+        _buildChangePwdTile(),
+        _settingsTile(
+          HugeIcons.strokeRoundedSmartPhone01,
+          a2(context, 'changePhoneTile'),
+          AppColors.primary,
+          trailing: const Icon(Icons.chevron_right,
+              size: 18, color: AppColors.textDisabled),
+          onTap: () => context.push(RouteNames.changePhone),
+        ),
+        _settingsTile(
+          HugeIcons.strokeRoundedSecurityLock,
+          a2(context, 'devicesTile'),
+          AppColors.info,
+          trailing: const Icon(Icons.chevron_right,
+              size: 18, color: AppColors.textDisabled),
+          onTap: () => context.push(RouteNames.securityDevices),
+        ),
+      ],
     );
   }
 
@@ -3049,6 +3073,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     });
   }
 
+  // ignore: unused_element
   Widget _buildChangeEmailTile() {
     final l10n = AppLocalizations.of(context);
     return ExpansionTile(

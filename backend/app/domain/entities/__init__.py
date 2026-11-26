@@ -21,6 +21,7 @@ from app.domain.entities.admin_entities import (
     TrashItem,
 )
 from app.domain.entities.suggestions_entities import Suggestion, SuggestionReply
+from app.domain.entities import auth2_entities as _auth2_entities  # noqa: F401  (auth v2 tables)
 from app.domain.entities.employee_workspace_entities import (EmployeeWorkspace, EmployeeInvitation, EmployeeSalaryPayment, EmployeeDebt)
 
 __all__ = [

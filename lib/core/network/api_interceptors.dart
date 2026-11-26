@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../storage/secure_storage.dart';
+import '../security/device_identity.dart';
 import '../../features/personal/data/ledger/personal_local_cutover.dart';
 
 /// Real device identity for session recognition (cached after first read so
@@ -159,6 +160,11 @@ class AuthInterceptor extends Interceptor {
       options.headers['X-App-Version'] = appVersion;
     }
     options.headers['X-Device-Platform'] = DeviceIdentity.platform;
+    // Trusted-device identity (auth2): stable random id per install.
+    final deviceId = DeviceKeyIdentity.cachedDeviceId;
+    if (deviceId != null && deviceId.isNotEmpty) {
+      options.headers['X-Device-Id'] = deviceId;
+    }
     // Device-only Personal builds say so: the server answers older builds
     // «update the app» instead of letting them sync Personal data.
     if (PersonalLocalMode.active) {

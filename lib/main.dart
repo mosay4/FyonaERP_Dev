@@ -16,6 +16,8 @@ import 'core/config/directory_pilot_build.dart';
 import 'core/localization/app_localizations.dart';
 import 'core/network/api_client.dart';
 import 'core/network/api_interceptors.dart';
+import 'core/security/device_identity.dart';
+import 'features/auth/auth2/auth2_strings.dart' show auth2T;
 import 'core/startup/startup_logger.dart';
 import 'core/startup/retired_business_storage.dart';
 import 'core/services/fcm_service.dart';
@@ -52,8 +54,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     final data = message.data;
     if ((data['type']?.toString() ?? '') == 'avatar_updated') return;
     final notification = message.notification;
-    final actionPayload =
-        (data['action_payload'] ?? 'suggestions').toString();
+    // auth2 sign-in approval: generic text only (never the code), opens the
+    // approval screen; lock screen shows it as private.
+    final isApproval = (data['type']?.toString() ?? '') == 'login_approval' &&
+        (data['approval_id']?.toString() ?? '').isNotEmpty;
+    final actionPayload = isApproval &&
+            (data['action_payload']?.toString() ?? '').isEmpty
+        ? FcmService.approvalRoute(data['approval_id'].toString())
+        : (data['action_payload'] ?? 'suggestions').toString();
     final notifTitle = (notification?.title ?? '').trim();
     final notifBody = (notification?.body ?? '').trim();
     final dataTitle = (data['title']?.toString() ?? '').trim();
@@ -62,8 +70,12 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     if (body.isEmpty) body = bodyEn;
     // Prefer OS notification strings when present (notification{} shape);
     // fall back to data[] (data-only shape).
-    final title = notifTitle.isNotEmpty ? notifTitle : dataTitle;
+    var title = notifTitle.isNotEmpty ? notifTitle : dataTitle;
     if (notifBody.isNotEmpty) body = notifBody;
+    if (isApproval && title.isEmpty && body.isEmpty) {
+      title = auth2T('approvalNotifTitle');
+      body = auth2T('approvalNotifBody');
+    }
     if (title.isEmpty && body.isEmpty) return;
     // Same persisted event-identity as the foreground bridge + poll: an
     // event already on the tray is never painted twice.
@@ -110,7 +122,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         id: key.hashCode & 0x7fffffff,
         title: title,
         body: body,
-        notificationDetails: const NotificationDetails(
+        notificationDetails: NotificationDetails(
           android: AndroidNotificationDetails(
             'suggestions_channel',
             'اقتراحات',
@@ -119,9 +131,11 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
             priority: Priority.high,
             autoCancel: true,
             icon: 'ic_launcher',
-            color: Color(0xFF000000),
-            sound: RawResourceAndroidNotificationSound('sound_1'),
-            visibility: NotificationVisibility.public,
+            color: const Color(0xFF000000),
+            sound: const RawResourceAndroidNotificationSound('sound_1'),
+            visibility: isApproval
+                ? NotificationVisibility.private
+                : NotificationVisibility.public,
             category: AndroidNotificationCategory.message,
             playSound: true,
             enableVibration: true,
@@ -233,6 +247,9 @@ Future<void> main() async {
   // Non-critical: warm the real device identity for session recognition
   // (model/OS headers). Cached on first read; requests never wait for it.
   DeviceIdentity.warm();
+  // Trusted-device key + X-Device-Id (Keystore / Secure Enclave), warmed in
+  // the background so the first auth2 call does not wait for key creation.
+  unawaited(DeviceKeyIdentity.current.deviceId().then((_) {}, onError: (_) {}));
 
   // Server address override (any LAN device can point the app at the
   // backend): applied before runApp so the first Dio uses it. Fast,

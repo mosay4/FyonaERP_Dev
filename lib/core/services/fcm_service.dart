@@ -17,6 +17,8 @@ import 'package:fyona_flutter/features/profile/presentation/providers/avatar_pro
 import 'package:fyona_flutter/features/subscription/presentation/providers/subscription_providers.dart';
 import 'package:fyona_flutter/shared/services/notification_service.dart';
 import '../../features/personal/data/active_chat.dart';
+import '../../features/auth/auth2/auth2_strings.dart' show auth2T;
+import '../../features/auth/auth2/security/approval_coordinator.dart';
 
 final fcmServiceProvider = Provider<FcmService>((ref) => FcmService(ref));
 
@@ -159,6 +161,31 @@ class FcmService {
   /// Silent data event sent by the backend after an admin plan change.
   static const String subscriptionChangedEvent = 'subscription_changed';
 
+  /// auth2: a new device asks the trusted device for its sign-in code.
+  static const String loginApprovalEvent = 'login_approval';
+
+  static String approvalRoute(String approvalId) =>
+      '${RouteNames.securityApprovals}?id=${Uri.encodeQueryComponent(approvalId)}';
+
+  Future<void> _onLoginApproval(Map<String, dynamic> data) async {
+    final id = data['approval_id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    try {
+      await _ref.read(notificationServiceProvider).showSecurityNotification(
+            title: auth2T('approvalNotifTitle'),
+            body: auth2T('approvalNotifBody'),
+            payload: approvalRoute(id),
+          );
+    } catch (_) {}
+    try {
+      _ref.invalidate(unreadCountProvider);
+      _ref.invalidate(notificationListProvider);
+    } catch (_) {}
+    try {
+      await _ref.read(approvalCoordinatorProvider).onPush(id);
+    } catch (_) {}
+  }
+
   /// Pulls the fresh plan everywhere it is shown: status snapshot (profile
   /// card + badges read `plan_name`), plans/invoices, and the cached profile
   /// (`subscriptionPlan` → drawer badge offline fallback). Never throws.
@@ -240,6 +267,12 @@ class FcmService {
       // Admin changed the plan: recolour badge / plan card now (silent).
       if ((data['type']?.toString() ?? '') == subscriptionChangedEvent) {
         await refreshSubscriptionState();
+        return;
+      }
+      // Sign-in attempt from a new device: generic notification (never
+      // the code) + the approval popup, which fetches the code itself.
+      if ((data['type']?.toString() ?? '') == loginApprovalEvent) {
+        await _onLoginApproval(data);
         return;
       }
     } catch (_) {}
@@ -349,7 +382,12 @@ class FcmService {
   }
 
   void _navigate(Map<String, dynamic> data) {
-    final payload = (data['action_payload'] ?? 'suggestions').toString();
+    final approvalId = data['approval_id']?.toString() ?? '';
+    final payload = (data['type']?.toString() == loginApprovalEvent &&
+            approvalId.isNotEmpty &&
+            (data['action_payload']?.toString() ?? '').isEmpty)
+        ? approvalRoute(approvalId)
+        : (data['action_payload'] ?? 'suggestions').toString();
     final ctx = rootNavigatorKey.currentContext;
     if (ctx == null) {
       if (!_pendingPayloads.contains(payload)) _pendingPayloads.add(payload);

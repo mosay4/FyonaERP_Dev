@@ -59,6 +59,9 @@ class AuthResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: "UserResponse"
+    session_id: Optional[str] = None
+    # Auth v2: {device_id, is_primary, trusted} of the signed-in device.
+    device: Optional[dict] = None
 
     @computed_field
     @property
@@ -74,6 +77,7 @@ class UserResponse(BaseModel):
     phone: Optional[str]
     phone_masked: Optional[str] = None
     phone_complete: bool = False
+    phone_verified: bool = False
     role: str
     avatar: Optional[str]
     username: Optional[str] = None

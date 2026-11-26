@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from typing import Optional, List
 
 
@@ -106,6 +106,99 @@ class Settings(BaseSettings):
     OTP_MAX_ATTEMPTS: int = 5
     OTP_COOLDOWN_SECONDS: int = 60
     PENDING_REGISTRATION_TTL_MINUTES: int = 15
+
+    # ── Auth v2 (phone-first, WhatsApp-first OTP, trusted devices) ──
+    # Legacy email routes under /auth are disabled (410). Comma list of the
+    # legacy routes that stay enabled: "" (none), "login" (QA scripts with
+    # seeded fake users) or "all" (old unit tests).
+    AUTH_LEGACY_EMAIL_ROUTES: str = ""
+    # OTP engine timings / limits.
+    AUTH_OTP_TTL_SECONDS: int = 300
+    AUTH_OTP_MAX_ATTEMPTS: int = 5
+    AUTH_OTP_MAX_RESENDS: int = 3
+    AUTH_OTP_RESEND_COOLDOWNS: str = "30,60,120"
+    # Seconds after the WhatsApp send was accepted with no 'delivered'
+    # receipt before the SMS fallback becomes allowed (signup/phone_change/
+    # password_reset only; never for new_device).
+    AUTH_OTP_DELIVERY_DEADLINE_SECONDS: int = 25
+    # Automatic SMS fallback at the deadline. Only active when the WhatsApp
+    # webhook secret is configured (without delivery receipts every message
+    # would look undelivered); the manual "send via SMS" stays available.
+    AUTH_OTP_AUTO_SMS_FALLBACK: bool = True
+    AUTH_OTP_WHATSAPP_MAX_ATTEMPTS: int = 3
+    AUTH_OTP_WORKER_INTERVAL_SECONDS: float = 1.0
+    # Caps: "hourly,daily" sends per phone / IP / device / account.
+    AUTH_OTP_CAP_PHONE: str = "5,10"
+    AUTH_OTP_CAP_IP: str = "10,30"
+    AUTH_OTP_CAP_DEVICE: str = "6,15"
+    AUTH_OTP_CAP_ACCOUNT: str = "6,15"
+    # Cost guard (USD). Admin overrides live in the otp_budgets table.
+    AUTH_OTP_BUDGET_SMS_DAILY_USD: float = 0.30
+    AUTH_OTP_BUDGET_SMS_MONTHLY_USD: float = 3.00
+    AUTH_OTP_BUDGET_WHATSAPP_DAILY_USD: float = 0.50
+    AUTH_OTP_BUDGET_WHATSAPP_MONTHLY_USD: float = 5.00
+    AUTH_OTP_BUDGET_GLOBAL_DAILY_USD: float = 0.80
+    AUTH_OTP_BUDGET_GLOBAL_MONTHLY_USD: float = 8.00
+    # Per-message estimates; JSON {"SA": 0.0107, ...} per ISO country.
+    AUTH_OTP_COST_WHATSAPP_DEFAULT_USD: float = 0.03
+    AUTH_OTP_COST_WHATSAPP_BY_COUNTRY: str = ""
+    AUTH_OTP_COST_SMS_DEFAULT_USD: float = 0.08
+    AUTH_OTP_COST_SMS_BY_COUNTRY: str = ""
+    AUTH_PASSWORD_MAX_FAILURES_PER_15MIN: int = 8
+    AUTH_PRIMARY_TRANSFER_HOURS: int = 48
+
+    # ── WhatsApp Cloud API (secrets only from the private env file) ──
+    WHATSAPP_ACCESS_TOKEN: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_TOKEN", "META_ACCESS_TOKEN",
+            "META_SYSTEM_USER_TOKEN", "WHATSAPP_SYSTEM_USER_TOKEN"),
+    )
+    WHATSAPP_PHONE_NUMBER_ID: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_PHONE_ID", "META_PHONE_NUMBER_ID"),
+    )
+    WHATSAPP_WABA_ID: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WHATSAPP_WABA_ID", "WHATSAPP_BUSINESS_ACCOUNT_ID", "META_WABA_ID"),
+    )
+    WHATSAPP_VERIFY_TOKEN: Optional[str] = None
+    WHATSAPP_GRAPH_VERSION: str = "v21.0"
+    WHATSAPP_GRAPH_BASE_URL: str = "https://graph.facebook.com"
+    WHATSAPP_TEMPLATE_NAME: str = "fyona_login_code"
+    WHATSAPP_TEMPLATE_LANG_AR: str = "ar"
+    WHATSAPP_TEMPLATE_LANG_EN: str = "en"
+    META_APP_ID: Optional[str] = None
+    META_APP_SECRET: Optional[str] = None
+    # Secret of the Meta app the WABA webhooks are subscribed to (falls back
+    # to META_APP_SECRET).
+    META_WEBHOOK_APP_SECRET: Optional[str] = None
+
+    # ── SMS.to ──
+    SMS_TO_API_KEY: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("SMS_TO_API_KEY", "SMS_API_KEY", "SMS_TOKEN"),
+    )
+    SMS_SENDER_ID: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("SMS_SENDER_ID", "SMS_TO_SENDER_ID", "SMS_SENDER"),
+    )
+    SMS_TO_BASE_URL: str = Field(
+        default="https://api.sms.to",
+        validation_alias=AliasChoices("SMS_TO_BASE_URL", "SMS_BASE_URL"),
+    )
+    # Optional Android SMS Retriever app hash appended to the SMS text.
+    SMS_ANDROID_APP_HASH: Optional[str] = None
+
+    # ── Google / Apple sign-in ──
+    GOOGLE_WEB_CLIENT_ID: str = (
+        "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com")
+    APPLE_TEAM_ID: Optional[str] = None
+    APPLE_KEY_ID: Optional[str] = None
+    APPLE_BUNDLE_ID: str = "com.fyona.erp.fyonaFlutter"
+    APPLE_PRIVATE_KEY_PATH: Optional[str] = None
 
     # ── Logging ──
     LOG_LEVEL: str = "INFO"

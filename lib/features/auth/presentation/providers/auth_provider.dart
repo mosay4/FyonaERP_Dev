@@ -1,5 +1,4 @@
 import 'dart:async';
-import '../../../../core/config/directory_pilot_build.dart';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,6 +20,9 @@ import '../../../../core/database/database_helper.dart';
 import '../../../personal/data/ledger/personal_ledger.dart';
 import '../../../../core/database/providers/database_providers.dart';
 import '../../data/models/auth_response.dart';
+import '../../auth2/auth2_models.dart';
+import '../../auth2/auth2_service.dart';
+import '../../auth2/auth2_strings.dart' show auth2ErrorText, auth2T;
 
 enum AuthStatus { initial, authenticated, unauthenticated, loading, verificationPending, sessionExpired }
 
@@ -113,6 +115,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
   ) : super(const AuthState()) {
     SessionNotifier.onExpired = () {
       unawaited(_handleSessionExpired());
+    };
+    SessionNotifier.onDeviceRevoked = () {
+      unawaited(_handleDeviceRevoked());
     };
     _checkSession();
   }
@@ -329,115 +334,120 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  Future<void> login({
-    required String email,
+  /// Phone + password sign-in (auth2). Returns the server outcome so the
+  /// page can continue to device verification; null on error ([state.error]).
+  /// A trusted device with a valid key proof is signed in directly.
+  Future<Auth2LoginResult?> login({
+    required String phone,
     required String password,
     bool rememberMe = false,
     String? usageMode,
   }) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final response = await _authService.loginWithEmailPassword(
-        email: email,
-        password: password,
-      );
-      await _applyAuthResponse(
-        response,
-        password: password,
-        rememberMe: rememberMe,
-        usageMode: usageMode,
-      );
-      return;
-    } catch (e) {
-      final msg = _toMessage(e);
-      if (msg.contains('تأكيد بريدك الإلكتروني أولاً')) {
-        state = state.copyWith(
-          status: AuthStatus.verificationPending,
-          isLoading: false,
-          pendingVerificationEmail: email,
-          error: msg,
-        );
-        return;
-      }
-      if (DirectoryPilotBuild.enabled) {
-        // QA uses the original email/OTP API only. A wrong password must not
-        // send the tester's credentials to Firebase's external services.
-        state = state.copyWith(
-          status: AuthStatus.unauthenticated,
-          isLoading: false,
-          error: msg,
-        );
-        return;
-      }
-      // Fall back to legacy Firebase email/password login for accounts that
-      // were created before the backend OTP flow existed.
-      try {
-        final fbUser = await _firebaseAuthService.signInWithEmailPassword(
-          email: email,
-          password: password,
-        );
-        if (!fbUser.isEmailVerified) {
-          try {
-            await _firebaseAuthService.resendVerificationEmail();
-          } catch (_) {}
-          state = state.copyWith(
-            status: AuthStatus.verificationPending,
-            isLoading: false,
-            pendingVerificationEmail: email,
-            error: AppLocalizations.t('authErrVerifyEmailFirst', {'email': email}),
-          );
-          return;
-        }
-        final response =
-            await _authService.loginWithFirebase(idToken: fbUser.idToken);
-        await _applyAuthResponse(
-          response,
+      final result =
+          await _ref.read(auth2ServiceProvider).login(phone, password);
+      if (result is Auth2Authenticated) {
+        await completeAuth2(
+          result,
           password: password,
           rememberMe: rememberMe,
           usageMode: usageMode,
         );
-      } catch (e2) {
-        state = state.copyWith(
-          status: AuthStatus.unauthenticated,
-          isLoading: false,
-          error: _toMessage(e2),
-        );
+      } else {
+        state = state.copyWith(isLoading: false, error: null);
       }
-    }
-  }
-
-  Future<void> loginWithGoogle({String? usageMode}) async {
-    if (DirectoryPilotBuild.enabled) return;
-    state = state.copyWith(isLoading: true, error: null);
-    try {
-      final fbUser = await _firebaseAuthService.signInWithGoogle();
-      final response = await _authService.loginWithFirebase(
-        idToken: fbUser.idToken,
-        googleIdToken: fbUser.googleIdToken,
-      );
-      // The usage-mode question is asked ONCE per account (at creation/first
-      // entry): a second device must not re-ask when the account already has
-      // a server-side mode — only a locally-unknown AND server-unknown mode
-      // forces the choose-usage screen. Computed BEFORE applying so the flag
-      // lands in the same state update (no double navigation race).
-      final serverMode = response.user.preferredUsageMode;
-      final needChoice = needsUsageChoice(
-        usageMode: usageMode,
-        savedMode: await _localDataSource.getUsageMode(),
-        serverMode: serverMode,
-      );
-      await _applyAuthResponse(
-        response,
-        usageMode: usageMode,
-        forceUsageChoice: needChoice,
-      );
+      return result;
     } catch (e) {
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
         isLoading: false,
         error: _toMessage(e),
       );
+      return null;
     }
+  }
+
+  /// Google (Android) / Apple (iOS) sign-in through auth2 `/social`.
+  /// Returns null when cancelled or failed ([state.error] set on failure).
+  Future<Auth2LoginResult?> loginWithSocial({
+    required String provider,
+    required String idToken,
+    String? authorizationCode,
+    String? rawNonce,
+    String? fullName,
+  }) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      final result = await _ref.read(auth2ServiceProvider).social(
+            provider: provider,
+            idToken: idToken,
+            authorizationCode: authorizationCode,
+            rawNonce: rawNonce,
+            fullName: fullName,
+          );
+      if (result is Auth2Authenticated) {
+        await completeAuth2(result);
+      } else {
+        state = state.copyWith(isLoading: false, error: null);
+      }
+      return result;
+    } catch (e) {
+      state = state.copyWith(
+        status: AuthStatus.unauthenticated,
+        isLoading: false,
+        error: _toMessage(e),
+      );
+      return null;
+    }
+  }
+
+  /// Persists an auth2 AuthResponse (tokens + user) and enters the app.
+  Future<void> completeAuth2(
+    Auth2Authenticated result, {
+    String? password,
+    bool rememberMe = false,
+    String? usageMode,
+  }) async {
+    final response = result.response;
+    await _localDataSource.saveTokens(response.token);
+    await _localDataSource.saveUser(response.user);
+    // No usage-mode question: entry resolves through /account-entry.
+    await _applyAuthResponse(
+      response,
+      password: password,
+      rememberMe: rememberMe,
+      usageMode: usageMode,
+    );
+  }
+
+  /// The server revoked THIS device (`device_revoked`): its key proofs are
+  /// dead, so nothing on the device can re-enter silently. Wipe tokens and
+  /// every recovery snapshot, then go to the login page.
+  Future<void> _handleDeviceRevoked() async {
+    _sessionPassword = null;
+    try {
+      _ref.read(sessionTimeoutProvider.notifier).unlock();
+    } catch (_) {}
+    try {
+      await _localDataSource.clearAuth();
+    } catch (_) {}
+    try {
+      await _localDataSource.clearBiometricSnapshot();
+    } catch (_) {}
+    try {
+      await _localDataSource.clearUsageMode();
+    } catch (_) {}
+    try {
+      await PersonalLedger.deactivate();
+    } catch (_) {}
+    try {
+      _ref.read(avatarProvider.notifier).clear();
+    } catch (_) {}
+    state = AuthState(
+      status: AuthStatus.unauthenticated,
+      error: auth2T('deviceRevoked'),
+    );
   }
 
   Future<void> _applyAuthResponse(
@@ -492,69 +502,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
     _ref.read(fcmServiceProvider).syncToken();
   }
 
-  Future<void> register({
-    required String email,
-    required String password,
-    required String fullName,
-    String? phone,
-  }) async {
-    state = state.copyWith(isLoading: true, error: null);
-    try {
-      await _authService.register(
-        fullName: fullName,
-        email: email,
-        password: password,
-        phone: phone,
-        preferredUsageMode: 'personal',
-      );
-      state = state.copyWith(
-        status: AuthStatus.verificationPending,
-        isLoading: false,
-        pendingVerificationEmail: email,
-        error: null,
-      );
-    } catch (e) {
-      state = state.copyWith(
-        status: AuthStatus.unauthenticated,
-        isLoading: false,
-        error: _toMessage(e),
-      );
-    }
-  }
-
-  /// Verifies the signup OTP sent to [pendingVerificationEmail] and completes
-  /// the registration. Returns an error message on failure.
-  Future<String?> verifyRegistration(String otp) async {
-    final email = state.pendingVerificationEmail;
-    if (email == null || email.isEmpty) {
-      return AppLocalizations.t('authErrSessionExpired');
-    }
-    try {
-      final response = await _authService.verifyRegistration(
-        email: email,
-        otp: otp.trim(),
-      );
-      await _applyAuthResponse(response, usageMode: 'personal');
-      return null;
-    } catch (e) {
-      return _toMessage(e);
-    }
-  }
-
-  Future<String?> resendVerificationEmail() async {
-    final email = state.pendingVerificationEmail;
-    if (email == null || email.isEmpty) {
-      return AppLocalizations.t('authErrNoPendingEmail');
-    }
-    try {
-      await _authService.resendRegistrationOtp(email);
-      return null;
-    } catch (e) {
-      return _toMessage(e);
-    }
-  }
-
   String _toMessage(Object e) {
+    if (e is Auth2Exception) return auth2ErrorText(e);
     String msg = firebaseErrorMessage(e);
     msg = msg.replaceFirst('ApiException: ', '');
     msg = msg.replaceAll(RegExp(r'\s*\(status: [\dnull]+\)'), '');
@@ -797,8 +746,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
         state = state.copyWith(isLoading: false);
         return AppLocalizations.t('authErrBioLogin');
       }
+      if (!email.startsWith('+')) {
+        // Legacy e-mail credentials: e-mail sign-in no longer exists.
+        state = state.copyWith(isLoading: false);
+        return AppLocalizations.t('authErrBioLogin');
+      }
       final savedMode = await _localDataSource.getUsageMode();
-      await login(email: email, password: password, usageMode: savedMode);
+      await login(phone: email, password: password, usageMode: savedMode);
       if (!state.isAuthenticated) {
         return state.error ?? AppLocalizations.t('authErrBioLogin');
       }
@@ -822,8 +776,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
           password.isEmpty) {
         return AppLocalizations.t('authErrBioLogin');
       }
+      if (!email.startsWith('+')) return AppLocalizations.t('authErrBioLogin');
       final savedMode = await _localDataSource.getUsageMode();
-      await login(email: email, password: password, usageMode: savedMode);
+      await login(phone: email, password: password, usageMode: savedMode);
       if (!state.isAuthenticated) {
         return state.error ?? AppLocalizations.t('authErrBioLogin');
       }

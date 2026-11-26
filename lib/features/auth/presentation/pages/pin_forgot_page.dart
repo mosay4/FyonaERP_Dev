@@ -7,10 +7,13 @@ import '../../../../core/security/app_pin_crypto.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../di/auth_providers.dart' hide authProvider;
 import '../providers/auth_provider.dart';
+import '../../auth2/auth2_models.dart';
+import '../../auth2/auth2_service.dart';
 import '../widgets/app_pin_pad.dart';
 import 'package:fyona_flutter/shared/widgets/fyona_text_field.dart';
 
-/// Forgot-PIN flow: email → emailed code → new 5-digit PIN (create+confirm).
+/// Forgot-PIN flow: account password (server-confirmed from this trusted
+/// device, no message sent) → new 5-digit PIN (create+confirm).
 ///
 /// Uses the `pin` purpose of the email-code channel: it only proves the
 /// address is yours and never touches the account password, so accounts
@@ -36,7 +39,7 @@ class _PinForgotPageState extends ConsumerState<PinForgotPage> {
   @override
   void initState() {
     super.initState();
-    _emailCtrl.text = ref.read(authProvider).user?.email ?? '';
+    _emailCtrl.text = '';
   }
 
   @override
@@ -58,26 +61,37 @@ class _PinForgotPageState extends ConsumerState<PinForgotPage> {
 
   Future<void> _sendCode() async {
     final l10n = AppLocalizations.of(context);
-    final email = _emailCtrl.text.trim();
-    if (email.isEmpty || !email.contains('@')) {
-      _snack(l10n.translate('pinEmailInvalid'));
+    final password = _emailCtrl.text;
+    if (password.isEmpty) {
+      _snack(l10n.translate('pinPasswordLabel'));
       return;
     }
     setState(() => _sending = true);
-    // Purpose `pin`: ownership check for the APP LOCK only. It must never
-    // hit the account-password rules — Google-signed-in accounts have no
-    // password and are accepted here exactly like email accounts.
-    final err = await ref.read(authProvider.notifier).forgotPassword(
-          email,
-          purpose: 'pin',
-        );
+    // Ownership check for the APP LOCK only: the account password, confirmed
+    // by the server from this trusted device. No message is sent (free).
+    String? err;
+    try {
+      await ref.read(auth2ServiceProvider).reauth(password);
+    } on Auth2Exception catch (e) {
+      err = e.code == 'password_not_set'
+          ? l10n.translate('pinPasswordNotSet')
+          : e.isNetwork
+              ? l10n.translate('noInternet')
+              : l10n.translate('pinPasswordWrong');
+    } catch (_) {
+      err = l10n.translate('pinPasswordWrong');
+    }
     if (!mounted) return;
     setState(() => _sending = false);
     if (err != null) {
       _snack(err);
       return;
     }
-    setState(() => _step = 1);
+    setState(() {
+      _step = 2;
+      _pinSubStep = 0;
+      _first = '';
+    });
   }
 
   Future<void> _verifyCode() async {
@@ -229,24 +243,25 @@ class _PinForgotPageState extends ConsumerState<PinForgotPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(l10n.translate('pinForgotBody'),
+        Text(l10n.translate('pinPasswordBody'),
             style: TextStyle(
                 fontFamily: 'Cairo',
                 fontSize: R.fontSize(context, 14),
                 color: AppColors.textSecondary,
                 height: 1.7)),
         const SizedBox(height: 20),
-        _fieldLabel(l10n.translate('pinEmailLabel')),
+        _fieldLabel(l10n.translate('pinPasswordLabel')),
         FyonaTextField(
           controller: _emailCtrl,
-          keyboardType: TextInputType.emailAddress,
+          obscureText: true,
+          keyboardType: TextInputType.visiblePassword,
           style: TextStyle(
               fontFamily: 'Cairo', color: AppColors.textPrimary),
-          decoration: _decoration(l10n.translate('pinEmailHint')),
+          decoration: _decoration(l10n.translate('pinPasswordLabel')),
         ),
         const SizedBox(height: 20),
         _primaryButton(
-          l10n.translate('pinSendCode'),
+          l10n.translate('pinPasswordContinue'),
           _sending ? null : _sendCode,
           busy: _sending,
         ),

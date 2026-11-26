@@ -6422,5 +6422,10 @@
   "saraSmartNotifTime": "Daily notification time",
   "saraSmartNotifTimeDesc": "Daily notification time.",
   "saraSmartNotifAuto": "Auto ({time})",
-  "saraSmartNotifUseAuto": "Use automatic time"
+  "saraSmartNotifUseAuto": "Use automatic time",
+  "pinPasswordBody": "Enter your account password to confirm it is you, then choose a new app lock code.",
+  "pinPasswordLabel": "Account password",
+  "pinPasswordWrong": "Wrong password",
+  "pinPasswordNotSet": "Your account has no password. Sign out and sign in again to reset the code.",
+  "pinPasswordContinue": "Continue"
 }

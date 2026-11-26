@@ -86,10 +86,14 @@ async def seed():
             (own, org, 'owner', 'business'), (staff, two, 'staff', 'personal')
         ), start=1):
             credentials = fs[profile]
+            phone = credentials.get('phone') or f'+1202555010{index}'
+            # Seeded fake users own VERIFIED phones (auth v2) and keep their
+            # email + password for the QA scripts (legacy /auth/login stays
+            # enabled for them via AUTH_LEGACY_EMAIL_ROUTES=login).
             db.add(User(id=uid, organization_id=oid, full_name='QA ' + profile,
-                email=credentials['email'], phone=f'+1202555010{index}',
-                phone_country='US', email_verified=True, role='owner',
-                password_hash=hash_password(credentials['password']),
+                email=credentials['email'], phone=phone, phone_e164=phone,
+                phone_verified_at=now, phone_country='US', email_verified=True,
+                role='owner', password_hash=hash_password(credentials['password']),
                 preferred_usage_mode=mode))
         await db.flush()
         pilot = UUID(fs['branch'])
@@ -155,6 +159,9 @@ if qa_directory.INVITES:
             await init_db()
         await qa_directory.install(engine)
         await qa_business_ledger.install(engine)
+        # Auth v2 tables/columns (init_db is skipped on a kept sandbox).
+        from app.core import auth2_schema
+        await auth2_schema.install(engine)
         if os.environ.get('FYONA_QA_CASH_RELAY') == '1':
             from app.domain.services.qa_cash_admission import orders
             async with engine.begin() as connection:
@@ -217,7 +224,7 @@ async def qa_private_accounts_only(request, call_next):
                         '/api/v1/auth/forgot', '/api/v1/auth/reset',
                         '/api/v1/auth/email-change',
                         '/api/v1/auth/verify-otp', '/api/v1/auth/google',
-                        '/api/v1/auth/firebase')):
+                        '/api/v1/auth/firebase', '/api/v1/auth2/admin')):
         return JSONResponse({'detail': 'Not found'}, status_code=404)
     return await call_next(request)
 
@@ -451,6 +458,26 @@ def main():
         env.setdefault("HTTPS_PROXY", "http://127.0.0.1:18990")
         if env["HTTPS_PROXY"] == "http://127.0.0.1:1":
             env["HTTPS_PROXY"] = "http://127.0.0.1:18990"
+    # Phone sign-in providers (WhatsApp Cloud API, SMS.to, Sign in with
+    # Apple): private state file, whitelisted names only, exactly like
+    # stripe.env. The Apple .p8 key stays a file next to it (path only).
+    providers_env = root / "auth-providers.env"
+    if managed and providers_env.is_file():
+        for line in providers_env.read_text().splitlines():
+            name, _, value = line.partition("=")
+            name = name.strip()
+            if re.fullmatch(r"WHATSAPP_[A-Z_]+|META_[A-Z_]+|SMS_[A-Z_]+|APPLE_[A-Z_]+",
+                            name) and value.strip():
+                env[name] = value.strip()
+        env.setdefault("HTTPS_PROXY", "http://127.0.0.1:18990")
+        if env["HTTPS_PROXY"] == "http://127.0.0.1:1":
+            env["HTTPS_PROXY"] = "http://127.0.0.1:18990"
+    apple_key = root / "apple-authkey.p8"
+    if managed and apple_key.is_file():
+        env["APPLE_PRIVATE_KEY_PATH"] = str(apple_key)
+    # Seeded fake users keep signing in by email for the QA scripts; every
+    # other email route answers 410 (auth v2 is phone-first).
+    env["AUTH_LEGACY_EMAIL_ROUTES"] = "login"
     # Voice messages are turned into text on this server (Whisper, offline
     # model folder; no download at run time).
     stt_model = Path("/opt/fyona-directory-qa/sara-stt/model-small")
@@ -562,12 +589,18 @@ def main():
         fixture = json.loads(fixture_path.read_text())
         assert fixture["base"] == public_base
         assert all(fixture[key] == value for key, value in PILOT.items())
+        if any("phone" not in fixture[role] for role in ("owner", "staff")):
+            for index, role in enumerate(("owner", "staff"), start=1):
+                fixture[role].setdefault("phone", f"+1202555010{index}")
+            fixture_path.write_text(json.dumps(fixture, indent=2) + "\n")
     else:
         fixture = {
             **PILOT,
             "base": public_base,
             **{role: {"email": f"directory-{role}@example.test",
-                      "password": "Aa1!" + secrets.token_hex(10)} for role in ("owner", "staff")},
+                      "phone": f"+1202555010{index}",
+                      "password": "Aa1!" + secrets.token_hex(10)}
+               for index, role in enumerate(("owner", "staff"), start=1)},
         }
         fixture_path.write_text(json.dumps(fixture, indent=2) + "\n")
     if not persistent or not (root / "seed-initialized").is_file():

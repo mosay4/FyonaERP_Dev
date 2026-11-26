@@ -20,6 +20,10 @@ class AuthForcedDark {
     RouteNames.register,
     RouteNames.verifyEmail,
     RouteNames.forgotPassword,
+    RouteNames.authOtp,
+    RouteNames.verifyDevice,
+    RouteNames.socialPhone,
+    RouteNames.resetPassword,
   };
 
   static bool isForcedPath(String path) => paths.contains(path);

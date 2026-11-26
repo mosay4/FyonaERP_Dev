@@ -204,6 +204,9 @@ async def send_email(
 
     Detailed per-step diagnostics are logged so failures are never silent.
     """
+    if (to or "").strip().lower().endswith(".fyona.invalid"):
+        # Phone-first accounts have no mailbox (internal placeholder).
+        return False
     if not email_config.get("is_configured"):
         logger.warning(
             "email_not_configured",

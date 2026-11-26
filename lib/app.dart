@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'features/auth/auth2/security/approval_coordinator.dart';
 import 'package:flutter/material.dart';
 import 'core/services/currency/currency_engine.dart';
 import 'shared/widgets/premium_switch_transition.dart';
@@ -215,6 +216,12 @@ class _AppLockOverlayState extends ConsumerState<_AppLockOverlay>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       setCurrentLocale(ref.read(localeProvider).languageCode);
+      // Session restored before the auth listener existed: watch approvals.
+      try {
+        if (ref.read(authProvider).isAuthenticated) {
+          ref.read(approvalCoordinatorProvider).start();
+        }
+      } catch (_) {}
       // Deliver any notification tap that arrived before the navigator
       // existed (cold-start tap) now that the app is ready.
       try {
@@ -301,6 +308,13 @@ class _AppLockOverlayState extends ConsumerState<_AppLockOverlay>
       ref
           .read(sessionTimeoutProvider.notifier)
           .setAuthenticated(next.isAuthenticated);
+      // Trusted-device sign-in approvals: watched only while signed in.
+      if (next.isAuthenticated != (prev?.isAuthenticated ?? false)) {
+        try {
+          final approvals = ref.read(approvalCoordinatorProvider);
+          next.isAuthenticated ? approvals.start() : approvals.stop();
+        } catch (_) {}
+      }
       if (next.isAuthenticated && !(prev?.isAuthenticated ?? false)) {
         unawaited(ref.read(currencyEngineProvider).load());
         // Login may finish after the cold-start retry window has elapsed.

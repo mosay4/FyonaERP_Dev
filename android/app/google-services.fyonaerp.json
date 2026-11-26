@@ -1,0 +1,285 @@
+{
+  "project_info": {
+    "project_number": "1008683392214",
+    "project_id": "fyonaerp",
+    "storage_bucket": "fyonaerp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1008683392214:android:7f4504bfbff78cdd2afd77",
+        "android_client_info": {
+          "package_name": "com.fyona.admin"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDhNHwaUCXdc-hKVmlQdVEzqrSYn21nbfM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1008683392214:android:bc659fbf0d80d09b2afd77",
+        "android_client_info": {
+          "package_name": "com.fyona.erp.fyona_flutter"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1008683392214-its1tiih46621bsp1cvtn1qa7ieicftl.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fyona.erp.fyona_flutter",
+            "certificate_hash": "607b2301950b99cd8b1649c8c7b46dd83d15c399"
+          }
+        },
+        {
+          "client_id": "1008683392214-jkc4kkmvauh2ep9oha89dkv2m48vuv56.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fyona.erp.fyona_flutter",
+            "certificate_hash": "c9c23f9122ee4cd5ac34280b8c916e6444b0eeea"
+          }
+        },
+        {
+          "client_id": "1008683392214-u3p84209slj8r21rck6lfc14ecd0md7p.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fyona.erp.fyona_flutter",
+            "certificate_hash": "e4487c0b173bbcbe20e34da7cfdaa30cecdd5dc3"
+          }
+        },
+        {
+          "client_id": "1008683392214-ulc8ve225hnlpau461hgrce8grem698l.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fyona.erp.fyona_flutter",
+            "certificate_hash": "101e71dfc6d021d347299b40f5a430f71c5658c6"
+          }
+        },
+        {
+          "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDhNHwaUCXdc-hKVmlQdVEzqrSYn21nbfM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1008683392214:android:d75c0ce432621eea2afd77",
+        "android_client_info": {
+          "package_name": "com.fyona.erp.fyona_flutter.directorypilot"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1008683392214-7v4kflj0k6m85aao2cr7d8horhfcubau.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fyona.erp.fyona_flutter.directorypilot",
+            "certificate_hash": "e4487c0b173bbcbe20e34da7cfdaa30cecdd5dc3"
+          }
+        },
+        {
+          "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDhNHwaUCXdc-hKVmlQdVEzqrSYn21nbfM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1008683392214:android:a13a82f09777545e2afd77",
+        "android_client_info": {
+          "package_name": "com.fyona.erp.fyona_flutter.offlinetest"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1008683392214-jujsj3a4nh1a04r9il8749fmicpsmnpv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fyona.erp.fyona_flutter.offlinetest",
+            "certificate_hash": "8c008e51f115e7ddede8003994bb4d28d8e9292e"
+          }
+        },
+        {
+          "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDhNHwaUCXdc-hKVmlQdVEzqrSYn21nbfM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1008683392214:android:896b6ab17b2a16eb2afd77",
+        "android_client_info": {
+          "package_name": "com.fyona.erp.fyona_flutter.offlinetest6"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1008683392214-sub6lr0bmfbeolvcnl0itq1airgq4pc9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fyona.erp.fyona_flutter.offlinetest6",
+            "certificate_hash": "8c008e51f115e7ddede8003994bb4d28d8e9292e"
+          }
+        },
+        {
+          "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDhNHwaUCXdc-hKVmlQdVEzqrSYn21nbfM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1008683392214:android:af5c484132b2119b2afd77",
+        "android_client_info": {
+          "package_name": "com.fyona.erp.fyona_flutter.offlinetest7"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1008683392214-oehjg6ujs9hnf1p4ao3v8316hrdopmb4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fyona.erp.fyona_flutter.offlinetest7",
+            "certificate_hash": "8c008e51f115e7ddede8003994bb4d28d8e9292e"
+          }
+        },
+        {
+          "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDhNHwaUCXdc-hKVmlQdVEzqrSYn21nbfM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1008683392214:android:03065ef00f5db8d32afd77",
+        "android_client_info": {
+          "package_name": "com.fyona.erp.fyona_flutter.test"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1008683392214-5d2ni291gjnrtanbh7s37mbosp21kuhh.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fyona.erp.fyona_flutter.test",
+            "certificate_hash": "8c008e51f115e7ddede8003994bb4d28d8e9292e"
+          }
+        },
+        {
+          "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDhNHwaUCXdc-hKVmlQdVEzqrSYn21nbfM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1008683392214-2lmo76djt9t5bf77g3cunlc3ja8pfjik.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

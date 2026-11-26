@@ -25,6 +25,8 @@ from .core.metrics import PrometheusMiddleware
 from .core.version import get_version_info
 from .api.v1.health import router as health_router
 from .api.v1.auth import router as auth_router
+from .api.v1.auth2 import router as auth2_router
+from .api.v1.otp_webhooks import router as otp_webhooks_router
 from .api.v1.business import router as business_router
 from .api.v1.branches import router as branches_router
 from .api.v1.business_media_transit import router as media_transit_router
@@ -163,6 +165,15 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_personal_maintenance.scheduler())
     except Exception:
         pass
+    # Auth v2 OTP worker (due sends, WhatsApp retries, SMS fallback
+    # deadlines, expiry, primary transfers). Restart-safe: state is in DB.
+    otp_task = None
+    try:
+        from app.domain.services.otp import worker as _otp_worker
+
+        otp_task = asyncio.create_task(_otp_worker.scheduler())
+    except Exception:
+        pass
     # Advertise on the LAN (mDNS) so phones find the backend with zero
     # configuration. Best-effort: never affects the API itself.
     try:
@@ -183,7 +194,9 @@ async def lifespan(app: FastAPI):
         logger.warning("running_in_debug_mode")
     yield
     rate_task.cancel()
-    await asyncio.gather(rate_task, return_exceptions=True)
+    if otp_task is not None:
+        otp_task.cancel()
+    await asyncio.gather(rate_task, *([otp_task] if otp_task else []), return_exceptions=True)
     logger.info("shutting_down_draining_requests")
     try:
         from app.core import mdns as _mdns_shutdown
@@ -245,6 +258,17 @@ async def metrics():
 # ── Standardized error responses ──
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if isinstance(exc.detail, dict) and exc.detail.get("code"):
+        # Auth v2 contract: {detail:{code, message_ar, message_en, retry_after?}}
+        headers = dict(getattr(exc, "headers", None) or {})
+        if exc.detail.get("retry_after") is not None:
+            headers.setdefault("Retry-After", str(exc.detail["retry_after"]))
+        return JSONResponse(
+            content={"success": False, "detail": exc.detail,
+                     "message": exc.detail.get("message_ar") or exc.detail.get("code")},
+            status_code=exc.status_code,
+            headers=headers or None,
+        )
     return JSONResponse(
         content={"success": False, "message": exc.detail},
         status_code=exc.status_code,
@@ -345,6 +369,8 @@ async def add_request_id_middleware(request, call_next):
 # ── Routers ──
 app.include_router(health_router, prefix=settings.API_PREFIX, tags=["Health"])
 app.include_router(auth_router, prefix=f"{settings.API_PREFIX}/auth", tags=["Auth"])
+app.include_router(auth2_router, prefix=f"{settings.API_PREFIX}/auth2", tags=["Auth v2"])
+app.include_router(otp_webhooks_router, prefix=settings.API_PREFIX, tags=["Webhooks"])
 app.include_router(business_router, prefix=f"{settings.API_PREFIX}", tags=["Business"], dependencies=_business_maint)
 app.include_router(branches_router, prefix=f"{settings.API_PREFIX}", tags=["Branches"])
 app.include_router(media_transit_router,
