@@ -7,8 +7,10 @@ import 'package:share_plus/share_plus.dart';
 import '../../../../core/network/api_client.dart' show serverBaseUrlProvider;
 import '../../../../core/network/dio_provider.dart';
 import '../../../../core/export/presentation/accounting_export_page.dart';
+import '../../../../core/import/presentation/smart_import_page.dart';
 import '../../../../core/backup/backup_providers.dart';
 import '../../../../core/backup/presentation/continuous_backup_page.dart';
+import '../../../../core/storage/free_space.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/styled_snack.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
@@ -38,6 +40,18 @@ class BusinessBackupPage extends ConsumerStatefulWidget {
 class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
   List<Map> _rows = [];
   bool _busy = false;
+  BusinessBackupStage? _stage;
+  double? _done;
+
+  void _onProgress(BusinessBackupStage stage, double done) {
+    if (!mounted) return;
+    final d = _done;
+    if (stage == _stage && d != null && (done - d).abs() < 0.005 && done < 1) return;
+    setState(() {
+      _stage = stage;
+      _done = done;
+    });
+  }
   String? _error;
   _BackupSelection? _shown;
   static const _path = '/business/project-settings/backups';
@@ -167,15 +181,23 @@ class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
                 BusinessBackupProblem.notEmpty =>
                   'السجلات غير فارغة؛ لم تُستبدل أو تُدمج أي سجلات',
                 BusinessBackupProblem.tooLarge =>
-                  'النسخة تتجاوز الحد المسموح لهذه التجربة',
+                  'هذا الملف ليس نسخة FYONA بهذا الرمز، أو أكبر من الحد المسموح',
                 BusinessBackupProblem.nothingToBackUp =>
                   'لا توجد سجلات في هذا الفرع لإنشاء نسخة',
               }
+            : error is NotEnoughSpace
+            ? 'المساحة غير كافية على الجهاز: افرغ حوالي ${error.missingMb} ميجابايت ثم أعد المحاولة. لم يتغير شيء'
             : 'تعذر إتمام العملية، لم يتم إعلان نجاحها';
         showFyonaSnack(context, message, success: false);
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _stage = null;
+          _done = null;
+        });
+      }
     }
   }
 
@@ -221,9 +243,9 @@ class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
     if (action == 'import') {
       final input = await files.pick();
       if (input == null || !_same(selection)) return;
-      outcome = await local.restoreStream(input, code);
+      outcome = await local.restoreStream(input, code, size: files.pickedSize, onProgress: _onProgress);
     } else {
-      outcome = await local.restoreFile(id!, code);
+      outcome = await local.restoreFile(id!, code, onProgress: _onProgress);
     }
     if (!_same(selection)) return;
     showFyonaSnack(
@@ -324,6 +346,7 @@ class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
         children: [
           if (local) const ContinuousBackupEntry(kind: BackupKind.business),
           if (local) const AccountingExportEntry(),
+          if (local) const SmartImportEntry(),
           Text(
             local
                 ? 'نسخة مشفّرة من سجلات هذا الفرع على الجهاز. لا تشمل تسجيل الدخول أو الشخصي. '
@@ -334,6 +357,18 @@ class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
           ),
           const SizedBox(height: 16),
           if (_busy && !local) const LinearProgressIndicator(),
+          if (_busy && local && _stage != null) ...[
+            LinearProgressIndicator(key: const ValueKey('business-backup-progress'), value: _done),
+            const SizedBox(height: 6),
+            Text(
+              '${switch (_stage!) {
+                BusinessBackupStage.reading => 'جارٍ قراءة الملف',
+                BusinessBackupStage.verifying => 'جارٍ التحقق من النسخة',
+                BusinessBackupStage.applying => 'جارٍ حفظ السجلات',
+              }} — ${((_done ?? 0) * 100).floor()}%',
+              key: const ValueKey('business-backup-progress-text'),
+            ),
+          ],
           if (!BranchScope.readOnly)
             FilledButton.icon(
               onPressed: _busy ? null : () => _action('create'),

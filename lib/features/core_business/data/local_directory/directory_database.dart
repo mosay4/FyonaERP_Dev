@@ -55,6 +55,7 @@ part 'business_bank_reconciliation.dart';
 part 'business_money_report.dart';
 part 'business_sync_engine.dart';
 part 'business_employees_local.dart';
+part 'business_import_activity.dart';
 
 abstract interface class DirectoryKeyStore {
   Future<String?> read(String workspaceId);

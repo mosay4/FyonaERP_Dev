@@ -83,10 +83,15 @@ jobs:
             backup:
               - 'lib/core/backup/**'
               - 'lib/core/media/**'
+              - 'lib/core/storage/**'
+              - 'lib/core/services/media/**'
+              - 'lib/features/core_business/data/local_ledger/business_local_backups.dart'
               - 'test/backup/**'
               - 'test/media/**'
               - 'lib/core/export/**'
               - 'test/export/**'
+              - 'lib/core/import/**'
+              - 'test/import/**'
               - 'lib/features/core_business/data/local_directory/**'
             native:
               - 'pubspec.*'
@@ -205,14 +210,14 @@ jobs:
       - run: flutter pub get
       - name: Analyze backup and media (errors fail)
         shell: bash
-        run: flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings lib/core/backup lib/core/media lib/core/export test/backup test/media test/export
+        run: flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings lib/core/backup lib/core/media lib/core/storage lib/core/export lib/core/import test/backup test/media test/export test/import
       # Exact restore at 100 / 10k / 100k products, live capture, kill mid-backup,
       # tampering, recovery code, cloud outage, real Business + Personal ledgers.
       - name: Backup, restore, kill and tamper tests (measurements printed)
         shell: bash
         env:
           FYONA_OS_KILL_TEST: '1' # real SIGKILL test (runs on Linux only)
-        run: flutter test --no-pub $QA_DEFINES -r expanded test/backup test/media test/export | tee backup-results.txt
+        run: flutter test --no-pub $QA_DEFINES -r expanded test/backup test/media test/export test/import | tee backup-results.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -245,6 +250,9 @@ jobs:
           backend/tests/unit/test_business_local_migration.py
           backend/tests/unit/test_local_business_cutover.py
           backend/tests/unit/test_business_media_transit.py
+          backend/tests/unit/test_storage_api.py
+          backend/tests/unit/test_chat_cloud_media.py
+          backend/tests/unit/test_import_mapping.py
           backend/tests/unit/test_qa_business_ledger.py
           backend/tests/unit/test_qa_business_party_sharing.py
           backend/tests/unit/test_sara_tool_contract.py

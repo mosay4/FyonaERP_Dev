@@ -39,6 +39,8 @@ dependencies:
   file_picker: ^11.0.2
   csv: ^8.0.0
   archive: ^4.0.9
+  # Smart import: XLSX / XML reading (pure Dart; entities never expanded).
+  xml: ^7.0.1
   pdf: ^3.13.0
   printing: ^5.15.0
   share_plus: ^10.0.0
@@ -81,7 +83,6 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   build_runner: ^2.15.1
   json_serializable: ^6.14.0
-  xml: ^7.0.1
 
 # The new Business directory uses a separate FFI factory and SQLCipher.
 # Personal continues to use the Android sqflite plugin and its existing file.

@@ -147,3 +147,59 @@ memory). Personal ledgers are small (no stock / invoice volume); a streamed Pers
   cut-off exact (later payment, return, sale taken back); branch isolation; SHA-256 of every file;
   formula neutralised; XML well-formed, sheet rows = CSV rows; AR + EN; employee refused;
   100 000 invoices streamed (time + memory measured).
+
+## Phase 3c — Restore from a file on the phone, free space, percentage
+
+* **Whole continuous set as ONE file** (`.fyonaset`, `backup_pack.dart`): `FYBKPACK1`, a JSON header
+  (names + sizes), then the set's own encrypted parts unchanged. "Save as a file" on each local set
+  (Android: Downloads/FYONA ERP, copied natively in 1 MiB blocks; iOS: share sheet; desktop: save dialog)
+  and "Restore from a file on this device" on the continuous backup page.
+  Reading is untrusted until proven: only the header + `key.json` + `manifest.enc` (≤ 64 MB together)
+  are read, then the manifest must open with this device's key or the recovery code/password; after that
+  exactly the parts that manifest lists are accepted (any other name, `..`, trailing data: refused) and
+  the rest may be as large as the backup (64 GB ceiling). Then the normal verified rebuild + apply.
+* **Branch file `.fyonabiz`**: no 64 MB cap for a genuine file. The picked file is untrusted until its
+  first page opens with the recovery code (`checkBackupHead`: SQLCipher authenticates the page) — at
+  most 1 MiB is read before that, so a wrong file/code is refused at once whatever its size; anything that
+  never proves itself still stops at 64 MB. Creating one is no longer capped at 64 MB either; saving it
+  streams (never `readAsBytes`).
+* **Free space** (`lib/core/storage/free_space.dart`: Android StatFs, iOS volumeAvailableCapacity…,
+  Windows GetDiskFreeSpaceEx, Linux/macOS `df`): checked before copying a file (2× its size + 128 MB for a
+  branch file), before the rebuild (media + 4× records + 128 MB), before the live apply (copy size +
+  128 MB); during the rebuild a monitor stops the job cleanly (`no_space`) if the disk nearly fills.
+  The message says how many MB to free. Nothing is changed on refusal.
+* **Percentage**: download / reading / media / records / preparing / applying, each 0–100 %; the live
+  branch restore copies in slices of 20 000 rows (same order, still ONE transaction) so it reports too.
+
+## Phase 5 — Chat media → Cloudflare R2 (encrypted on the device)
+
+* The sender encrypts each attachment with a fresh random 256-bit key (FYBK frames) and uploads the
+  ciphertext with a presigned URL to `t/c_<link>/m/<sha256 of ciphertext>` (participants only).
+  The message carries `fyc:<link>/<sha>.<ext>#<key>`; the receiver downloads, checks SHA-256, decrypts,
+  keeps the file. Cloudflare only ever holds ciphertext. Background (WorkManager) uploads use the same path.
+* Server: `/chat/{link}/media` (disk) retired → 410 `chat_media_moved`; when the server purges a
+  message (read + 10 min, or 90 days) its R2 objects are deleted too (only `fyc:` refs of that chat).
+* Older `uploads/chat/…` links still download as before. Video thumbnails are no longer made by the
+  server (it never sees the file): the bubble shows the generic video tile until the file is on the device.
+
+## Phase 6 — Smart import (deterministic engine + Sara column suggestions)
+
+* `lib/core/import/`: readers (CSV/TSV UTF-8/UTF-16, XLSX, JSON, XML, SQLite read-only, SQL INSERT,
+  ZIP of those) with hard limits: own ZIP reader inflating with an output cap (bombs and lying headers
+  stop at the limit), ≤ 2000 entries, no nested archives, entry names never used as paths, XML DTD
+  entities refused, unknown text encodings refused with a clear message.
+* Mapping: deterministic titles (Arabic/English, spelling folded) first; "Ask Sara" sends only the
+  titles + ≤ 30 sample rows (values ≤ 60 chars) to `/ai/import-mapping`, which keeps only known fields
+  mapped to existing columns. Sara never touches numbers or rows.
+* Preview: every row checked (Arabic digits, separators, negatives, debit/credit columns, currency names,
+  kind words, duplicates in the file, names already in the branch); problems listed by row, never guessed.
+* Apply = one batch: customers/suppliers via `addPartyWithOpeningDebt`, products via the app's own
+  `createProduct` (with stock). Row command ids derive from the file SHA-256 + branch + row: the same
+  file twice is refused, and even without the registry the ledger's command idempotency prevents doubles.
+  Old records ("archive") are kept read-only in the batch registry, no effect on balances.
+* Undo by batch only while nothing happened to what it created (`importLaterActivity`: payments, other
+  documents, edits, invoices, stock moves) — through `deleteUnlinkedParty` / `deleteProduct`.
+* The registry/archive is a separate encrypted file `imports/<workspace>.sqlite` (same key) next to the
+  ledger; it is not part of the continuous backup (the imported cards/debts/products are).
+* Not in this version: bank/cash account balances (the ledger has no safe undo for an account yet —
+  entered by hand), and old invoices as live documents (they go to the read-only archive instead).
