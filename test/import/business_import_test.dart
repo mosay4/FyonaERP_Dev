@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -179,13 +180,41 @@ void main() {
     await expectLater(imp.undo(b2), throwsA(isA<ImportRefused>().having((e) => e.code, 'code', 'busy_after_import')));
   });
 
-  test('history rows kept read-only as an archive, no effect on balances', () async {
-    final (t, sha) = await file('old-invoices.csv', 'رقم,التاريخ,العميل,المبلغ\n1,2024-01-01,محمد,100\n2,2024-02-01,سالم,50\n');
-    final imp = importer();
-    final p = await buildImportPreview(t, ImportTarget.archive, const {});
-    final batch = await imp.apply(p, fileSha: sha, fileName: 'old-invoices.csv');
-    expect(await registry.archiveRows(batch).toList(), [['1', '2024-01-01', 'محمد', '100'], ['2', '2024-02-01', 'سالم', '50']]);
-    expect(await store.search(scope, DirectoryPartyKind.customer, ''), isEmpty);
+  test('products with a category and a picture from the same ZIP; rows for another branch refused', () async {
+    final png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, ...List.filled(64, 7)];
+    final zip = Archive()
+      ..addFile(ArchiveFile.bytes('products.csv', utf8.encode('الصنف,التصنيف,الصورة,الكمية,الفرع\n'
+          'قلم,قرطاسية,pen.png,5,${scope.branchId}\nدفتر,قرطاسية,missing.png,2,\nممحاة,,,,فرع آخر\n')))
+      ..addFile(ArchiveFile('pics/pen.png', png.length, png));
+    final f = File('${dir.path}/p.zip')..writeAsBytesSync(ZipEncoder().encode(zip));
+    final t = (await readImportFile(f)).single;
+    final images = await readImportImages(f);
+    expect(images.names, {'pen.png'});
+    final review = await ImportReview.load(t, ImportTarget.products, autoMapColumns(ImportTarget.products, t.columns),
+        branches: {scope.branchId}, images: images.names);
+    expect(review.rows[1].warnings, ['image_missing']);
+    expect(review.rows[2].reasons, ['other_branch']);
+    final media = <String>[];
+    final imp = BusinessImporter(
+      store: store, access: scope, registry: registry,
+      createProduct: inventory.createProduct, deleteProduct: inventory.deleteProduct,
+      categories: inventory.categories, createCategory: inventory.createCategory,
+      picture: (name) async {
+        final p = images.read(name);
+        if (p == null) return null;
+        media.add(p.$2);
+        return 'media:${sha256.convert(p.$1)}';
+      },
+    );
+    await imp.apply(review.toPreview(), fileSha: '${sha256.convert(f.readAsBytesSync())}', fileName: 'p.zip');
+    final list = await inventory.listProducts();
+    expect(list.map((e) => e['name']).toSet(), {'قلم', 'دفتر'});
+    expect(media, ['image/png']);
+    final pen = list.firstWhere((e) => e['name'] == 'قلم');
+    expect('${pen['image'] ?? pen['image_url']}', contains('media:'));
+    final cats = await inventory.categories();
+    expect(cats.where((c) => c['name'] == 'قرطاسية').length, 1); // created once
+    expect(pen['category_id'], cats.single['id']);
   });
 
   final bench = int.tryParse(Platform.environment['FYONA_IMPORT_BENCH'] ?? '');

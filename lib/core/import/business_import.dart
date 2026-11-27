@@ -25,8 +25,10 @@ import 'import_plan.dart';
 /// created (no payment, invoice, stock move or edit); it removes the cards
 /// and opening documents through the app's own delete operations.
 ///
-/// The registry and the read-only archive of the file's rows (history) are
-/// kept in their own encrypted file next to the ledger (same key).
+/// Only data that has a place in FYONA is written: nothing else from the
+/// file is stored or archived. The batch registry (which file, which rows,
+/// what was created — for undo and the double-import check) is kept in its
+/// own encrypted file next to the ledger (same key).
 class ImportRegistry {
   ImportRegistry._(this._db);
   final Database _db;
@@ -42,8 +44,6 @@ class ImportRegistry {
     await db.execute('''CREATE TABLE IF NOT EXISTS import_items (
       batch_id TEXT NOT NULL, kind TEXT NOT NULL, entity_id TEXT NOT NULL, party_kind TEXT,
       opening_id TEXT, row_no INTEGER NOT NULL, PRIMARY KEY (batch_id, kind, entity_id))''');
-    await db.execute('''CREATE TABLE IF NOT EXISTS import_archive (
-      batch_id TEXT NOT NULL, row_no INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (batch_id, row_no))''');
     return ImportRegistry._(db);
   }
 
@@ -55,18 +55,6 @@ class ImportRegistry {
   Future<Map<String, Object?>?> batch(String id) async =>
       (await _db.query('import_batches', where: 'id = ?', whereArgs: [id])).firstOrNull;
 
-  /// The archived rows of a batch (history kept read-only), in file order.
-  Stream<List<Object?>> archiveRows(String batchId) async* {
-    final cur = await _db.rawQueryCursor(
-        'SELECT payload FROM import_archive WHERE batch_id = ? ORDER BY row_no', [batchId], bufferSize: 2000);
-    try {
-      while (await cur.moveNext()) {
-        yield (jsonDecode('${cur.current['payload']}') as List).cast<Object?>();
-      }
-    } finally {
-      await cur.close();
-    }
-  }
 }
 
 class ImportRefused implements Exception {
@@ -86,6 +74,9 @@ class BusinessImporter {
     required this.registry,
     required this.createProduct,
     required this.deleteProduct,
+    this.categories,
+    this.createCategory,
+    this.picture,
   });
 
   final DirectoryPilotStore store;
@@ -96,6 +87,14 @@ class BusinessImporter {
   /// is created and removed exactly like from the products screen.
   final Future<Map<String, dynamic>> Function(Map<String, dynamic> body) createProduct;
   final Future<void> Function(String id) deleteProduct;
+
+  /// The branch's categories and how to add one (a product's category is
+  /// found by name, or created once).
+  final Future<List<Map<String, dynamic>>> Function()? categories;
+  final Future<Map<String, dynamic>> Function(String name)? createCategory;
+
+  /// A picture named in the file → its `media:` reference (null: none).
+  final Future<String?> Function(String name)? picture;
 
   static const _ns = '6a4d3f1e-9b2c-4f7a-8e5d-1c0b9a8f7e6d';
   static const _uuid = Uuid();
@@ -143,7 +142,6 @@ class BusinessImporter {
           'customers': preview.parties.where((p) => p.kind == 'customer').length,
           'suppliers': preview.parties.where((p) => p.kind == 'supplier').length,
           'products': preview.products.length,
-          'archive': preview.archive.length,
         }),
       });
     }
@@ -171,9 +169,21 @@ class BusinessImporter {
           onProgress?.call(done, total);
         }
       }
-    } else if (preview.target == ImportTarget.products) {
+    } else {
+      final catIds = <String, String>{};
+      if (categories != null && preview.products.any((p) => p.category != null)) {
+        for (final c in await categories!()) {
+          catIds[importFold('${c['name']}')] = '${c['id']}';
+        }
+      }
       for (final r in preview.products) {
         final cmd = _rowCommand(id, r.row, 'product');
+        String? category;
+        if (r.category != null && createCategory != null) {
+          final k = importFold(r.category!);
+          category = catIds[k] ??= '${(await createCategory!(r.category!))['id']}';
+        }
+        final image = r.image == null || picture == null ? null : await picture!(r.image!);
         final created = await createProduct({
           'command_id': cmd,
           'name': r.name,
@@ -183,6 +193,8 @@ class BusinessImporter {
           if (r.stock != null) 'stock': r.stock,
           if (r.barcode != null) 'barcode': r.barcode,
           if (r.sku != null) 'sku': r.sku,
+          if (category != null) 'category_id': category,
+          if (image != null) 'image': image,
         });
         await db.insert('import_items', {
           'batch_id': id, 'kind': 'product', 'entity_id': '${created['id']}', 'row_no': r.row,
@@ -192,20 +204,6 @@ class BusinessImporter {
           onProgress?.call(done, total);
         }
       }
-    } else {
-      // History: kept as it was, read-only, no effect on balances.
-      final batch = db.batch();
-      var i = 0;
-      for (final r in preview.archive) {
-        batch.insert('import_archive', {'batch_id': id, 'row_no': ++i, 'payload': jsonEncode(r)},
-            conflictAlgorithm: ConflictAlgorithm.ignore);
-        if (i % 2000 == 0) {
-          await batch.commit(noResult: true);
-          onProgress?.call(i, total);
-        }
-      }
-      await batch.commit(noResult: true);
-      done = i;
     }
     // The header row of an archive batch, for showing it later.
     await db.update('import_batches', {
@@ -251,7 +249,6 @@ class BusinessImporter {
       await deleteProduct(p);
       if (++done % 200 == 0) onProgress?.call(done, items.length);
     }
-    await db.delete('import_archive', where: 'batch_id = ?', whereArgs: [id]);
     await db.update('import_batches', {'status': 'undone', 'undone_us': DateTime.now().toUtc().microsecondsSinceEpoch},
         where: 'id = ?', whereArgs: [id]);
     onProgress?.call(items.length, items.length);

@@ -721,3 +721,46 @@ Future<List<ImportTable>> _zip(File file) async {
   if (out.isEmpty) throw const ImportRejected('empty');
   return out;
 }
+
+// ── Pictures inside a ZIP (products' "picture" column) ──────────────────
+
+const importMaxImageBytes = 10 * 1024 * 1024;
+const _imageExt = {'jpg', 'jpeg', 'png', 'webp', 'gif'};
+
+/// Pictures found in a ZIP, by file name (lower case). Read only when a
+/// product that names one is imported; checked to really be a picture.
+class ImportImages {
+  ImportImages._(this._zip, this._entries);
+  final _Zip? _zip;
+  final Map<String, _ZipEntry> _entries;
+  static final none = ImportImages._(null, const {});
+
+  Set<String> get names => _entries.keys.toSet();
+
+  /// The picture's bytes and type, or null when missing / not a picture.
+  (Uint8List, String)? read(String name) {
+    final e = _entries[name.split('/').last.split('\\').last.toLowerCase()];
+    if (e == null || _zip == null || e.size > importMaxImageBytes) return null;
+    final b = _zip.read(e);
+    if (b.length >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return (b, 'image/jpeg');
+    if (b.length >= 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) return (b, 'image/png');
+    if (b.length >= 12 && ascii.decode(b.sublist(8, 12), allowInvalid: true) == 'WEBP') return (b, 'image/webp');
+    if (b.length >= 4 && ascii.decode(b.sublist(0, 4), allowInvalid: true) == 'GIF8') return (b, 'image/gif');
+    return null;
+  }
+}
+
+Future<ImportImages> readImportImages(File file) async {
+  final head = await file.openRead(0, 4).fold<List<int>>([], (a, b) => a..addAll(b));
+  final name = file.path.toLowerCase();
+  if (!_isZip(head) || name.endsWith('.xlsx')) return ImportImages.none;
+  final zip = _Zip.open(await file.readAsBytes());
+  final out = <String, _ZipEntry>{};
+  for (final e in zip) {
+    if (!e.isFile) continue;
+    final base = e.name.replaceAll('\\', '/').split('/').last.toLowerCase();
+    final ext = base.contains('.') ? base.split('.').last : '';
+    if (_imageExt.contains(ext) && !base.startsWith('.')) out[base] = e;
+  }
+  return out.isEmpty ? ImportImages.none : ImportImages._(zip, out);
+}

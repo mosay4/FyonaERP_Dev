@@ -55,14 +55,15 @@ class SaraScreenCatalog {
     // Personal reports: one entry point (see saraPersonalReportsRoute in
     // sara_action_dispatcher.dart — the new Personal reports page).
     '/personal/reports-center': '/personal/reports',
+    '/import': '/data-import/smart-import',
   };
 
   /// Screens with no equivalent in this app.
   static const Set<String> _removed = {
     '/accounts', '/admin/subscription-requests', '/attendance',
     '/balance-sheet', '/cheques', '/contracts', '/crm-dashboard',
-    '/data-import/smart-import', '/design-studio', '/fiscal-years',
-    '/fixed-assets', '/hr-reports', '/import', '/journal', '/leaves',
+    '/design-studio', '/fiscal-years',
+    '/fixed-assets', '/hr-reports', '/journal', '/leaves',
     '/ledger', '/projects', '/projects-dashboard', '/recurring-invoices',
     '/trial-balance',
   };
@@ -167,6 +168,11 @@ class SaraScreenCatalog {
       'route': '/business/backup',
       'title': 'النسخ الاحتياطي للأعمال',
       'summary': 'نسخة احتياطية مشفرة لبيانات الفرع.',
+    },
+    {
+      'route': '/data-import/smart-import',
+      'title': 'الاستيراد الذكي',
+      'summary': 'إدخال العملاء والموردين والمنتجات وأرصدتهم من ملف، مع مراجعة كل صف قبل الحفظ.',
     },
     {
       'route': '/personal/debts?debtId=',
@@ -305,6 +311,11 @@ class SaraScreenCatalog {
       'route': '/business/backup',
       'title': 'Business backup',
       'summary': 'An encrypted backup of the branch data.',
+    },
+    {
+      'route': '/data-import/smart-import',
+      'title': 'Smart import',
+      'summary': 'Bring customers, suppliers, products and their balances in from a file, reviewing every row first.',
     },
     {
       'route': '/personal/debts?debtId=',

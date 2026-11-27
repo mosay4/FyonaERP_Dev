@@ -191,15 +191,24 @@ memory). Personal ledgers are small (no stock / invoice volume); a streamed Pers
 * Mapping: deterministic titles (Arabic/English, spelling folded) first; "Ask Sara" sends only the
   titles + ≤ 30 sample rows (values ≤ 60 chars) to `/ai/import-mapping`, which keeps only known fields
   mapped to existing columns. Sara never touches numbers or rows.
-* Preview: every row checked (Arabic digits, separators, negatives, debit/credit columns, currency names,
-  kind words, duplicates in the file, names already in the branch); problems listed by row, never guessed.
-* Apply = one batch: customers/suppliers via `addPartyWithOpeningDebt`, products via the app's own
-  `createProduct` (with stock). Row command ids derive from the file SHA-256 + branch + row: the same
-  file twice is refused, and even without the registry the ledger's command idempotency prevents doubles.
-  Old records ("archive") are kept read-only in the batch registry, no effect on balances.
+* Review window (owner's decision 27-11): its own full-screen window (also opened by Sara via
+  `/data-import/smart-import`). Steps: file → tables & columns → review → fingerprint / app PIN → import.
+  * Each table of the file gets a destination: customers, suppliers, products, or "not imported"
+    (no place in FYONA: nothing from it is saved).
+  * Columns: drag a column chip onto a field (dropping on a taken field swaps them), or the swap menu;
+    columns with no field are listed in red/yellow as "not saved". Sara can suggest the mapping.
+  * Review in two parts — "will be added" and "will not be added" (red rows, yellow reason per row,
+    reason filters with counts, skipped tables and columns listed). Any cell can be edited; the whole
+    table is checked again (same rules as the import). Search, select all shown, leave out / put back.
+    Rows are built lazily (fixed-height list): 100 000 rows load in ~3.7 s, an edit re-checks in ~1 s.
+  * Products: name, barcode, code, unit, sale/purchase price, quantity, category (found by name or
+    created once), picture (a file inside the same ZIP, verified to be an image; missing → added
+    without it, said so), branch (a row for another branch is refused). Customers/suppliers: name,
+    type, phone, balance or two "they owe / we owe" columns, currency, branch.
+  * Only accepted rows are written. No archive: data with no place in FYONA is never stored.
 * Undo by batch only while nothing happened to what it created (`importLaterActivity`: payments, other
   documents, edits, invoices, stock moves) — through `deleteUnlinkedParty` / `deleteProduct`.
-* The registry/archive is a separate encrypted file `imports/<workspace>.sqlite` (same key) next to the
-  ledger; it is not part of the continuous backup (the imported cards/debts/products are).
+* The batch registry (for undo and the double-import check) is a separate encrypted file
+  `imports/<workspace>.sqlite` (same key); the imported cards/debts/products are in the ledger (backed up).
 * Not in this version: bank/cash account balances (the ledger has no safe undo for an account yet —
-  entered by hand), and old invoices as live documents (they go to the read-only archive instead).
+  entered by hand) and old invoices as documents (refused as "no place", not stored).

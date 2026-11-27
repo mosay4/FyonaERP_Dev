@@ -1,3 +1,4 @@
+import '../import/presentation/smart_import_page.dart';
 import 'dart:convert';
 import 'dart:async';
 import '../services/section_scope.dart';
@@ -1159,6 +1160,15 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/business/backup',
             builder: (_, _) => const BusinessBackupPage(),
+          ),
+          // Smart import (also opened by Sara): its own full-screen window.
+          GoRoute(
+            path: RouteNames.smartImport,
+            pageBuilder: (_, state) => MaterialPage<void>(
+              key: state.pageKey,
+              fullscreenDialog: true,
+              child: const SmartImportPage(),
+            ),
           ),
           GoRoute(
             path: '/employees/salary',

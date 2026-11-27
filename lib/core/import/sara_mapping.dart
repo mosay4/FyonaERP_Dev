@@ -7,7 +7,6 @@ import 'import_source.dart';
 /// suggestion the user sees and can change. Any failure returns null and
 /// the deterministic mapping stays.
 Future<Map<String, String>?> saraImportMapping(ApiClient api, ImportTarget target, ImportTable table) async {
-  if (target == ImportTarget.archive) return null;
   try {
     final sample = [
       for (final r in await table.sample(30)) [for (final v in r) v == null ? null : (v.length > 60 ? v.substring(0, 60) : v)],

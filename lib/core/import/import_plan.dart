@@ -3,7 +3,7 @@ import 'import_source.dart';
 /// Smart import, step 2: which column is which field (deterministic rules
 /// first; Sara may suggest a mapping from a small sample), then every row
 /// checked into a preview. Nothing is written here.
-enum ImportTarget { parties, products, archive }
+enum ImportTarget { parties, products }
 
 class ImportField {
   const ImportField(this.key, this.synonyms, {this.required = false});
@@ -21,6 +21,7 @@ const importFields = <ImportTarget, List<ImportField>>{
     ImportField('debit', ['مدين', 'debit', 'dr']),
     ImportField('credit', ['دائن', 'credit', 'cr']),
     ImportField('currency', ['العملة', 'عملة', 'currency', 'cur']),
+    ImportField('branch', ['الفرع', 'فرع', 'branch', 'store', 'location']),
   ],
   ImportTarget.products: [
     ImportField('name', ['اسم المنتج', 'اسم الصنف', 'المنتج', 'الصنف', 'الاسم', 'اسم', 'product', 'item', 'name', 'description'], required: true),
@@ -30,8 +31,10 @@ const importFields = <ImportTarget, List<ImportField>>{
     ImportField('sale_price', ['سعر البيع', 'السعر', 'سعر', 'price', 'sale price', 'selling price']),
     ImportField('cost_price', ['سعر الشراء', 'التكلفة', 'تكلفة', 'cost', 'cost price', 'purchase price']),
     ImportField('stock', ['الكمية', 'كمية', 'المخزون', 'الرصيد', 'qty', 'quantity', 'stock', 'on hand']),
+    ImportField('category', ['التصنيف', 'تصنيف', 'الفئة', 'المجموعة', 'category', 'group', 'family']),
+    ImportField('image', ['الصورة', 'صورة', 'image', 'picture', 'photo']),
+    ImportField('branch', ['الفرع', 'فرع', 'branch', 'store', 'location']),
   ],
-  ImportTarget.archive: [],
 };
 
 /// Folds Arabic spelling variants, case, spaces and punctuation.
@@ -154,7 +157,8 @@ class ImportIssue {
   final int row;
 
   /// missing_name | bad_number | credit_balance | bad_currency | bad_kind |
-  /// duplicate_in_file | exists | too_many_decimals
+  /// duplicate_in_file | exists | too_many_decimals | other_branch |
+  /// rejected_by_user
   final String code;
   final String? value;
 }
@@ -170,14 +174,20 @@ class PartyImportRow {
 }
 
 class ProductImportRow {
-  ProductImportRow(this.row, this.name, this.barcode, this.sku, this.unit, this.sale, this.cost, this.stock);
+  ProductImportRow(this.row, this.name, this.barcode, this.sku, this.unit, this.sale, this.cost, this.stock,
+      {this.category, this.image});
   final int row;
   final String name;
   final String? barcode, sku, unit;
   final String? sale, cost, stock;
+  final String? category;
+
+  /// A picture file name inside the same ZIP (null: none).
+  final String? image;
 }
 
-/// What the import WOULD do — shown to the user before anything is written.
+/// What the import WILL do: only the approved rows that have a place in
+/// FYONA. Built from an [ImportReview].
 class ImportPreview {
   ImportPreview(this.target, this.mapping);
   final ImportTarget target;
@@ -185,27 +195,16 @@ class ImportPreview {
   int rows = 0;
   final parties = <PartyImportRow>[];
   final products = <ProductImportRow>[];
-  final archive = <List<String?>>[];
   final issues = <ImportIssue>[];
   int issueCount = 0;
 
-  /// kind → currency → total opening balance (minor units).
+  /// kind → currency → total balance (minor units).
   final totals = <String, Map<String, int>>{};
-  int get ready => target == ImportTarget.parties
-      ? parties.length
-      : target == ImportTarget.products
-          ? products.length
-          : archive.length;
-
-  void _issue(ImportIssue i) {
-    issueCount++;
-    if (issues.length < 500) issues.add(i);
-  }
+  int get ready => target == ImportTarget.parties ? parties.length : products.length;
 }
 
-/// Checks every row of [table] with [mapping] into a preview. Rows with a
-/// problem are listed (never guessed). [existing] are names already in the
-/// branch (folded, per kind for parties): those rows are skipped.
+/// Checks every row of [table] with [mapping] (see [ImportReview]) and
+/// returns what would be imported, with every refused row listed.
 Future<ImportPreview> buildImportPreview(
   ImportTable table,
   ImportTarget target,
@@ -213,107 +212,224 @@ Future<ImportPreview> buildImportPreview(
   String defaultKind = 'customer',
   String defaultCurrency = 'SAR',
   Set<String> existing = const {},
+  Set<String> branches = const {},
+  Set<String> images = const {},
   void Function(int rows)? onRows,
 }) async {
-  final p = ImportPreview(target, Map.of(mapping));
-  final idx = {for (final e in mapping.entries) e.key: table.columns.indexOf(e.value)}..removeWhere((_, v) => v < 0);
-  String? at(List<String?> r, String f) {
-    final i = idx[f];
-    final v = i == null || i >= r.length ? null : r[i]?.trim();
-    return v == null || v.isEmpty ? null : v;
+  final r = await ImportReview.load(table, target, mapping,
+      defaultKind: defaultKind,
+      defaultCurrency: defaultCurrency,
+      existing: existing,
+      branches: branches,
+      images: images,
+      onRows: onRows);
+  return r.toPreview();
+}
+
+/// One source row under review: the mapped values (edited by the user or
+/// not), why it cannot be imported, and the user's own decision.
+class ReviewRow {
+  ReviewRow(this.row, this.values);
+  final int row;
+  final Map<String, String?> values;
+  List<String> reasons = const [];
+  List<String> warnings = const [];
+  bool rejectedByUser = false;
+  bool get accepted => reasons.isEmpty && !rejectedByUser;
+  String? operator [](String field) => values[field];
+}
+
+/// The review behind the import screen: every row of one table, mapped to
+/// FYONA fields, checked by the same rules again after every edit.
+/// Columns that map to no field are listed and never saved.
+class ImportReview {
+  ImportReview._(this.table, this.target, this.mapping, this.defaultKind, this.defaultCurrency, this.existing,
+      this.branches, this.images);
+
+  final ImportTable table;
+  final ImportTarget target;
+  final Map<String, String> mapping;
+  final String defaultKind;
+  final String defaultCurrency;
+  final Set<String> existing;
+
+  /// Folded names / ids of the branch being imported into.
+  final Set<String> branches;
+
+  /// Picture file names available in the same ZIP.
+  final Set<String> images;
+  final rows = <ReviewRow>[];
+
+  static Future<ImportReview> load(
+    ImportTable table,
+    ImportTarget target,
+    Map<String, String> mapping, {
+    String defaultKind = 'customer',
+    String defaultCurrency = 'SAR',
+    Set<String> existing = const {},
+    Set<String> branches = const {},
+    Set<String> images = const {},
+    void Function(int rows)? onRows,
+  }) async {
+    final r = ImportReview._(table, target, Map.of(mapping), defaultKind, defaultCurrency, existing,
+        {for (final b in branches) importFold(b)}, {for (final i in images) i.toLowerCase()});
+    final idx = {for (final e in r.mapping.entries) e.key: table.columns.indexOf(e.value)}..removeWhere((_, v) => v < 0);
+    var n = 0;
+    await for (final raw in table.rows()) {
+      n++;
+      if (n % 5000 == 0) onRows?.call(n);
+      final values = <String, String?>{};
+      for (final e in idx.entries) {
+        final v = e.value < raw.length ? raw[e.value]?.trim() : null;
+        values[e.key] = v == null || v.isEmpty ? null : v;
+      }
+      r.rows.add(ReviewRow(n, values));
+    }
+    onRows?.call(n);
+    if (n == 0) throw const ImportRejected('empty');
+    r.revalidate();
+    return r;
   }
 
-  final seen = <String>{};
-  await for (final r in table.rows()) {
-    final n = ++p.rows;
-    if (n % 5000 == 0) onRows?.call(n);
-    if (target == ImportTarget.archive) {
-      p.archive.add(r);
-      continue;
+  /// Columns of the file that go nowhere in FYONA (never saved).
+  List<String> get unusedColumns => [for (final c in table.columns) if (!mapping.containsValue(c)) c];
+
+  int get acceptedCount => rows.where((r) => r.accepted).length;
+  int get refusedCount => rows.length - acceptedCount;
+
+  /// Refused rows grouped by their first reason (for the red section).
+  Map<String, int> get refusedByReason {
+    final out = <String, int>{};
+    for (final r in rows) {
+      if (r.accepted) continue;
+      final k = r.reasons.isNotEmpty ? r.reasons.first : 'rejected_by_user';
+      out[k] = (out[k] ?? 0) + 1;
     }
-    final name = at(r, 'name');
-    if (name == null) {
-      p._issue(ImportIssue(n, 'missing_name'));
-      continue;
-    }
-    if (target == ImportTarget.parties) {
-      var kind = defaultKind;
-      final k = at(r, 'kind');
-      if (k != null) {
-        final f = importFold(k);
-        if (_customerWords.any((w) => f == w || f.contains(w) && w.length > 1)) {
-          kind = 'customer';
-        } else if (_supplierWords.any((w) => f == w || f.contains(w) && w.length > 1)) {
-          kind = 'supplier';
-        } else {
-          p._issue(ImportIssue(n, 'bad_kind', k));
-          continue;
-        }
-      }
-      int amount = 0;
-      final bal = at(r, 'balance'), dr = at(r, 'debit'), cr = at(r, 'credit');
-      if (bal != null || dr != null || cr != null) {
-        int? read(String? v) => v == null ? 0 : importMinor(importDecimal(v));
-        final b = read(bal), d = read(dr), c = read(cr);
-        if (b == null || d == null || c == null) {
-          p._issue(ImportIssue(n, 'bad_number', bal ?? dr ?? cr));
-          continue;
-        }
-        // Debit/credit columns: a customer owes the debit side, a supplier
-        // is owed the credit side.
-        amount = b + (kind == 'customer' ? d - c : c - d);
-      }
-      if (amount < 0) {
-        p._issue(ImportIssue(n, 'credit_balance', '${amount / 100}'));
-        continue;
-      }
-      final cur = importCurrency(at(r, 'currency'), defaultCurrency);
-      if (cur == null) {
-        p._issue(ImportIssue(n, 'bad_currency', at(r, 'currency')));
-        continue;
-      }
-      final key = '$kind|${importFold(name)}';
-      if (existing.contains(key)) {
-        p._issue(ImportIssue(n, 'exists', name));
-        continue;
-      }
-      if (!seen.add(key)) {
-        p._issue(ImportIssue(n, 'duplicate_in_file', name));
-        continue;
-      }
-      p.parties.add(PartyImportRow(n, kind, name.length > 120 ? name.substring(0, 120) : name, at(r, 'phone'), amount, cur));
-      (p.totals[kind] ??= {})[cur] = ((p.totals[kind]![cur]) ?? 0) + amount;
-    } else {
-      final sale = at(r, 'sale_price'), cost = at(r, 'cost_price'), stock = at(r, 'stock');
-      String? num(String? v) => v == null ? null : importDecimal(v);
-      final s = num(sale), c = num(cost), q = num(stock);
-      if ((sale != null && s == null) || (cost != null && c == null) || (stock != null && q == null)) {
-        p._issue(ImportIssue(n, 'bad_number', sale ?? cost ?? stock));
-        continue;
-      }
-      if ((s?.startsWith('-') ?? false) || (c?.startsWith('-') ?? false) || (q?.startsWith('-') ?? false)) {
-        p._issue(ImportIssue(n, 'bad_number', sale ?? cost ?? stock));
-        continue;
-      }
-      if ((s != null && importMinor(s) == null) || (c != null && importMinor(c) == null)) {
-        p._issue(ImportIssue(n, 'too_many_decimals', sale ?? cost));
-        continue;
-      }
-      final barcode = at(r, 'barcode');
-      final key = 'product|${barcode ?? importFold(name)}';
-      if (existing.contains(key) || existing.contains('product|${importFold(name)}')) {
-        p._issue(ImportIssue(n, 'exists', name));
-        continue;
-      }
-      if (!seen.add(key) || !seen.add('product-name|${importFold(name)}')) {
-        p._issue(ImportIssue(n, 'duplicate_in_file', name));
-        continue;
-      }
-      p.products.add(ProductImportRow(n, name.length > 120 ? name.substring(0, 120) : name, barcode, at(r, 'sku'),
-          at(r, 'unit'), s, c, q));
+    return out;
+  }
+
+  /// Edits one cell; the whole table is checked again (duplicates).
+  void edit(ReviewRow row, String field, String? value) {
+    final v = value?.trim();
+    row.values[field] = v == null || v.isEmpty ? null : v;
+    revalidate();
+  }
+
+  void setRejected(Iterable<ReviewRow> which, bool rejected) {
+    for (final r in which) {
+      r.rejectedByUser = rejected;
     }
   }
-  onRows?.call(p.rows);
-  if (p.rows == 0) throw const ImportRejected('empty');
-  return p;
+
+  /// Checks every row (same rules as the import itself).
+  void revalidate() {
+    final seen = <String>{};
+    for (final r in rows) {
+      final reasons = <String>[];
+      final warnings = <String>[];
+      final name = r['name'];
+      if (name == null) reasons.add('missing_name');
+      final b = r['branch'];
+      if (b != null && branches.isNotEmpty && !branches.contains(importFold(b))) reasons.add('other_branch');
+      if (target == ImportTarget.parties) {
+        final kind = _kindOf(r);
+        if (kind == null) reasons.add('bad_kind');
+        final amount = _amountOf(r, kind ?? defaultKind);
+        if (amount == null) {
+          reasons.add('bad_number');
+        } else if (amount < 0) {
+          reasons.add('credit_balance');
+        }
+        if (importCurrency(r['currency'], defaultCurrency) == null) reasons.add('bad_currency');
+        if (name != null && kind != null) {
+          final key = '$kind|${importFold(name)}';
+          if (existing.contains(key)) {
+            reasons.add('exists');
+          } else if (reasons.isEmpty && !r.rejectedByUser && !seen.add(key)) {
+            reasons.add('duplicate_in_file');
+          }
+        }
+      } else {
+        for (final f in ['sale_price', 'cost_price', 'stock']) {
+          final raw = r[f];
+          if (raw == null) continue;
+          final d = importDecimal(raw);
+          if (d == null || d.startsWith('-')) {
+            reasons.add('bad_number');
+            break;
+          }
+          if (f != 'stock' && importMinor(d) == null) {
+            reasons.add('too_many_decimals');
+            break;
+          }
+        }
+        final img = r['image'];
+        if (img != null && !images.contains(img.split('/').last.split('\\').last.toLowerCase())) {
+          warnings.add('image_missing');
+        }
+        if (name != null) {
+          final barcode = r['barcode'];
+          final byName = 'product|${importFold(name)}';
+          if (existing.contains(byName) || (barcode != null && existing.contains('product|$barcode'))) {
+            reasons.add('exists');
+          } else if (reasons.isEmpty && !r.rejectedByUser) {
+            final byCode = barcode == null ? null : 'barcode|$barcode';
+            if (!seen.add(byName) || (byCode != null && !seen.add(byCode))) reasons.add('duplicate_in_file');
+          }
+        }
+      }
+      r.reasons = reasons;
+      r.warnings = warnings;
+    }
+  }
+
+  String? _kindOf(ReviewRow r) {
+    final k = r['kind'];
+    if (k == null) return defaultKind;
+    final f = importFold(k);
+    if (_customerWords.any((w) => f == w || f.contains(w) && w.length > 1)) return 'customer';
+    if (_supplierWords.any((w) => f == w || f.contains(w) && w.length > 1)) return 'supplier';
+    return null;
+  }
+
+  int? _amountOf(ReviewRow r, String kind) {
+    final bal = r['balance'], dr = r['debit'], cr = r['credit'];
+    int? read(String? v) => v == null ? 0 : importMinor(importDecimal(v));
+    final b = read(bal), d = read(dr), c = read(cr);
+    if (b == null || d == null || c == null) return null;
+    // Two columns: a customer owes the "they owe" side, a supplier is owed
+    // the "we owe" side.
+    return b + (kind == 'customer' ? d - c : c - d);
+  }
+
+  /// The accepted rows, as the import will write them.
+  ImportPreview toPreview() {
+    final p = ImportPreview(target, Map.of(mapping))..rows = rows.length;
+    for (final r in rows) {
+      if (!r.accepted) {
+        p.issueCount++;
+        if (p.issues.length < 500) {
+          p.issues.add(ImportIssue(r.row, r.reasons.isNotEmpty ? r.reasons.first : 'rejected_by_user', r['name']));
+        }
+        continue;
+      }
+      final name = r['name']!;
+      final clean = name.length > 120 ? name.substring(0, 120) : name;
+      if (target == ImportTarget.parties) {
+        final kind = _kindOf(r)!;
+        final amount = _amountOf(r, kind)!;
+        final cur = importCurrency(r['currency'], defaultCurrency)!;
+        p.parties.add(PartyImportRow(r.row, kind, clean, r['phone'], amount, cur));
+        (p.totals[kind] ??= {})[cur] = (p.totals[kind]![cur] ?? 0) + amount;
+      } else {
+        String? num(String f) => r[f] == null ? null : importDecimal(r[f]);
+        final img = r['image'];
+        p.products.add(ProductImportRow(r.row, clean, r['barcode'], r['sku'], r['unit'], num('sale_price'),
+            num('cost_price'), num('stock'),
+            category: r['category'],
+            image: img != null && r.warnings.isEmpty ? img.split('/').last.split('\\').last : null));
+      }
+    }
+    return p;
+  }
 }
