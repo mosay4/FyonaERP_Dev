@@ -45,6 +45,7 @@ part 'business_product_statistics.dart';
 part 'business_operations.dart';
 part 'business_party_shares.dart';
 part 'business_backup_archive.dart';
+part 'business_accounting_export.dart';
 part 'business_debt_report.dart';
 part 'business_sales_report.dart';
 part 'business_report_cost.dart';

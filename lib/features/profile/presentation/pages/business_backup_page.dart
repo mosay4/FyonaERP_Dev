@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../../core/network/api_client.dart' show serverBaseUrlProvider;
 import '../../../../core/network/dio_provider.dart';
+import '../../../../core/export/presentation/accounting_export_page.dart';
 import '../../../../core/backup/backup_providers.dart';
 import '../../../../core/backup/presentation/continuous_backup_page.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -322,6 +323,7 @@ class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
         padding: const EdgeInsets.all(16),
         children: [
           if (local) const ContinuousBackupEntry(kind: BackupKind.business),
+          if (local) const AccountingExportEntry(),
           Text(
             local
                 ? 'نسخة مشفّرة من سجلات هذا الفرع على الجهاز. لا تشمل تسجيل الدخول أو الشخصي. '

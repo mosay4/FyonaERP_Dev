@@ -6521,5 +6521,15 @@
   "bk2Err_not_verified": "The backup failed verification; nothing was restored",
   "bk2Err_no_set": "Backup not available",
   "bk2Err_apply_failed": "Restore failed; nothing changed",
-  "bk2Err_not_empty": "The branch has data; restore goes into an empty branch only to protect balances"
+  "bk2Err_not_empty": "The branch has data; restore goes into an empty branch only to protect balances",
+  "axTitle": "Accounting export (Excel / CSV)",
+  "axEntrySubtitle": "What each customer, supplier and account stood at on a date you choose, with invoices, payments and stock",
+  "axIntro": "Creates a ZIP with Excel, CSV, product photos and a manifest that proves the content is complete. Balances are taken at the end of the cut-off day from this branch's records, without changing them.",
+  "axCutoff": "Cut-off date",
+  "axImages": "Include product photos",
+  "axRun": "Export",
+  "axWorking": "Exporting…",
+  "axDone": "Export complete",
+  "axWarnings": "{n} documents changed after the cut-off — listed in the manifest",
+  "axFailed": "Export failed; nothing changed"
 }
