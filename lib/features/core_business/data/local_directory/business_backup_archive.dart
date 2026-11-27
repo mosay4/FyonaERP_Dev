@@ -6,7 +6,14 @@ const _manifestTable = 'fyona_business_backup_manifest';
 const _archiveFormat = 'fyona.business-backup.v1';
 // Live admission reservations are not exported. The archive wire shape is v14.
 const _archiveVersion = 14;
+/// Cap for a branch archive file chosen by the user (an untrusted file).
 const businessBackupMaxBytes = 64 * 1024 * 1024;
+
+/// Cap for the archive the app itself makes from a backup set it has just
+/// rebuilt and verified (continuous backup restore). SQLite copies it page
+/// by page on disk — nothing is held in memory — so the only limit needed
+/// is a sanity ceiling against a runaway file.
+const businessBackupRebuildMaxBytes = 64 * 1024 * 1024 * 1024;
 
 // A backup includes every persisted branch fact, including replay markers,
 // balances, pending commands and archived source rows. A replica admission,
@@ -145,6 +152,7 @@ extension BusinessBackupLedger on BusinessLedger {
     required File destination,
     required BusinessBackupCode code,
     required bool Function() allowed,
+    int maxBytes = businessBackupMaxBytes,
   }) async {
     final branch = _branch(access, BusinessLedgerAction.manageBackup);
     _requireBackupAccess(access, allowed);
@@ -158,7 +166,7 @@ extension BusinessBackupLedger on BusinessLedger {
       if (pageSize == null || pageSize < 512 || pageSize > 65536)
         throw _badBackup;
       await db.rawQuery(
-        'PRAGMA $_archive.max_page_count = ${businessBackupMaxBytes ~/ pageSize}',
+        'PRAGMA $_archive.max_page_count = ${maxBytes ~/ pageSize}',
       );
       await db.rawQuery('PRAGMA $_archive.journal_mode = DELETE');
       await db.execute('PRAGMA $_archive.synchronous = FULL');
@@ -230,12 +238,13 @@ extension BusinessBackupLedger on BusinessLedger {
     required BusinessBackupCode code,
     required bool Function() allowed,
     String? expectedId,
+    int maxBytes = businessBackupMaxBytes,
   }) async {
     final branch = _branch(access, BusinessLedgerAction.manageBackup);
     _requireBackupAccess(access, allowed);
     final length = await source.length();
     if (length <= 0) throw _badBackup;
-    if (length > businessBackupMaxBytes) {
+    if (length > maxBytes) {
       throw const BusinessBackupRejected(BusinessBackupProblem.tooLarge);
     }
     final digest = (await sha256.bind(source.openRead()).single).toString();

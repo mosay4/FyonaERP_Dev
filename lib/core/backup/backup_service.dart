@@ -10,15 +10,25 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../media/media_store.dart';
 import 'backup_crypto.dart';
 import 'backup_engine.dart';
+import 'backup_stream.dart';
 
 /// Where backup parts go: this device's files, or Cloudflare R2.
+///
+/// Parts move as FILES (streamed): a part never has to fit in memory.
+/// [put] / [get] remain for the small parts (manifest, key, extras).
 abstract class BackupDestination {
   String get id;
   Future<void> put(String backupId, String part, Uint8List data);
   Future<Uint8List?> get(String backupId, String part);
+  Future<void> putFile(String backupId, String part, File source, {bool move = false});
+  Future<bool> getFile(String backupId, String part, File into);
+  Future<bool> has(String backupId, String part);
   Future<List<String>> sets();
   Future<void> deleteSet(String backupId);
 }
+
+/// The largest part read whole into memory (manifest / key / extras).
+const backupSmallPartMax = 64 * 1024 * 1024;
 
 /// Backups as files on this device (`<root>/<backupId>/<part>`), written
 /// atomically (temp file + rename): a crash never leaves a half part.
@@ -28,9 +38,11 @@ class LocalBackupDestination implements BackupDestination {
   @override
   String get id => 'local';
 
+  File file(String backupId, String part) => File('${root.path}/$backupId/$part');
+
   @override
   Future<void> put(String backupId, String part, Uint8List data) async {
-    final f = File('${root.path}/$backupId/$part');
+    final f = file(backupId, part);
     await f.parent.create(recursive: true);
     final tmp = File('${f.path}.tmp');
     await tmp.writeAsBytes(data, flush: true);
@@ -38,10 +50,41 @@ class LocalBackupDestination implements BackupDestination {
   }
 
   @override
-  Future<Uint8List?> get(String backupId, String part) async {
-    final f = File('${root.path}/$backupId/$part');
-    return await f.exists() ? f.readAsBytes() : null;
+  Future<void> putFile(String backupId, String part, File source, {bool move = false}) async {
+    final f = file(backupId, part);
+    await f.parent.create(recursive: true);
+    if (move) {
+      try {
+        await source.rename(f.path);
+        return;
+      } on FileSystemException {
+        // another volume: copy below
+      }
+    }
+    final tmp = File('${f.path}.tmp');
+    await source.copy(tmp.path);
+    await tmp.rename(f.path);
   }
+
+  @override
+  Future<Uint8List?> get(String backupId, String part) async {
+    final f = file(backupId, part);
+    if (!await f.exists()) return null;
+    if (await f.length() > backupSmallPartMax) throw const BackupTampered('part too large');
+    return f.readAsBytes();
+  }
+
+  @override
+  Future<bool> getFile(String backupId, String part, File into) async {
+    final f = file(backupId, part);
+    if (!await f.exists()) return false;
+    await into.parent.create(recursive: true);
+    await f.copy(into.path);
+    return true;
+  }
+
+  @override
+  Future<bool> has(String backupId, String part) => file(backupId, part).exists();
 
   @override
   Future<List<String>> sets() async {
@@ -62,11 +105,14 @@ class LocalBackupDestination implements BackupDestination {
 /// Plain state of one database's backups (persisted by the caller).
 class BackupState {
   BackupState({this.backupId, this.s0 = 0, this.lastSeq = 0, List<Map<String, dynamic>>? deltas,
-      Set<String>? media, this.createdAt = 0, Map<String, int>? doneSeq, Map<String, int>? lastOkAt, this.checkpoint})
+      Set<String>? media, this.createdAt = 0, Map<String, int>? doneSeq, Map<String, int>? lastOkAt, this.checkpoint,
+      List<String>? snapshot, Map<String, int>? mediaParts})
       : deltas = deltas ?? [],
         media = media ?? {},
         doneSeq = doneSeq ?? {},
-        lastOkAt = lastOkAt ?? {};
+        lastOkAt = lastOkAt ?? {},
+        snapshot = snapshot ?? ['s.fybk'],
+        mediaParts = mediaParts ?? {};
 
   String? backupId;
   int s0;
@@ -74,6 +120,12 @@ class BackupState {
   final List<Map<String, dynamic>> deltas;
   final Set<String> media;
   int createdAt;
+
+  /// Chunk files of the snapshot (one for small ledgers).
+  List<String> snapshot;
+
+  /// Media sha → number of chunk files (absent = 1).
+  final Map<String, int> mediaParts;
 
   /// Highest change seq each destination fully holds (manifest written).
   final Map<String, int> doneSeq;
@@ -85,6 +137,7 @@ class BackupState {
         'x': hasExtras,
         'id': backupId, 's0': s0, 'last': lastSeq, 'deltas': deltas, 'media': media.toList(),
         'created': createdAt, 'done': doneSeq, 'ok': lastOkAt, 'cp': checkpoint,
+        'sp': snapshot, 'mp': mediaParts,
       };
 
   static BackupState fromJson(Map? j) {
@@ -99,8 +152,27 @@ class BackupState {
       doneSeq: {for (final e in (j['done'] as Map? ?? const {}).entries) '${e.key}': (e.value as num).toInt()},
       lastOkAt: {for (final e in (j['ok'] as Map? ?? const {}).entries) '${e.key}': (e.value as num).toInt()},
       checkpoint: (j['cp'] as Map?)?.cast<String, dynamic>(),
+      snapshot: [for (final n in (j['sp'] as List? ?? const ['s.fybk'])) '$n'],
+      mediaParts: {for (final e in (j['mp'] as Map? ?? const {}).entries) '${e.key}': (e.value as num).toInt()},
     )..hasExtras = j['x'] == true;
   }
+}
+
+/// Chunk file names of a logical part `<base>.fybk` split in [n].
+List<String> backupChunks(String base, int n) => [for (var i = 0; i < n; i++) i == 0 ? '$base.fybk' : '$base.$i.fybk'];
+
+/// Every file of a set, from its manifest (old single-file sets included).
+List<String> backupPartsOf(Map<String, dynamic> man) {
+  final snap = man['snapshot'];
+  final mp = (man['mparts'] as Map? ?? const {});
+  return [
+    if (snap is List) ...snap.map((e) => '$e') else '$snap',
+    for (final d in (man['deltas'] as List? ?? const []).cast<Map>())
+      ...((d['parts'] as List?)?.map((e) => '$e') ?? ['${d['name']}']),
+    for (final sha in (man['media'] as List? ?? const []).cast<String>())
+      ...backupChunks('m-$sha', (mp[sha] as num?)?.toInt() ?? 1),
+    if (man['extras'] != null) '${man['extras']}',
+  ];
 }
 
 /// Result of one backup run (for the status line and reports).
@@ -117,12 +189,14 @@ class BackupRun {
 
 /// Runs FYONA backups for one database.
 ///
-/// A *set* = one fuzzy snapshot (`s.fybk`) + ordered change parts
-/// (`d-<from>-<to>.fybk`) + encrypted media (`m-<sha>.fybk`) + the wrapped
-/// key (`key.json`) + `manifest.enc`, which is written LAST on every
-/// destination: a set without its manifest (crash / network loss mid-way)
-/// simply does not exist for restore. A new set starts every [setAge] or
-/// after [maxDeltas] parts; [keepSets] newest complete sets are kept.
+/// A *set* = one fuzzy snapshot (`s.fybk`, `s.1.fybk`, … chunks) + ordered
+/// change parts (`d-<from>-<to>.fybk`, chunked the same way) + encrypted
+/// media (`m-<sha>.fybk` …) + the wrapped key (`key.json`) +
+/// `manifest.enc`, which is written LAST on every destination: a set without
+/// its manifest (crash / network loss mid-way) simply does not exist for
+/// restore. Everything is streamed through files in [work], so the size of
+/// the ledger does not matter for memory. A new set starts every [setAge]
+/// or after [maxDeltas] parts; [keepSets] newest complete sets are kept.
 class BackupService {
   BackupService({
     required this.engine,
@@ -131,11 +205,15 @@ class BackupService {
     required this.destinations,
     required this.scope,
     this.media,
+    Directory? work,
     this.setAge = const Duration(days: 7),
     this.maxDeltas = 200,
     this.keepSets = 3,
+    this.partBytes = BackupStream.partBytes,
     int Function()? now,
-  }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
+  })  : work = work ?? Directory('${Directory.systemTemp.path}/fyona-backup-work-$pid-${_rng.nextInt(1 << 32)}'),
+        _sweep = work != null,
+        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final BackupEngine engine;
   final SecretKey key;
@@ -143,19 +221,23 @@ class BackupService {
   final List<BackupDestination> destinations;
   final String scope; // e.g. personal:<uid> / business:<org>/<branch>
   final MediaStore? media;
+  final Directory work;
   final Duration setAge;
   final int maxDeltas;
   final int keepSets;
+  final int partBytes;
+  final bool _sweep; // a dedicated work folder: leftovers of a killed run are removed
   final int Function() _now;
 
   static final _rng = Random.secure();
+
+  String _rand() => List.generate(6, (_) => _rng.nextInt(36).toRadixString(36)).join();
 
   String _newId() {
     final t = DateTime.fromMillisecondsSinceEpoch(_now(), isUtc: true);
     final stamp = '${t.year}${t.month.toString().padLeft(2, '0')}${t.day.toString().padLeft(2, '0')}'
         '-${t.hour.toString().padLeft(2, '0')}${t.minute.toString().padLeft(2, '0')}${t.second.toString().padLeft(2, '0')}';
-    final rnd = List.generate(6, (_) => _rng.nextInt(36).toRadixString(36)).join();
-    return 'bk-$stamp-$rnd';
+    return 'bk-$stamp-${_rand()}';
   }
 
   /// One run: new set or new change part, sent to every destination.
@@ -169,58 +251,97 @@ class BackupService {
     final newSet = state.backupId == null ||
         _now() - state.createdAt > setAge.inMilliseconds ||
         state.deltas.length >= maxDeltas;
-    final parts = <String, Uint8List>{};
+    // Nothing written since the last run: no work at all (no table scan).
+    if (!newSet && await engine.lastSeq(db) == state.lastSeq &&
+        destinations.every((d) => (state.doneSeq[d.id] ?? -1) >= state.lastSeq)) {
+      return BackupRun(backupId: state.backupId!, newSet: false, changes: 0, bytes: 0, destinations: const [], failed: failed);
+    }
+    if (_sweep && await work.exists()) {
+      await for (final e in work.list()) {
+        if (e is Directory && e.uri.pathSegments.where((s) => s.isNotEmpty).last.startsWith('run-')) {
+          await e.delete(recursive: true);
+        }
+      }
+    }
+    final dir = Directory('${work.path}/run-${_now()}-${_rand()}');
+    await dir.create(recursive: true);
+    try {
+      return await _run(db, state, extras, newSet, dir, failed);
+    } finally {
+      if (await dir.exists()) await dir.delete(recursive: true);
+    }
+  }
+
+  Future<BackupRun> _run(Database db, BackupState state, Map<String, dynamic>? extras, bool newSet, Directory dir,
+      Map<String, String> failed) async {
+    final parts = <String>[]; // files in [dir], in upload order
     var changes = 0;
     final prevSeq = state.lastSeq;
     final prevDone = Map<String, int>.of(state.doneSeq);
+    final refs = <String>{};
+    void collect(String line) => refs.addAll(BackupEngine.mediaRefsOf(line));
     if (newSet) {
-      final lines = <String>[];
-      final s0 = await engine.snapshot(db, lines.add);
+      final w = BackupLineWriter(dir, 's', key, partBytes: partBytes, onLine: collect);
+      final s0 = await engine.snapshot(db, w.add);
+      final names = await w.close();
       state
         ..backupId = _newId()
         ..s0 = s0
         ..lastSeq = s0
+        ..snapshot = names
         ..deltas.clear()
         ..media.clear()
+        ..mediaParts.clear()
         ..createdAt = _now()
         ..doneSeq.clear();
-      parts['s.fybk'] = await BackupContainer.seal(BackupEngine.pack(lines), key);
-      parts['key.json'] = Uint8List.fromList(utf8.encode(jsonEncode(wrappedKey)));
-      await _media(lines, state, parts);
-      changes = lines.length;
+      parts.addAll(names);
+      await File('${dir.path}/key.json').writeAsString(jsonEncode(wrappedKey), flush: true);
+      parts.add('key.json');
+      changes = w.lineCount;
     }
-    final d = await engine.delta(db, state.lastSeq);
-    if (d.lines.isNotEmpty || newSet) {
-      final from = state.lastSeq, to = d.checkpoint.seq;
-      if (d.lines.isNotEmpty) {
-        final name = 'd-$from-$to.fybk';
-        parts[name] = await BackupContainer.seal(BackupEngine.pack(d.lines), key);
-        state.deltas.add({'name': name, 'from': from, 'to': to});
-        await _media(d.lines, state, parts);
-        changes += d.lines.length;
+    final head = await engine.head(db);
+    if (head.seq > state.lastSeq || newSet) {
+      final from = state.lastSeq, to = head.seq;
+      if (to > from) {
+        final w = BackupLineWriter(dir, 'd-$from-$to', key, partBytes: partBytes, onLine: collect);
+        await for (final l in engine.changeLines(db, from, to)) {
+          await w.add(l);
+        }
+        final names = await w.close();
+        state.deltas.add({'name': names.first, 'from': from, 'to': to, if (names.length > 1) 'parts': names});
+        parts.addAll(names);
+        changes += w.lineCount;
       }
       state
         ..lastSeq = to
-        ..checkpoint = d.checkpoint.toJson();
+        ..checkpoint = head.toJson();
     }
+    parts.addAll(await _media(refs, state, dir));
     if (extras != null && parts.isNotEmpty) {
-      parts['x.fybk'] = await BackupContainer.seal(Uint8List.fromList(utf8.encode(jsonEncode(extras))), key);
+      await _small(dir, 'x.fybk', utf8.encode(jsonEncode(extras)));
+      parts.add('x.fybk');
       state.hasExtras = true;
     }
-    if (parts.isEmpty) {
+    if (parts.isEmpty && destinations.every((d) => (prevDone[d.id] ?? -1) >= prevSeq)) {
       return BackupRun(backupId: state.backupId!, newSet: false, changes: 0, bytes: 0, destinations: const [], failed: failed);
     }
-    parts['manifest.enc'] = await BackupContainer.seal(Uint8List.fromList(utf8.encode(jsonEncode(_manifest(state)))), key);
+    await _small(dir, 'manifest.enc', utf8.encode(jsonEncode(_manifest(state))));
+    var bytes = 0;
+    for (final p in [...parts, 'manifest.enc']) {
+      bytes += await File('${dir.path}/$p').length();
+    }
     final ok = <String>[];
-    for (final dest in destinations) {
+    for (var i = 0; i < destinations.length; i++) {
+      final dest = destinations[i];
+      final last = i == destinations.length - 1;
       try {
         // Destinations that missed earlier parts of this set get them now.
-        for (final e in parts.entries.where((e) => e.key != 'manifest.enc')) {
-          await dest.put(state.backupId!, e.key, e.value);
+        for (final p in parts) {
+          await dest.putFile(state.backupId!, p, File('${dir.path}/$p'), move: last);
         }
         // Only a destination that missed an earlier run needs catching up.
-        if (!newSet && (prevDone[dest.id] ?? -1) < prevSeq) await _catchUp(dest, state, db);
-        await dest.put(state.backupId!, 'manifest.enc', parts['manifest.enc']!);
+        if (!newSet && (prevDone[dest.id] ?? -1) < prevSeq) await _catchUp(dest, state, db, dir);
+        await dest.putFile(state.backupId!, 'manifest.enc', File('${dir.path}/manifest.enc'), move: last);
         state.doneSeq[dest.id] = state.lastSeq;
         state.lastOkAt[dest.id] = _now();
         ok.add(dest.id);
@@ -234,61 +355,108 @@ class BackupService {
       await engine.forget(db, state.lastSeq);
     }
     return BackupRun(backupId: state.backupId!, newSet: newSet, changes: changes,
-        bytes: parts.values.fold(0, (s, p) => s + p.length), destinations: ok, failed: failed);
+        bytes: bytes, destinations: ok, failed: failed);
   }
 
-  Future<void> _catchUp(BackupDestination dest, BackupState state, Database db) async {
+  Future<void> _small(Directory dir, String name, List<int> plain) async {
+    final w = BackupFileWriter(File('${dir.path}/$name'), key);
+    await w.add(plain);
+    await w.close();
+  }
+
+  Future<void> _catchUp(BackupDestination dest, BackupState state, Database db, Directory dir) async {
     // A destination that failed before may lack earlier parts of this set.
     // Copy them from a destination that has them (identical bytes), else
     // rebuild change parts from the device log (kept until EVERY destination
     // holds them). A snapshot nobody has forces a new set next run.
     final id = state.backupId!;
-    final need = ['s.fybk', 'key.json', for (final d in state.deltas) d['name'] as String,
-      for (final m in state.media) 'm-${MediaStore.shaOf(m)}.fybk'];
-    for (final name in need) {
-      if (await dest.get(id, name) != null) continue;
-      Uint8List? bytes;
+    final fix = Directory('${dir.path}/catch-up');
+    await fix.create(recursive: true);
+    Future<bool> fromOthers(String name) async {
       for (final other in destinations) {
         if (identical(other, dest)) continue;
         try {
-          bytes = await other.get(id, name);
+          final f = File('${fix.path}/$name');
+          if (await other.getFile(id, name, f)) {
+            await dest.putFile(id, name, f, move: true);
+            return true;
+          }
         } catch (_) {}
-        if (bytes != null) break;
       }
-      if (bytes == null && name.startsWith('d-')) {
-        final d = state.deltas.firstWhere((d) => d['name'] == name);
-        bytes = await BackupContainer.seal(
-            BackupEngine.pack(await engine.range(db, d['from'] as int, d['to'] as int)), key);
+      return false;
+    }
+
+    Never lost(String name) {
+      state.createdAt = 0; // start a fresh set on the next run
+      throw StateError('part $name lost on ${dest.id}; a new set will be made');
+    }
+
+    for (final name in state.snapshot) {
+      if (!await dest.has(id, name) && !await fromOthers(name)) lost(name);
+    }
+    if (!await dest.has(id, 'key.json') && !await fromOthers('key.json')) {
+      await dest.put(id, 'key.json', Uint8List.fromList(utf8.encode(jsonEncode(wrappedKey))));
+    }
+    for (final d in state.deltas) {
+      final names = [for (final n in (d['parts'] as List?) ?? [d['name']]) '$n'];
+      var missing = false;
+      for (final n in names) {
+        if (!await dest.has(id, n) && !await fromOthers(n)) missing = true;
       }
-      if (bytes == null && name == 'key.json') bytes = Uint8List.fromList(utf8.encode(jsonEncode(wrappedKey)));
-      if (bytes == null && name.startsWith('m-') && media != null) {
-        final raw = await media!.read(MediaStore.refFor(name.substring(2, name.length - 5)));
-        if (raw != null) bytes = await BackupContainer.seal(raw, key);
+      if (!missing) continue;
+      final from = d['from'] as int, to = d['to'] as int;
+      final w = BackupLineWriter(fix, 'd-$from-$to', key, partBytes: partBytes);
+      await for (final l in engine.changeLines(db, from, to)) {
+        await w.add(l);
       }
-      if (bytes == null) {
-        state.createdAt = 0; // start a fresh set on the next run
-        throw StateError('part $name lost on ${dest.id}; a new set will be made');
+      final rebuilt = await w.close();
+      if (rebuilt.length != names.length) lost(names.first);
+      for (final n in rebuilt) {
+        await dest.putFile(id, n, File('${fix.path}/$n'), move: true);
       }
-      await dest.put(id, name, bytes);
+    }
+    for (final ref in state.media) {
+      final sha = MediaStore.shaOf(ref)!;
+      final names = backupChunks('m-$sha', state.mediaParts[sha] ?? 1);
+      var missing = false;
+      for (final n in names) {
+        if (!await dest.has(id, n) && !await fromOthers(n)) missing = true;
+      }
+      if (!missing) continue;
+      final src = media?.fileOf(ref);
+      if (src == null) lost(names.first);
+      final made = await sealFileChunks(src, fix, 'm-$sha', key, partBytes: partBytes);
+      if (made.length != names.length) lost(names.first);
+      for (final n in made) {
+        await dest.putFile(id, n, File('${fix.path}/$n'), move: true);
+      }
     }
   }
 
-  Future<void> _media(List<String> lines, BackupState state, Map<String, Uint8List> parts) async {
+  /// Media referenced by new records: sealed straight from the device file
+  /// (streamed, chunked like any part).
+  Future<List<String>> _media(Set<String> refs, BackupState state, Directory dir) async {
     final store = media;
-    if (store == null) return;
-    for (final ref in BackupEngine.mediaRefs(lines)) {
+    if (store == null) return const [];
+    final out = <String>[];
+    for (final ref in refs) {
       if (state.media.contains(ref)) continue;
-      final bytes = await store.read(ref);
-      if (bytes == null) continue; // not on this device: listed as missing in the manifest
-      parts['m-${MediaStore.shaOf(ref)}.fybk'] = await BackupContainer.seal(bytes, key);
+      final file = store.fileOf(ref);
+      if (file == null) continue; // not on this device: listed as missing in the manifest
+      final sha = MediaStore.shaOf(ref)!;
+      final names = await sealFileChunks(file, dir, 'm-$sha', key, partBytes: partBytes);
+      if (names.length > 1) state.mediaParts[sha] = names.length;
       state.media.add(ref);
+      out.addAll(names);
     }
+    return out;
   }
 
   Map<String, dynamic> _manifest(BackupState s) => {
         'v': 2, 'scope': scope, 'id': s.backupId, 'created': s.createdAt, 'updated': _now(),
-        's0': s.s0, 'snapshot': 's.fybk', 'deltas': s.deltas, 'checkpoint': s.checkpoint,
+        's0': s.s0, 'snapshot': s.snapshot, 'deltas': s.deltas, 'checkpoint': s.checkpoint,
         'media': [for (final m in s.media) MediaStore.shaOf(m)],
+        if (s.mediaParts.isNotEmpty) 'mparts': s.mediaParts,
         if (s.hasExtras) 'extras': 'x.fybk',
       };
 
@@ -302,6 +470,12 @@ class BackupService {
 }
 
 /// Reads and verifies a backup set, then rebuilds it into a NEW database.
+///
+/// Streamed end to end: each part is read frame by frame (authenticated
+/// before use), decompressed in small slices and applied in batches inside
+/// one transaction of the new database. Media are verified by SHA-256 into
+/// a staging folder and only handed to the media store once the whole
+/// database is rebuilt and verified — until then nothing is visible.
 class BackupRestorer {
   BackupRestorer({required this.engine});
   final BackupEngine engine;
@@ -322,42 +496,89 @@ class BackupRestorer {
     return (jsonDecode(utf8.decode(await BackupContainer.open(b, key))) as Map).cast<String, dynamic>();
   }
 
-  /// Every part is downloaded and authenticated BEFORE anything is written;
-  /// then the database is rebuilt into [target] and verified (row counts +
-  /// numeric totals of every table + SQLite integrity). Media files are
-  /// verified against their SHA-256 and put in [mediaStore].
   Future<List<String>> restore(BackupDestination src, String backupId, SecretKey key, Database target,
-      {MediaStore? mediaStore}) async {
+      {MediaStore? mediaStore, Directory? work, void Function(String stage, int done)? onProgress}) async {
     final man = await manifest(src, backupId, key);
-    final snap = await src.get(backupId, '${man['snapshot']}');
-    if (snap == null) throw const BackupTampered('snapshot missing');
-    final snapLines = BackupEngine.unpack(await BackupContainer.open(snap, key));
-    final changeLines = <String>[];
+    final dir = work ?? Directory('${Directory.systemTemp.path}/fyona-restore-${DateTime.now().microsecondsSinceEpoch}');
+    await dir.create(recursive: true);
+    try {
+      return await _restore(src, backupId, key, target, man, mediaStore, dir, onProgress);
+    } finally {
+      if (await dir.exists()) await dir.delete(recursive: true);
+    }
+  }
+
+  Future<List<String>> _restore(BackupDestination src, String backupId, SecretKey key, Database target,
+      Map<String, dynamic> man, MediaStore? mediaStore, Directory dir,
+      void Function(String stage, int done)? onProgress) async {
+    // The chain must be complete before anything is read.
     var expectFrom = (man['s0'] as num).toInt();
     for (final d in (man['deltas'] as List).cast<Map>()) {
       if ((d['from'] as num).toInt() != expectFrom) throw const BackupTampered('gap in change parts');
-      final p = await src.get(backupId, '${d['name']}');
-      if (p == null) throw BackupTampered('missing ${d['name']}');
-      changeLines.addAll(BackupEngine.unpack(await BackupContainer.open(p, key)));
       expectFrom = (d['to'] as num).toInt();
     }
+    Future<File> fetch(String name) async {
+      if (src is LocalBackupDestination) {
+        final f = src.file(backupId, name);
+        if (!await f.exists()) throw BackupTampered('missing $name');
+        return f;
+      }
+      final f = File('${dir.path}/parts/$name');
+      if (!await src.getFile(backupId, name, f)) throw BackupTampered('missing $name');
+      return f;
+    }
+
+    final snap = man['snapshot'];
+    final snapFiles = [for (final n in snap is List ? snap : [snap]) await fetch('$n')];
+    final deltaFiles = [
+      for (final d in (man['deltas'] as List).cast<Map>())
+        [for (final n in (d['parts'] as List?) ?? [d['name']]) await fetch('$n')],
+    ];
+    // Media first, into staging: verified (hash) before the database is built.
+    final mp = (man['mparts'] as Map? ?? const {});
     final missingMedia = <String>[];
-    final mediaBytes = <String, Uint8List>{};
+    final staged = <String, File>{};
+    var m = 0;
     for (final sha in (man['media'] as List).cast<String>()) {
-      final p = await src.get(backupId, 'm-$sha.fybk');
-      if (p == null) {
+      final names = backupChunks('m-$sha', (mp[sha] as num?)?.toInt() ?? 1);
+      final files = <File>[];
+      try {
+        for (final n in names) {
+          files.add(await fetch(n));
+        }
+      } on BackupTampered {
+        files.clear();
+      }
+      if (files.length != names.length) {
         missingMedia.add(sha);
         continue;
       }
-      final bytes = await BackupContainer.open(p, key);
-      if (MediaStore.shaHex(bytes) != sha) throw BackupTampered('media $sha altered');
-      mediaBytes[sha] = bytes;
+      final out = File('${dir.path}/media/$sha');
+      await out.parent.create(recursive: true);
+      final sink = out.openWrite();
+      try {
+        await sink.addStream(BackupStream.bytes(files, key, sha: sha));
+        await sink.flush();
+      } on BackupTampered {
+        await sink.close();
+        throw BackupTampered('media $sha altered');
+      }
+      await sink.close();
+      staged[sha] = out;
+      onProgress?.call('media', ++m);
     }
-    final problems = await engine.restore(
-        target, snapLines, changeLines, BackupCheckpoint.fromJson(man['checkpoint'] as Map));
-    if (mediaStore != null) {
-      for (final e in mediaBytes.entries) {
-        await mediaStore.putVerified(e.key, e.value, mime: 'application/octet-stream');
+    Stream<String> changes() async* {
+      for (final files in deltaFiles) {
+        yield* BackupStream.lines(files, key);
+      }
+    }
+
+    final problems = await engine.restoreStream(
+        target, BackupStream.lines(snapFiles, key), changes(), BackupCheckpoint.fromJson(man['checkpoint'] as Map),
+        onProgress: (n) => onProgress?.call('records', n));
+    if (problems.isEmpty && mediaStore != null) {
+      for (final e in staged.entries) {
+        await mediaStore.adopt(e.key, e.value, mime: 'application/octet-stream');
       }
     }
     return [...problems, for (final m in missingMedia) 'media $m not in the backup'];

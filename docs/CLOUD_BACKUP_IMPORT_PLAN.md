@@ -93,4 +93,57 @@ bridges, providers, presentation). Tests: `test/backup/`. CI job `backup-media`.
 Measured (host CPU, test suite): 100 products 0.25 s / 6 KB; 10k 3.7 s / 373 KB;
 100k 38 s / 3.6 MB encrypted (background isolate, UI not blocked).
 Kill test: 15 rounds, job killed at random moments — every offered set verified.
-Known limit: Business restore via the v1 archive is bounded by its 64 MB cap.
+~~Known limit: Business restore via the v1 archive is bounded by its 64 MB cap.~~ Removed in 3b.
+
+## Phase 3b — Large backups and restores (no size cap, constant memory)
+
+Where 64 MB came from: (1) `businessBackupMaxBytes`, the cap of the v1 branch archive (a user-chosen,
+untrusted file), used by the v2 bridge; (2) the v2 set itself kept every part in memory (snapshot
+lines → gzip → seal → bytes); (3) the server signs at most 64 MB per backup object.
+
+What changed (format stays FYBK v2; old sets still restore):
+* `backup_stream.dart`: container files are written and read one 1 MiB frame at a time
+  (`BackupFileWriter`, `BackupStream.frames`); JSONL records are gzip-streamed into chunk files of
+  32 MB (`s.fybk`, `s.1.fybk`, … / `d-<from>-<to>.fybk`, … / `m-<sha>.fybk`, …) — resumable per
+  chunk and under the server's object cap. Manifest: `snapshot` is a list; `mparts` counts media chunks.
+* Engine: the snapshot is streamed to the writer; change parts are paged (`changeLines`); the
+  checkpoint transaction (`head`) only reads counts/totals; a run with no new change does no table scan.
+  Restore (`restoreStream`) applies records in batches inside ONE transaction of a NEW file.
+* Destinations move files (`putFile`/`getFile`, streamed HTTP up/down); small parts (manifest, key,
+  extras) are still read whole, capped at 64 MB.
+* Media are verified (SHA-256, streamed) into a staging folder and only adopted by the media store
+  after the database copy is verified.
+* Business bridge: the archive the app makes itself from the verified copy has a 64 GB sanity
+  ceiling (`businessBackupRebuildMaxBytes`; SQLite copies pages on disk). The rebuilt copy is
+  deleted before the live restore (disk peak ≈ copy + archive). A user-chosen archive file keeps 64 MB.
+* Hostile files: frame length ≤ 1 MiB + tag, record ≤ 64 MB, decompressed ≤ 1100 × file size
+  (zip bomb stops early), inflate fed in 16 KB slices (bounded memory), every frame authenticated
+  before use, gap / missing chunk / hash mismatch abort before anything is visible.
+* Leftovers of an interrupted backup run / restore are removed on the next run.
+* Unchanged: accounting, sync, branches, permissions — the live step is still the app's own branch
+  restore (empty branch only, one transaction, recovery receipt; a second restore is refused).
+
+Evidence: `test/backup/backup_large_restore_test.dart` (opt-in: `FYONA_LARGE_RESTORE=100,500,1000`,
+`FYONA_LARGE_KILLS=n`): two branches, real operations, invoice volume, photos/attachments, backup with
+live changes, restore on a new device, SHA-256 per table, balances via the app API, every attachment,
+SIGKILL during rebuild and during the live commit. CI: manual job `heavy-backup` (100 + 500 MB).
+
+Remaining limit: the Personal v2 restore goes through the v4 snapshot of the v1 restore (built in
+memory). Personal ledgers are small (no stock / invoice volume); a streamed Personal apply is a follow-up.
+
+## Phase 4 — Accounting export (Excel / CSV / opening balances at a cut-off day)
+
+* `business_accounting_export.dart` (ledger extension, read-only, owner only): sheets opening_accounts,
+  opening_parties, opening_stock, documents, document_lines, payments, returns, bank_movements.
+* Every figure is anchored on today's app value; a past cut-off takes back later events (payments,
+  returns replayed with the app's rule "balance first, rest refunded", bank legs, stock movements).
+  Documents edited / deleted / cancelled after the cut-off are listed as warnings (today's figures kept).
+* `accounting_export_writer.dart`: CSV (UTF-8 BOM, RFC 4180) + XLSX (hand-built SpreadsheetML,
+  inline strings, RTL for Arabic, frozen header, 1,048,575 rows per sheet then a continuation sheet),
+  formula-injection guard, product photos, manifest.json (rows, SHA-256 per file, control totals,
+  warnings, definitions). Streamed to disk; ZIP built in a background isolate.
+* UI: "تصدير محاسبي" card on the Business backup screen (owner, device ledger), cut-off date, photos.
+* Tests (`test/export`): today = the app's own party balances / account balance / stock; past
+  cut-off exact (later payment, return, sale taken back); branch isolation; SHA-256 of every file;
+  formula neutralised; XML well-formed, sheet rows = CSV rows; AR + EN; employee refused;
+  100 000 invoices streamed (time + memory measured).

@@ -115,7 +115,8 @@ abstract final class BackupBridges {
     final work = Directory('${File(copyPath).parent.path}/bk2-apply-${DateTime.now().microsecondsSinceEpoch}');
     await work.create(recursive: true);
     final storage = access.workspace.storageId;
-    await File(copyPath).rename(DirectoryDatabase.filePath(work, access.workspace));
+    final copyFile = DirectoryDatabase.filePath(work, access.workspace);
+    await File(copyPath).rename(copyFile);
     final copy = DirectoryPilotStore(root: () async => work, keys: _CopyKeys(storage, dbKeyHex));
     // The temporary copy only extracts the branch archive. The real gate
     // (live entitlement, owner, empty branch) is the live restore below.
@@ -127,11 +128,19 @@ abstract final class BackupBridges {
     final archive = File('${work.path}/branch.fybackup');
     final code = BusinessBackupCode.generate();
     try {
+      // Same archive format and rules as a branch backup, but no 64 MB cap:
+      // SQLite copies the rows page by page on disk.
       await copy.withLedger(grant, () => access, (l) => l.captureBackup(grant,
-          id: const Uuid().v4(), destination: archive, code: code, allowed: allowed));
+          id: const Uuid().v4(), destination: archive, code: code, allowed: allowed,
+          maxBytes: businessBackupRebuildMaxBytes));
       await copy.close();
+      // The copy is no longer needed: free its disk space before the restore.
+      for (final f in [copyFile, '$copyFile-journal', '$copyFile-wal', '$copyFile-shm']) {
+        if (File(f).existsSync()) File(f).deleteSync();
+      }
       return await live.withLedger(grant, () => access,
-          (l) => l.restoreBackup(grant, source: archive, code: code, allowed: allowed));
+          (l) => l.restoreBackup(grant, source: archive, code: code, allowed: allowed,
+              maxBytes: businessBackupRebuildMaxBytes));
     } finally {
       await copy.close();
       if (await work.exists()) await work.delete(recursive: true);

@@ -68,26 +68,55 @@ class CloudBackupDestination implements BackupDestination {
 
   @override
   Future<void> put(String backupId, String part, Uint8List data) async {
-    final url = await remote.uploadUrl(backupId, part, data.length);
     await temp.create(recursive: true);
     final f = File('${temp.path}/up-${DateTime.now().microsecondsSinceEpoch}');
     await f.writeAsBytes(data, flush: true);
     try {
-      final code = await transfer.put(
-          url, {'content-type': 'application/octet-stream', 'content-length': '${data.length}'}, f);
-      if (code != 200) throw HttpException('upload $part: $code');
+      await putFile(backupId, part, f);
+    } finally {
+      if (f.existsSync()) f.deleteSync();
+    }
+  }
+
+  /// Streamed from disk (a chunk is ≤ 32 MB; never read whole).
+  @override
+  Future<void> putFile(String backupId, String part, File source, {bool move = false}) async {
+    final size = await source.length();
+    final url = await remote.uploadUrl(backupId, part, size);
+    final code = await transfer.put(url, {'content-type': 'application/octet-stream', 'content-length': '$size'}, source);
+    if (code != 200) throw HttpException('upload $part: $code');
+    if (move && source.existsSync()) source.deleteSync();
+  }
+
+  @override
+  Future<Uint8List?> get(String backupId, String part) async {
+    final f = File('${temp.path}/dl-${DateTime.now().microsecondsSinceEpoch}');
+    try {
+      if (!await getFile(backupId, part, f)) return null;
+      if (await f.length() > backupSmallPartMax) throw const HttpException('part too large');
+      return await f.readAsBytes();
     } finally {
       if (f.existsSync()) f.deleteSync();
     }
   }
 
   @override
-  Future<Uint8List?> get(String backupId, String part) async {
+  Future<bool> getFile(String backupId, String part, File into) async {
     try {
-      return await transfer.get(await remote.downloadUrl(backupId, part));
+      return await transfer.download(await remote.downloadUrl(backupId, part), into);
     } on HttpException catch (e) {
-      if (e.message.contains('404')) return null;
+      if (e.message.contains('404')) return false;
       rethrow;
+    }
+  }
+
+  @override
+  Future<bool> has(String backupId, String part) async {
+    final f = File('${temp.path}/has-${DateTime.now().microsecondsSinceEpoch}');
+    try {
+      return await getFile(backupId, part, f);
+    } finally {
+      if (f.existsSync()) f.deleteSync();
     }
   }
 
@@ -119,7 +148,7 @@ class BackupMirror {
       final st = await f.stat();
       final tag = '${st.size}:${st.modified.microsecondsSinceEpoch}';
       if (sent[_name(f)] == tag) continue;
-      await cloud.put(backupId, _name(f), await f.readAsBytes());
+      await cloud.putFile(backupId, _name(f), f);
       sent[_name(f)] = tag;
       n++;
     }
@@ -130,9 +159,10 @@ class BackupMirror {
   Future<void> pull(String backupId, Directory into, Iterable<String> parts) async {
     await into.create(recursive: true);
     for (final p in parts) {
-      final b = await cloud.get(backupId, p);
-      if (b == null) continue; // the restorer reports what is missing
-      await File('${into.path}/$p').writeAsBytes(b, flush: true);
+      final f = File('${into.path}/$p');
+      if (await f.exists()) continue; // already fetched (resumed restore)
+      // Missing parts are reported by the restorer, before anything is used.
+      await cloud.getFile(backupId, p, f);
     }
   }
 

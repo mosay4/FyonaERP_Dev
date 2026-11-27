@@ -51,12 +51,14 @@ class BackupJobResult {
   final String? error;
 }
 
-Future<Database> openLedgerFile(String path, String keyHex, {bool create = false}) async {
+/// [direct]: SQLite runs on the calling isolate (inside a worker isolate:
+/// no extra hop per statement). Off by default for the UI isolate.
+Future<Database> openLedgerFile(String path, String keyHex, {bool create = false, bool direct = false}) async {
   if (keyHex.isNotEmpty && !RegExp(r'^[a-f0-9]{64}$').hasMatch(keyHex)) {
     throw ArgumentError('bad ledger key');
   }
   if (!create && !File(path).existsSync()) throw StateError('no ledger file');
-  return createDatabaseFactoryFfi().openDatabase(path,
+  return createDatabaseFactoryFfi(noIsolate: direct).openDatabase(path,
       options: OpenDatabaseOptions(
         singleInstance: false,
         onConfigure: (db) async {
@@ -64,8 +66,9 @@ Future<Database> openLedgerFile(String path, String keyHex, {bool create = false
             if ((await db.rawQuery('PRAGMA cipher_version')).isEmpty) throw StateError('no cipher');
             await db.execute('PRAGMA key = "x\'$keyHex\'"');
           }
-          await db.rawQuery('SELECT count(*) FROM sqlite_master');
+          // Wait for the app's own connection instead of failing at once.
           await db.execute('PRAGMA busy_timeout = 5000');
+          await db.rawQuery('SELECT count(*) FROM sqlite_master');
           await db.rawQuery('PRAGMA journal_mode = DELETE');
           await db.execute('PRAGMA synchronous = FULL');
         },
@@ -79,7 +82,7 @@ Future<BackupJobResult> runBackupJobInline(BackupJob job) async {
   final state = BackupState.fromJson(job.state);
   Database? db;
   try {
-    db = await openLedgerFile(job.dbPath, job.dbKeyHex);
+    db = await openLedgerFile(job.dbPath, job.dbKeyHex, direct: true);
     final engine = BackupEngine(exclude: job.exclude);
     await engine.install(db);
     final svc = BackupService(
@@ -87,6 +90,7 @@ Future<BackupJobResult> runBackupJobInline(BackupJob job) async {
       key: BackupKeys.keyFrom(job.backupKey),
       wrappedKey: job.wrappedKey,
       destinations: [LocalBackupDestination(Directory(job.localRoot))],
+      work: Directory('${Directory(job.localRoot).parent.path}/work'),
       scope: job.scope,
       media: job.mediaRoot == null ? null : MediaStore(Directory(job.mediaRoot!)),
       keepSets: job.keepSets,
@@ -113,21 +117,25 @@ Future<RestoreOutcome> runRestoreJob({
   required String targetPath,
   required String dbKeyHex,
   String? mediaRoot,
+  String? workRoot,
   Set<String> exclude = const {},
 }) =>
     Isolate.run(() async {
       final f = File(targetPath);
       if (f.existsSync()) f.deleteSync();
-      final db = await openLedgerFile(targetPath, dbKeyHex, create: true);
+      final db = await openLedgerFile(targetPath, dbKeyHex, create: true, direct: true);
       try {
         final src = LocalBackupDestination(Directory(setRoot));
         final key = BackupKeys.keyFrom(backupKey);
         final restorer = BackupRestorer(engine: BackupEngine(exclude: exclude));
         final problems = await restorer.restore(src, backupId, key, db,
-            mediaStore: mediaRoot == null ? null : MediaStore(Directory(mediaRoot)));
+            mediaStore: mediaRoot == null ? null : MediaStore(Directory(mediaRoot)),
+            work: workRoot == null ? null : Directory(workRoot));
         return (problems: problems, extras: await restorer.extras(src, backupId, key));
       } on BackupTampered catch (e) {
         return (problems: ['tampered: ${e.reason}'], extras: null);
+      } on FormatException {
+        return (problems: ['tampered: record format'], extras: null);
       } finally {
         await db.close();
       }

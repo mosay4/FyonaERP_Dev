@@ -95,6 +95,24 @@ class MediaStore {
     return true;
   }
 
+  /// Takes over a file whose content was already verified against [sha]
+  /// (restore staging): moved into place when possible, else copied.
+  Future<void> adopt(String sha, File verified, {required String mime}) async {
+    final file = _file(sha);
+    final size = await verified.length();
+    if (!await file.exists() || await file.length() != size) {
+      await file.parent.create(recursive: true);
+      final tmp = File('${file.path}.part');
+      try {
+        await verified.rename(tmp.path);
+      } on FileSystemException {
+        await verified.copy(tmp.path);
+      }
+      await tmp.rename(file.path);
+    }
+    if (!await _meta(sha).exists()) await _meta(sha).writeAsString(jsonEncode({'mime': mime, 'size': size}));
+  }
+
   /// The local file, or null when it is not on this device (yet).
   File? fileOf(String ref) {
     final sha = shaOf(ref);

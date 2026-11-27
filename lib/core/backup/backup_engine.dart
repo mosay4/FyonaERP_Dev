@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -197,13 +198,13 @@ class BackupEngine {
 
   /// Fuzzy, non-blocking dump. Emits JSONL lines through [sink].
   /// Returns S0: replay changes with seq > S0 on top of it.
-  Future<int> snapshot(Database db, void Function(String line) sink, {int pageSize = 2000}) async {
+  Future<int> snapshot(Database db, FutureOr<void> Function(String line) sink, {int pageSize = 2000}) async {
     final s0 = await lastSeq(db);
     final tabs = await tables(db);
     // The app's schema version travels too: a restored copy opens as the
     // same version (no "new database" creation or migration on top of it).
     final uv = (await db.rawQuery('PRAGMA user_version')).first.values.first as int? ?? 0;
-    sink(jsonEncode({'k': 'schema', 'v': 2, 's0': s0, 'uv': uv, 'objects': await schema(db, tabs)}));
+    await sink(jsonEncode({'k': 'schema', 'v': 2, 's0': s0, 'uv': uv, 'objects': await schema(db, tabs)}));
     for (final t in tabs) {
       final tq = _q(t.name);
       if (t.withoutRowid) {
@@ -211,7 +212,7 @@ class BackupEngine {
         while (true) {
           final rows = await db.rawQuery('SELECT * FROM $tq LIMIT $pageSize OFFSET $offset');
           for (final r in rows) {
-            sink(jsonEncode({'k': 'r', 't': t.name, 'row': _encodeRow(t, r)}));
+            await sink(jsonEncode({'k': 'r', 't': t.name, 'row': _encodeRow(t, r)}));
           }
           if (rows.length < pageSize) break;
           offset += pageSize;
@@ -225,7 +226,7 @@ class BackupEngine {
           for (final r in rows) {
             final rid = r['__rid'] as int;
             final row = Map<String, Object?>.of(r)..remove('__rid');
-            sink(jsonEncode({'k': 'r', 't': t.name, 'rid': rid, 'row': _encodeRow(t, row)}));
+            await sink(jsonEncode({'k': 'r', 't': t.name, 'rid': rid, 'row': _encodeRow(t, row)}));
             after = rid;
           }
           if (rows.length < pageSize) break;
@@ -258,6 +259,29 @@ class BackupEngine {
     });
   }
 
+  /// Where the change log ends now + the exact checkpoint at that point,
+  /// read in ONE short transaction (only counts / totals; the change rows
+  /// themselves are read afterwards — rows up to `to` never change).
+  Future<BackupCheckpoint> head(Database db) async {
+    final tabs = await tables(db);
+    return db.transaction((tx) async => checkpoint(tx, tabs, await lastSeq(tx)));
+  }
+
+  /// The captured changes in (from, to], streamed page by page.
+  Stream<String> changeLines(Database db, int from, int to, {int pageSize = 5000}) async* {
+    var after = from;
+    while (after < to) {
+      final rows = await db.rawQuery(
+          'SELECT seq, tbl, op, rid, row FROM $changes WHERE seq > ? AND seq <= ? ORDER BY seq LIMIT $pageSize',
+          [after, to]);
+      if (rows.isEmpty) break;
+      for (final r in rows) {
+        yield jsonEncode({'k': 'c', 'seq': r['seq'], 't': r['tbl'], 'op': r['op'], 'rid': r['rid'], 'row': r['row']});
+      }
+      after = rows.last['seq'] as int;
+    }
+  }
+
   /// The captured changes in (from, to] — rebuilds a lost change part.
   Future<List<String>> range(Database db, int from, int to) async => [
         for (final r in await db.rawQuery(
@@ -273,15 +297,37 @@ class BackupEngine {
   /// empty database) and verifies it against [expected].
   /// Returns the list of problems (empty = verified identical).
   Future<List<String>> restore(Database target, Iterable<String> snapshotLines,
-      Iterable<String> changeLines, BackupCheckpoint expected) async {
+          Iterable<String> changeLines, BackupCheckpoint expected) =>
+      restoreStream(target, Stream.fromIterable(snapshotLines), Stream.fromIterable(changeLines), expected);
+
+  /// [restore] from streams: records are applied as they are read, in
+  /// batches, inside ONE transaction of the new database — memory stays
+  /// flat whatever the size, and an error at any point (damaged part,
+  /// missing chunk, interruption) leaves nothing behind.
+  Future<List<String>> restoreStream(Database target, Stream<String> snapshotLines,
+      Stream<String> changeLines, BackupCheckpoint expected,
+      {void Function(int records)? onProgress, int batchSize = 1000}) async {
     var objects = <Map>[];
     final tabs = <String, BackupTable>{};
     var s0 = 0;
     var userVersion = 0;
+    var done = 0;
     await target.transaction((tx) async {
-      for (final line in snapshotLines) {
+      var batch = tx.batch();
+      var queued = 0;
+      Future<void> flush() async {
+        if (queued == 0) return;
+        await batch.commit(noResult: true);
+        batch = tx.batch();
+        done += queued;
+        queued = 0;
+        onProgress?.call(done);
+      }
+
+      await for (final line in snapshotLines) {
         final j = jsonDecode(line) as Map;
         if (j['k'] == 'schema') {
+          await flush();
           s0 = (j['s0'] as num).toInt();
           userVersion = (j['uv'] as num?)?.toInt() ?? 0;
           objects = (j['objects'] as List).cast<Map>();
@@ -295,9 +341,10 @@ class BackupEngine {
         }
         final t = tabs['${j['t']}'];
         if (t == null) throw const FormatException('row for an unknown table');
-        await _put(tx, t, j['rid'] as int?, _decodeRow(t, j['row']));
+        _put(batch, t, j['rid'] as int?, _decodeRow(t, j['row']));
+        if (++queued >= batchSize) await flush();
       }
-      for (final line in changeLines) {
+      await for (final line in changeLines) {
         final j = jsonDecode(line) as Map;
         if ((j['seq'] as num) <= s0) continue; // already in the fuzzy snapshot window? replay is idempotent
         final t = tabs['${j['t']}'];
@@ -307,16 +354,18 @@ class BackupEngine {
         if (j['op'] == 'D') {
           if (t.withoutRowid) {
             if (row != null) {
-              await tx.delete(_q(t.name),
+              batch.delete(_q(t.name),
                   where: t.pk.map((c) => '${_q(c)} IS ?').join(' AND '), whereArgs: [for (final c in t.pk) row[c]]);
             }
           } else {
-            await tx.delete(_q(t.name), where: 'rowid = ?', whereArgs: [j['rid']]);
+            batch.delete(_q(t.name), where: 'rowid = ?', whereArgs: [j['rid']]);
           }
         } else if (row != null) {
-          await _put(tx, t, j['rid'] as int?, row);
+          _put(batch, t, j['rid'] as int?, row);
         }
+        if (++queued >= batchSize) await flush();
       }
+      await flush();
       // Indexes, views and the app's own triggers last: nothing fires twice.
       for (final o in objects.where((o) => o['type'] != 'table')) {
         await tx.execute('${o['sql']}');
@@ -347,20 +396,21 @@ class BackupEngine {
     };
   }
 
-  Future<void> _put(DatabaseExecutor tx, BackupTable t, int? rid, Map<String, Object?> row) async {
+  void _put(Batch tx, BackupTable t, int? rid, Map<String, Object?> row) {
     final cols = row.keys.toList();
     final names = [if (!t.withoutRowid && rid != null) 'rowid', ...cols.map(_q)];
     final args = [if (!t.withoutRowid && rid != null) rid, ...cols.map((c) => row[c])];
-    await tx.rawInsert(
+    tx.rawInsert(
         'INSERT OR REPLACE INTO ${_q(t.name)} (${names.join(', ')}) VALUES (${List.filled(names.length, '?').join(', ')})',
         args);
   }
 
   /// Media references (`media:<sha256>`) found in any text value.
-  static Set<String> mediaRefs(Iterable<String> lines) {
-    final re = RegExp(r'media:[0-9a-f]{64}');
-    return {for (final l in lines) ...re.allMatches(l).map((m) => m.group(0)!)};
-  }
+  static Set<String> mediaRefs(Iterable<String> lines) => {for (final l in lines) ...mediaRefsOf(l)};
+
+  static final _mediaRe = RegExp(r'media:[0-9a-f]{64}');
+  static Iterable<String> mediaRefsOf(String line) =>
+      line.contains('media:') ? _mediaRe.allMatches(line).map((m) => m.group(0)!) : const [];
 
   /// gzip + JSONL helpers.
   static Uint8List pack(List<String> lines) => Uint8List.fromList(gzip.encode(utf8.encode(lines.join('\n'))));

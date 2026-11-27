@@ -20,6 +20,9 @@ abstract class MediaRemote {
 abstract class MediaTransfer {
   Future<int> put(String url, Map<String, String> headers, File file);
   Future<Uint8List> get(String url);
+
+  /// Streams the object into [into] (`.part` + rename); false on 404.
+  Future<bool> download(String url, File into);
 }
 
 class HttpMediaTransfer implements MediaTransfer {
@@ -55,6 +58,33 @@ class HttpMediaTransfer implements MediaTransfer {
       return b.takeBytes();
     } finally {
       client.close(force: true);
+    }
+  }
+
+  @override
+  Future<bool> download(String url, File into) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    final tmp = File('${into.path}.part');
+    try {
+      final res = await (await client.getUrl(Uri.parse(url))).close().timeout(timeout);
+      if (res.statusCode == 404) {
+        await res.drain<void>();
+        return false;
+      }
+      if (res.statusCode != 200) throw HttpException('download ${res.statusCode}');
+      await into.parent.create(recursive: true);
+      final sink = tmp.openWrite();
+      try {
+        await sink.addStream(res.timeout(timeout));
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+      await tmp.rename(into.path);
+      return true;
+    } finally {
+      client.close(force: true);
+      if (tmp.existsSync()) tmp.deleteSync();
     }
   }
 }

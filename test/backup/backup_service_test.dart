@@ -19,6 +19,13 @@ class FlakyDestination extends LocalBackupDestination {
   Future<void> put(String b, String p, Uint8List d) => down ? throw const SocketException('offline') : super.put(b, p, d);
   @override
   Future<Uint8List?> get(String b, String p) => down ? throw const SocketException('offline') : super.get(b, p);
+  @override
+  Future<void> putFile(String b, String p, File f, {bool move = false}) =>
+      down ? throw const SocketException('offline') : super.putFile(b, p, f, move: move);
+  @override
+  Future<bool> getFile(String b, String p, File f) => down ? throw const SocketException('offline') : super.getFile(b, p, f);
+  @override
+  Future<bool> has(String b, String p) => down ? throw const SocketException('offline') : super.has(b, p);
 }
 
 void main() {

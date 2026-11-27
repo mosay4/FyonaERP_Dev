@@ -289,18 +289,17 @@ class BackupCoordinator {
       // Now that the key opens the manifest, fetch exactly the listed parts.
       final man = await BackupRestorer(engine: _engine).manifest(
           LocalBackupDestination(from), set.id, BackupKeys.keyFrom(key));
-      final parts = <String>[
-        '${man['snapshot']}',
-        for (final d in (man['deltas'] as List)) '${(d as Map)['name']}',
-        for (final s in (man['media'] as List? ?? const [])) 'm-$s.fybk',
-        if (man['extras'] != null) '${man['extras']}',
-      ];
+      final parts = backupPartsOf(man);
       final remote = remoteFor!.call(space.section);
       await BackupMirror(CloudBackupDestination(remote, temp: Directory('${root.parent.path}/tmp')))
           .pull(set.id, Directory('${from.path}/${set.id}'), parts);
     }
+    // Leftovers of an interrupted earlier restore are never reused.
+    await _sweepRestores(space);
     final target = '${space.dbPath}.restore-${DateTime.now().millisecondsSinceEpoch}';
+    final work = Directory('${root.parent.path}/restore-work');
     final out = await runRestoreJob(
+      workRoot: work.path,
       setRoot: from.path,
       backupId: set.id,
       backupKey: key,
@@ -319,6 +318,17 @@ class BackupCoordinator {
   }
 
   static final _engine = BackupEngine();
+
+  Future<void> _sweepRestores(BackupSpace space) async {
+    final dir = File(space.dbPath).parent;
+    final name = File(space.dbPath).uri.pathSegments.last;
+    if (!await dir.exists()) return;
+    await for (final e in dir.list()) {
+      final n = e.uri.pathSegments.where((s) => s.isNotEmpty).last;
+      if (e is File && n.startsWith('$name.restore-')) await e.delete();
+      if (e is Directory && n.startsWith('bk2-apply-')) await e.delete(recursive: true);
+    }
+  }
 
   Future<bool> _opens(Directory from, String id, Uint8List key) async {
     try {

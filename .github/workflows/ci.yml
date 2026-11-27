@@ -1,8 +1,13 @@
 name: FYONA CI
 
-# Every push and pull request: the Business engine/conflict tests, the full
-# regression suite, the backend relay/guard tests, and app builds for
-# Android, iOS and Windows. Nothing here deploys anywhere.
+# Every push: analyze + the sync/conflict engine (fast gate) and the full
+# regression suite (every test in test/, incl. the real-kill backup test).
+# Windows-only checks run when their code changed. The slow platform builds
+# (Android, iOS = macOS minutes at 10x, Windows at 2x) run on pull requests,
+# on manual runs (release-apk.yml builds tagged releases), and on pushes that touch native code or
+# dependencies — not on every Dart commit (release APKs are built and
+# checked by tools/claude/fyona-6193-release-candidate.sh for every delivery).
+# Nothing here deploys anywhere.
 on:
   push:
     branches: [main, develop, 'claude/**']
@@ -10,6 +15,15 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      builds:
+        description: 'Build Android, iOS and Windows'
+        type: boolean
+        default: true
+      heavy:
+        description: 'Large backup restores (100 MB + 500 MB, with process kills)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -39,6 +53,9 @@ jobs:
     outputs:
       app: ${{ steps.f.outputs.app }}
       backend: ${{ steps.f.outputs.backend }}
+      printing: ${{ steps.f.outputs.printing }}
+      backup: ${{ steps.f.outputs.backup }}
+      native: ${{ steps.f.outputs.native }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -59,13 +76,33 @@ jobs:
               - 'backend/**'
               - 'tools/ci/**'
               - '.github/workflows/ci.yml'
+            printing:
+              - 'lib/features/printing/**'
+              - 'test/printing/**'
+              - 'windows/**'
+            backup:
+              - 'lib/core/backup/**'
+              - 'lib/core/media/**'
+              - 'test/backup/**'
+              - 'test/media/**'
+              - 'lib/core/export/**'
+              - 'test/export/**'
+              - 'lib/features/core_business/data/local_directory/**'
+            native:
+              - 'pubspec.*'
+              - 'android/**'
+              - 'ios/**'
+              - 'windows/**'
+              - '.github/workflows/ci.yml'
 
+  # Fast gate: analyze + the two-device sync/conflict engine. Every other
+  # Business test runs once, in the regression suite (no duplicate runs).
   business-tests:
-    name: Business sync, conflicts, reports (Linux)
+    name: Analyze + sync/conflict engine (Linux)
     needs: changes
     if: needs.changes.outputs.app == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -78,13 +115,6 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings lib
       - name: Two-device sync and conflict rules
         run: flutter test --no-pub $QA_DEFINES test/business_sync_engine_test.dart
-      - name: Business, reports, money, employees, linked parties
-        run: >-
-          flutter test --no-pub $QA_DEFINES
-          test/business_*_test.dart test/report_*_test.dart
-          test/public_exchange_rates_test.dart test/peer_*_test.dart
-          test/chat_media_store_test.dart
-          test/sara_currency_mismatch_test.dart
 
   regression:
     name: Full regression suite (Linux)
@@ -106,22 +136,24 @@ jobs:
       - name: All app tests (regression gate)
         # flutter exits 1 when any test fails (known ones too); the gate
         # decides. A crash with no results fails the gate (passed=0).
+        env:
+          FYONA_OS_KILL_TEST: '1' # backup survives a real SIGKILL (Linux)
         run: |
           flutter test --no-pub --machine $QA_DEFINES test/ > results.jsonl || true
           python3 tools/ci/check_regressions.py < results.jsonl
 
+  # The Linux print tests are part of the regression suite; this job adds the
+  # REAL Windows spooler, only when printing code changed (Windows = 2x).
   printing:
     name: Print Center (${{ matrix.os }})
     needs: changes
-    if: needs.changes.outputs.app == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.printing == 'true' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
-        # Targets: Android / iOS (builds above) and Windows; Linux runs the
-        # engine tests. macOS is not a target (and its CI minutes cost more).
-        os: [ubuntu-latest, windows-2022]
+        os: [windows-2022]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -150,16 +182,19 @@ jobs:
         shell: bash
         run: flutter test --no-pub $QA_DEFINES test/printing
 
+  # Linux runs these tests in the regression suite (with the real-kill
+  # test). Windows file semantics (rename, locks) are checked here, only
+  # when backup / media / ledger code changed.
   backup-media:
     name: Backup v2 + media layer (${{ matrix.os }})
     needs: changes
-    if: needs.changes.outputs.app == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.backup == 'true' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-2022]
+        os: [windows-2022]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -170,14 +205,14 @@ jobs:
       - run: flutter pub get
       - name: Analyze backup and media (errors fail)
         shell: bash
-        run: flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings lib/core/backup lib/core/media test/backup test/media
+        run: flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings lib/core/backup lib/core/media lib/core/export test/backup test/media test/export
       # Exact restore at 100 / 10k / 100k products, live capture, kill mid-backup,
       # tampering, recovery code, cloud outage, real Business + Personal ledgers.
       - name: Backup, restore, kill and tamper tests (measurements printed)
         shell: bash
         env:
           FYONA_OS_KILL_TEST: '1' # real SIGKILL test (runs on Linux only)
-        run: flutter test --no-pub $QA_DEFINES -r expanded test/backup test/media | tee backup-results.txt
+        run: flutter test --no-pub $QA_DEFINES -r expanded test/backup test/media test/export | tee backup-results.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -218,7 +253,11 @@ jobs:
 
   android:
     name: Android build
-    needs: business-tests
+    needs: [changes, business-tests]
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && inputs.builds) ||
+      (github.event_name == 'push' && needs.changes.outputs.native == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -227,6 +266,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -255,7 +295,11 @@ jobs:
 
   ios:
     name: iOS build + engine tests (macOS)
-    needs: business-tests
+    needs: [changes, business-tests]
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && inputs.builds) ||
+      (github.event_name == 'push' && needs.changes.outputs.native == 'true')
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
@@ -273,7 +317,11 @@ jobs:
 
   windows:
     name: Windows build + engine tests
-    needs: business-tests
+    needs: [changes, business-tests]
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && inputs.builds) ||
+      (github.event_name == 'push' && needs.changes.outputs.native == 'true')
     # Visual Studio 2022: VS 18 removed /await coroutines that plugins use.
     runs-on: windows-2022
     timeout-minutes: 90
@@ -295,3 +343,33 @@ jobs:
           # CMake 4 rejects without this policy floor.
           CMAKE_POLICY_VERSION_MINIMUM: '3.5'
         run: flutter build windows --release $QA_DEFINES
+
+  # Manual only: real-size continuous-backup restores on a new device
+  # (two branches, photos, invoices), with SIGKILLs mid-restore.
+  heavy-backup:
+    name: Large backup restores (manual)
+    if: github.event_name == 'workflow_dispatch' && inputs.heavy
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Restore 100 MB and 500 MB backups (kills included)
+        env:
+          FYONA_LARGE_RESTORE: '100,500'
+          FYONA_LARGE_KILLS: '2'
+          FYONA_LARGE_DIR: ${{ runner.temp }}/fyona-large
+        run: |
+          export FYONA_QA_DEFINES="$QA_DEFINES"
+          flutter test --no-pub $QA_DEFINES -r expanded test/backup/backup_large_restore_test.dart
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: large-restore-report
+          path: ${{ runner.temp }}/fyona-large/large-restore-report.txt
