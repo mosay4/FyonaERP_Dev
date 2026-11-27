@@ -6,7 +6,7 @@ import wave
 from pathlib import Path
 
 root = Path(__file__).parent / 'assets' / 'audio'
-rate = 24000
+rate = 11025  # small files: every cue stays under 3.2 kHz
 
 
 def write(name, duration, fn):
@@ -34,12 +34,12 @@ def bell(t, f, start, decay, amp):
 
 
 # A soft rising air-swell: the work begins.
-write('restore_start.wav', .9, lambda t, r: .10 * math.sin(math.pi * t / .9) ** 2 * (
-    math.sin(2 * math.pi * (220 + 260 * t) * t) * .5 + r.uniform(-1, 1) * .35 * math.sin(math.pi * t / .9)))
+write('restore_start.wav', .6, lambda t, r: .10 * math.sin(math.pi * t / .6) ** 2 * (
+    math.sin(2 * math.pi * (220 + 380 * t) * t) * .5 + r.uniform(-1, 1) * .3 * math.sin(math.pi * t / .6)))
 # A tiny glass tick between stages.
 write('restore_tick.wav', .14, lambda t, r: bell(t, 1567.98, 0, 38, .10))
 # Done: a warm rising major arpeggio with a shimmer.
-write('restore_done.wav', 1.5, lambda t, r: sum(bell(t, f, d, 3.4, .085) for f, d in
+write('restore_done.wav', 1.1, lambda t, r: sum(bell(t, f, d, 3.4, .085) for f, d in
       [(523.25, 0), (659.25, .09), (783.99, .18), (1046.5, .29)]) + .01 * math.sin(2 * math.pi * 2093 * t) * math.exp(-t * 3))
 # Not completed: two low, gentle descending tones (never harsh).
-write('restore_fail.wav', .7, lambda t, r: bell(t, 392.0, 0, 6, .09) + bell(t, 311.13, .18, 6, .09))
+write('restore_fail.wav', .55, lambda t, r: bell(t, 392.0, 0, 6, .09) + bell(t, 311.13, .18, 6, .09))
