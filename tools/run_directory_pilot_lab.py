@@ -419,6 +419,9 @@ def main():
         "FYONA_QA_API_PORT": str(api_port),
         "DEBUG": "false",
         "JWT_SECRET_KEY": secret_file("jwt-secret", 40) if persistent else secrets.token_urlsafe(40),
+        # Backup key management: per-account keys are derived from this
+        # master on the server only (never stored with the backups).
+        "FYONA_BACKUP_MASTER_KEY": secret_file("backup-master-key", 48) if persistent else secrets.token_urlsafe(48),
         "DATABASE_URL": ("postgresql+asyncpg://directory_pilot:"
                          f"{db_password}@127.0.0.1:{pg}/directory_pilot"),
         "REDIS_URL": f"redis://127.0.0.1:{redis}/0",

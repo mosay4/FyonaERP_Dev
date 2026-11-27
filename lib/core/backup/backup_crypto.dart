@@ -154,10 +154,34 @@ abstract final class BackupKeys {
     };
   }
 
+  /// The key wrapped by the ACCOUNT key (AccountBackupKeys): no code to
+  /// keep; any device of the account opens it after signing in.
+  static Future<Map<String, dynamic>> wrapForAccount(SecretKey key, SecretKey account) async {
+    final nonce = List.generate(12, (_) => _rng.nextInt(256));
+    final box = await _aead.encrypt(await key.extractBytes(), secretKey: account, nonce: nonce,
+        aad: utf8.encode('fyona-backup-key/v1|account'));
+    return {'v': 1, 'kind': 'account', 'nonce': base64Encode(nonce), 'ct': base64Encode([...box.cipherText, ...box.mac.bytes])};
+  }
+
+  static Future<SecretKey?> unwrapForAccount(Map<String, dynamic> w, SecretKey account) async {
+    try {
+      if (w['kind'] != 'account') return null;
+      final ct = base64Decode('${w['ct']}');
+      final plain = await _aead.decrypt(
+          SecretBox(ct.sublist(0, ct.length - 16), nonce: base64Decode('${w['nonce']}'), mac: Mac(ct.sublist(ct.length - 16))),
+          secretKey: account,
+          aad: utf8.encode('fyona-backup-key/v1|account'));
+      return keyFrom(plain);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// The key from its wrapped form; null when [secret] is wrong.
   static Future<SecretKey?> unwrap(Map<String, dynamic> w, String secret) async {
     try {
       final kind = '${w['kind']}';
+      if (kind == 'account') return null;
       final kek = await _kdf(memory: (w['m'] as num).toInt(), iterations: (w['t'] as num).toInt()).deriveKey(
           secretKey: SecretKey(utf8.encode(kind == 'recovery' ? normalize(secret) : secret)),
           nonce: base64Decode('${w['salt']}'));

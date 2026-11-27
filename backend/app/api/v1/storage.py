@@ -251,3 +251,15 @@ async def business_backup_delete(backup_id: str, org_id: str = Depends(get_curre
                                  user_id: UUID = Depends(get_current_user_uuid),
                                  db: AsyncSession = Depends(get_db)):
     return await _delete_backup(await _business_tenant(db, user_id, org_id, "b"), backup_id)
+
+
+@router.get("/business-storage/account-key")
+async def business_account_key(org_id: str = Depends(get_current_org_id),
+                               user_id: UUID = Depends(get_current_user_uuid),
+                               db: AsyncSession = Depends(get_db)):
+    """The organisation's backup encryption key — the owner only (a branch
+    backup holds the business's money). See core/backup_keys.py."""
+    from ...domain.services.branch_service import require_owner
+    from ...core.backup_keys import account_key
+    await require_owner(db, user_id, org_id)
+    return {"success": True, "data": {"key": account_key("o", UUID(str(org_id))), "v": 1}}

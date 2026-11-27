@@ -2,8 +2,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../../../../../core/backup/account_backup_keys.dart';
 import '../../../../../core/network/api_client.dart';
 import '../../../../../core/network/api_endpoints.dart';
 import '../../../../../core/offline/offline_guard.dart';
@@ -22,9 +24,86 @@ class ServerBackupService {
 
   static const String _hmacKeyStorageKey = 'backup_hmac_key_b64';
 
-  ServerBackupService({ApiClient? apiClient, FlutterSecureStorage? secureStorage})
+  ServerBackupService({ApiClient? apiClient, FlutterSecureStorage? secureStorage, AccountBackupKeys? keys})
       : _apiClient = apiClient,
-        _secureStorage = secureStorage ?? const FlutterSecureStorage();
+        _secureStorage = secureStorage ?? const FlutterSecureStorage(),
+        _keys = keys ?? AccountBackupKeys(apiClient);
+
+  final AccountBackupKeys _keys;
+
+  /// The account's backup key (see AccountBackupKeys); [userId] = the
+  /// signed-in user (server uuid).
+  String? userId;
+
+  static const _lastUserKey = 'backup_account_key_user';
+
+  Future<SecretKey> _key({bool online = true}) async {
+    var id = userId;
+    // A fresh service (background job, pending restore) uses the last
+    // signed-in user of this device.
+    if (id == null || id.isEmpty) {
+      try {
+        id = await _secureStorage.read(key: _lastUserKey);
+      } catch (_) {}
+    } else {
+      try {
+        await _secureStorage.write(key: _lastUserKey, value: id);
+      } catch (_) {}
+    }
+    final k = id == null || id.isEmpty ? null : await _keys.personal(id, online: online);
+    if (k == null) throw const ServerBackupException('key_unavailable');
+    return k;
+  }
+
+  /// The key for device files (cached; fetched once when online).
+  Future<SecretKey> deviceKey() => _key();
+
+  /// Every backup leaves the phone encrypted; the server keeps it in the
+  /// cloud (Cloudflare R2), never on its own disk.
+  Future<FormData> _form(Uint8List plain, String filename) async {
+    final sealed = await BackupEnvelope.sealBytes(plain, await _key());
+    var schema = '', count = 0;
+    Map<String, dynamic> meta = const {};
+    String appVersion = '';
+    try {
+      final j = jsonDecode(utf8.decode(plain));
+      if (j is Map) {
+        schema = '${j['schema_version'] ?? ''}';
+        final c = j['counts'];
+        if (c is Map) {
+          for (final v in c.values) {
+            count += (v as num?)?.toInt() ?? 0;
+          }
+        }
+        if (j['meta'] is Map) meta = Map<String, dynamic>.from(j['meta'] as Map);
+        appVersion = '${j['app_version'] ?? ''}';
+      }
+    } catch (_) {}
+    final name = filename.replaceAll(RegExp(r'\.json$'), '.fybk');
+    return FormData.fromMap({
+      'file': MultipartFile.fromBytes(sealed, filename: name),
+      'encrypted': 'true',
+      'schema_version': schema,
+      'record_count': '$count',
+      'meta': jsonEncode(meta),
+      'app_version': appVersion,
+    });
+  }
+
+  /// Older versions kept plain on the server are re-uploaded encrypted (the
+  /// server then deletes the plain copy). Safe to repeat; nothing is lost:
+  /// a version is replaced only after its encrypted copy is stored.
+  Future<int> migrateToEncrypted() async {
+    var moved = 0;
+    for (final b in (await listBackups())['backups'] as List<Map<String, dynamic>>) {
+      if (b['encrypted'] == true) continue;
+      final id = '${b['id']}';
+      final plain = await downloadBackup(id);
+      await updateBackup(id, plain, '${b['filename'] ?? 'backup.json'}');
+      moved++;
+    }
+    return moved;
+  }
 
   ApiClient get _api {
     final client = _apiClient;
@@ -80,9 +159,7 @@ class ServerBackupService {
     Uint8List bytes,
     String filename,
   ) async {
-    final form = FormData.fromMap({
-      'file': MultipartFile.fromBytes(bytes, filename: filename),
-    });
+    final form = await _form(bytes, filename);
     final resp = await _api.post<Map<String, dynamic>>(
       ApiEndpoints.userBackups,
       data: form,
@@ -122,6 +199,8 @@ class ServerBackupService {
     );
     final data = resp.data;
     if (data == null) throw const ServerBackupException('download_empty');
+    // Encrypted (current) or an older plain version.
+    if (BackupEnvelope.isSealedBytes(data)) return BackupEnvelope.openBytes(data, await _key());
     return Uint8List.fromList(data);
   }
 
@@ -134,9 +213,7 @@ class ServerBackupService {
     Uint8List bytes,
     String filename,
   ) async {
-    final form = FormData.fromMap({
-      'file': MultipartFile.fromBytes(bytes, filename: filename),
-    });
+    final form = await _form(bytes, filename);
     final resp = await _api.put<Map<String, dynamic>>(
       ApiEndpoints.userBackup(id),
       data: form,

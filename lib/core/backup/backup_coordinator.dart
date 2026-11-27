@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,6 +16,7 @@ import 'backup_cloud.dart';
 import 'backup_crypto.dart';
 import 'backup_engine.dart';
 import 'backup_pack.dart';
+import 'device_backup_folder.dart';
 import 'backup_service.dart';
 import 'backup_worker.dart';
 
@@ -28,7 +30,13 @@ class BackupSpace {
     required this.dbKeyHex,
     this.extras,
     this.exclude = const {},
+    this.accountKey,
   });
+
+  /// The account's backup key (Personal user / business owner), fetched
+  /// from the FYONA server after sign-in and cached: it wraps this space's
+  /// key, so a new device restores with no code. Null in tests/offline.
+  final Future<SecretKey?> Function()? accountKey;
 
   /// Stable, non-identifying id (derived from the ledger storage id).
   final String id;
@@ -77,7 +85,7 @@ class BackupRestoreFailure implements Exception {
   const BackupRestoreFailure(this.code, [this.detail]);
 
   /// key_needed | wrong_code | tampered | not_verified | no_set |
-  /// apply_failed | no_space | not_a_backup
+  /// apply_failed | no_space | not_a_backup | key_unavailable
   final String code;
   final String? detail;
   @override
@@ -133,6 +141,20 @@ class BackupCoordinator {
     return s == null ? null : base64Decode(s);
   }
 
+  /// Continuous backup on, protected by the ACCOUNT key (no code shown or
+  /// asked: owner's decision 27-11). Needs the account key once (online).
+  Future<void> ensureEnabled(BackupSpace space) async {
+    final m = await _load(space.id);
+    final wrapped = m['wrapped'] as Map?;
+    if (m['enabled'] == true && wrapped?['account'] != null && await _key(space.id) != null) return;
+    if (await _account(space) == null) throw const BackupRestoreFailure('key_unavailable');
+    if (wrapped != null && await _key(space.id) != null) {
+      await configure(space.id, enabled: true, cloud: true);
+      return; // the next run adds the account wrap
+    }
+    await enable(space);
+  }
+
   /// Turns continuous backup on. Returns the recovery code: shown ONCE to
   /// the user — with it (and only with it) a new device can open the
   /// backups. FYONA never stores it.
@@ -149,6 +171,10 @@ class BackupCoordinator {
         final code = BackupKeys.newRecoveryCode();
         // Argon2id is deliberately slow: off the UI isolate.
         m['wrapped'] = await _wrapOff(raw, code, password);
+        final account = await _account(space);
+        if (account != null) {
+          (m['wrapped'] as Map)['account'] = await BackupKeys.wrapForAccount(BackupKeys.keyFrom(raw), account);
+        }
         m['enabled'] = true;
         m['cloud'] = cloud;
         m['media'] = media;
@@ -175,6 +201,15 @@ class BackupCoordinator {
           m['last_error'] = 'key_missing';
           await _save(space.id, m);
           return BackupStatus(m);
+        }
+        // Spaces enabled before account keys: add the account wrap once,
+        // and start a new set so every set offered carries it.
+        if ((m['wrapped'] as Map)['account'] == null) {
+          final account = await _account(space);
+          if (account != null) {
+            (m['wrapped'] as Map)['account'] = await BackupKeys.wrapForAccount(BackupKeys.keyFrom(key), account);
+            (m['state'] as Map?)?.remove('id');
+          }
         }
         final sets = await _sets(space.id);
         final r = await runBackupJob(BackupJob(
@@ -307,6 +342,24 @@ class BackupCoordinator {
   Future<Uint8List> _keyFor(BackupSpace space, Directory from, String id, Future<String?> Function()? ask) async {
     final own = await _key(space.id);
     if (own != null && await _opens(from, id, own)) return own;
+    // The account key (after sign-in): no code for sets that carry it.
+    final kj0 = File('${from.path}/$id/key.json');
+    if (await kj0.exists() && await kj0.length() <= 1024 * 1024) {
+      try {
+        final w = jsonDecode(await kj0.readAsString());
+        final acc = w is Map && w['account'] is Map ? Map<String, dynamic>.from(w['account'] as Map) : null;
+        final account = acc == null ? null : await _account(space);
+        if (acc != null && account != null) {
+          final k = await BackupKeys.unwrapForAccount(acc, account);
+          if (k != null) {
+            final raw = await BackupKeys.keyBytes(k);
+            if (await _opens(from, id, raw)) return raw;
+          }
+        }
+      } on FormatException {
+        throw const BackupRestoreFailure('not_a_backup');
+      }
+    }
     final secret = ask == null ? null : await ask();
     if (secret == null || secret.isEmpty) throw const BackupRestoreFailure('key_needed');
     final kj = File('${from.path}/$id/key.json');
@@ -318,7 +371,7 @@ class BackupCoordinator {
       throw const BackupRestoreFailure('not_a_backup');
     }
     if (w is! Map) throw const BackupRestoreFailure('not_a_backup');
-    final wraps = [for (final v in w.values) if (v is Map) Map<String, dynamic>.from(v)];
+    final wraps = [for (final v in w.values) if (v is Map && v['kind'] != 'account') Map<String, dynamic>.from(v)];
     final found = await _unwrapOff(wraps, secret);
     if (found == null || !await _opens(from, id, found)) throw const BackupRestoreFailure('wrong_code');
     return found;
@@ -380,6 +433,59 @@ class BackupCoordinator {
           out.problems.join('; '));
     }
     return (path: target, extras: out.extras);
+  }
+
+  /// File names of this space's backups in the FYONA folder on the device.
+  String devicePrefix(BackupSpace space) =>
+      'FYONA-${space.section == MediaSection.business ? 'Business' : 'Personal'}-'
+      '${space.id.codeUnits.fold<int>(7, (a, b) => (a * 31 + b) & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+  /// Keeps the newest local set as one file in the FYONA folder (it
+  /// survives reinstalling the app); the 3 newest files are kept.
+  Future<DeviceBackupFile?> saveToDevice(BackupSpace space, {BackupProgress? onProgress}) async {
+    final sets = (await listSets(space)).where((s) => s.local).toList();
+    if (sets.isEmpty) return null;
+    final set = sets.first;
+    final root = await _sets(space.id);
+    final t = DateTime.now();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final name = '${devicePrefix(space)}-${t.year}${two(t.month)}${two(t.day)}-${two(t.hour)}${two(t.minute)}${two(t.second)}.$backupPackExtension';
+    final tmp = File('${root.parent.path}/out/$name');
+    try {
+      await exportToFile(space, set, tmp, onProgress: onProgress);
+      await DeviceBackupFolder.save(tmp, name);
+    } finally {
+      if (await tmp.exists()) await tmp.delete();
+    }
+    final mine = await deviceFiles(space);
+    for (final old in mine.skip(3)) {
+      try {
+        await DeviceBackupFolder.delete(old);
+      } catch (_) {}
+    }
+    return mine.firstOrNull;
+  }
+
+  /// This space's backup files in the FYONA folder, newest first.
+  Future<List<DeviceBackupFile>> deviceFiles(BackupSpace space) async => [
+        for (final f in await DeviceBackupFolder.list([backupPackExtension]))
+          if (f.name.startsWith(devicePrefix(space))) f,
+      ];
+
+  /// Restores a file of the FYONA folder (copied in, then the same verified
+  /// path as any file). No code: this device's key or the account key.
+  Future<({String path, Map<String, dynamic>? extras})> restoreDeviceFile(BackupSpace space, DeviceBackupFile file,
+      {Future<String?> Function()? askSecret, BackupProgress? onProgress}) async {
+    final root = await _sets(space.id);
+    final tmp = File('${root.parent.path}/incoming/${file.name}');
+    await FreeSpace.require(root.parent.path, file.size + freeSpaceMargin);
+    onProgress?.call('reading', 0);
+    try {
+      await DeviceBackupFolder.copyTo(file, tmp);
+      return await importFile(space, tmp.openRead(), size: await tmp.length(), askSecret: askSecret, onProgress: onProgress);
+    } finally {
+      if (await tmp.exists()) await tmp.delete();
+    }
   }
 
   /// Saves the local set [set] as ONE file [out] (see backup_pack.dart) the
@@ -447,6 +553,18 @@ class BackupCoordinator {
   }
 
   static final _engine = BackupEngine();
+
+  Future<SecretKey?> _account(BackupSpace space) async {
+    try {
+      return await space.accountKey?.call();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Whether set [set] opens without any code here (this device's key or
+  /// the account key): the screen then never asks for one.
+  bool needsNoCode(BackupSpace space) => space.accountKey != null;
 
   Future<void> _sweepRestores(BackupSpace space) async {
     final dir = File(space.dbPath).parent;

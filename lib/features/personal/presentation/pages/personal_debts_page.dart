@@ -180,10 +180,11 @@ class _PersonalDebtsPageState extends ConsumerState<PersonalDebtsPage> with Sing
                         },
                       ),
                       SizedBox(height: 16),
-                      // ── Add Debt Button ──
-                      _buildAddDebtButton(),
-                      SizedBox(height: 20),
+                      // Totals once, right under the card (owed to me, owed
+                      // by me, overdue), then the add button.
                       _buildStatCards(totalPayable, totalReceivable, overdueCount),
+                      SizedBox(height: 16),
+                      _buildAddDebtButton(),
                       SizedBox(height: 20),
                       _buildFilterSection(filtered, totalPayable, totalReceivable, overdueCount, activeCount),
                       SizedBox(height: 12),
@@ -235,12 +236,12 @@ class _PersonalDebtsPageState extends ConsumerState<PersonalDebtsPage> with Sing
     final l10n = AppLocalizations.of(context);
     return Row(children: [
       Expanded(child: _StatMiniCard(
-        label: l10n.translate('debtOwedByMe'), value: fmtNum(payable), color: AppColors.danger,
+        label: '${l10n.translate('debtOwedByMe')} · ${currencySymbol(_displayCurrency)}', value: fmtNum(payable), color: AppColors.danger,
         icon: TwoToneIcons.arrowUp,
       )),
       SizedBox(width: 10),
       Expanded(child: _StatMiniCard(
-        label: l10n.translate('debtOwedToMe'), value: fmtNum(receivable), color: AppColors.success,
+        label: '${l10n.translate('debtOwedToMe')} · ${currencySymbol(_displayCurrency)}', value: fmtNum(receivable), color: AppColors.success,
         icon: TwoToneIcons.arrowDown,
       )),
       SizedBox(width: 10),
@@ -423,30 +424,6 @@ class _HeroDebtCard extends StatelessWidget {
                 ]),
               ),
             ),
-          ]),
-          SizedBox(height: 24),
-          Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(l10n.translate('debtOwedToMe'), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 10), color: Colors.white.withAlpha(160))),
-              SizedBox(height: 2),
-              FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-                Text(fmtNum(totalReceivable), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 18), fontWeight: FontWeight.w700, color: Colors.white)),
-                SizedBox(width: 4),
-                Text(currencySymbol(displayCurrency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), color: Colors.white.withAlpha(180))),
-              ])),
-            ])),
-            SizedBox(width: 16),
-            Container(width: 1, height: 36, color: Colors.white.withAlpha(20)),
-            SizedBox(width: 16),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(l10n.translate('debtOwedByMe'), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 10), color: Colors.white.withAlpha(160))),
-              SizedBox(height: 2),
-              FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-                Text(fmtNum(totalPayable), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 18), fontWeight: FontWeight.w700, color: Colors.white)),
-                SizedBox(width: 4),
-                Text(currencySymbol(displayCurrency), style: TextStyle(fontFamily: 'Cairo', fontSize: R.fontSize(context, 11), color: Colors.white.withAlpha(180))),
-              ])),
-            ])),
           ]),
         ]),
       ]),

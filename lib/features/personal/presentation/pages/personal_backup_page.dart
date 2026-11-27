@@ -1,5 +1,7 @@
-import 'package:fyona_flutter/core/backup/backup_providers.dart';
-import 'package:fyona_flutter/core/backup/presentation/continuous_backup_page.dart';
+import 'dart:async';
+
+import 'package:fyona_flutter/core/backup/presentation/backup_list_sheet.dart';
+import 'package:fyona_flutter/core/backup/presentation/operation_motion.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -8,6 +10,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../shared/widgets/dots_loader.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../auth/presentation/widgets/app_pin_sheet.dart';
 import '../../di/personal_providers.dart';
 import '../../domain/services/backup_service.dart';
 import '../providers/personal_providers.dart';
@@ -493,6 +496,126 @@ class _BackupPageState extends ConsumerState<BackupPage> {
       serverUserUuid: _serverUserUuid,
       onProgress: onProgress,
     );
+  }
+
+  // ── restore: numbered list → fingerprint/PIN → motion ──
+
+  /// Every backup of the chosen place, numbered from the oldest (1) to the
+  /// newest (highest, on top) with date, time and size. No code to type:
+  /// the account key opens them after sign-in.
+  Future<void> _openRestoreList() async {
+    final l10n = AppLocalizations.of(context);
+    final bs = ref.read(backupServiceProvider);
+    final device = _source == BackupSource.device;
+    final items = <BackupListItem>[];
+    String empty = l10n.translate(device ? 'backupNoBackupInDeviceFolder' : 'backupServerEmpty');
+    try {
+      if (device) {
+        for (final f in await BackupService.listBackups()) {
+          items.add(BackupListItem(f.name, f.date, f.size, payload: f));
+        }
+      } else {
+        // Older plain versions move to the encrypted cloud (in background).
+        unawaited(bs.server.migrateToEncrypted().catchError((Object _) => 0));
+        for (final v in await bs.fetchServerBackups()) {
+          items.add(BackupListItem(
+            '${v['filename'] ?? v['id']}',
+            DateTime.tryParse('${v['created_at']}')?.toLocal() ?? DateTime.now(),
+            (v['size_bytes'] as num?)?.toInt() ?? 0,
+            payload: v,
+          ));
+        }
+      }
+    } catch (_) {
+      empty = l10n.translate('backupServerUnreachable');
+    }
+    if (!mounted) return;
+    items.sort((a, b) => a.when.compareTo(b.when));
+    final pick = await BackupListSheet.show(context,
+        title: l10n.translate(device ? 'bkhFromDevice' : 'bkhFromFyonaServer'),
+        icon: device ? Icons.phone_android_rounded : Icons.cloud_rounded,
+        items: items,
+        empty: empty);
+    if (pick == null || !mounted) return;
+    if (device) {
+      final file = pick.payload as BackupFileInfo;
+      final checked = await _validateDeviceFile(bs, file);
+      if (!mounted) return;
+      if (checked == null) {
+        _showError(l10n.translate('backupInvalidBackup'));
+        return;
+      }
+      await _restoreWithMotion(
+        kind: MotionKind.deviceRestore,
+        summary: '${l10n.translate('bkhItemName', params: {'n': '${pick.serial}'})} • '
+            '${l10n.translate('backupRecordCount', params: {'count': '${checked['count']}'})}',
+        run: (m) => bs.restoreFromBackup(
+          checked['data'] as Map<String, dynamic>,
+          userId: _localUserId,
+          serverUserUuid: _serverUserUuid,
+          skipServer: false,
+          onProgress: (s, v) => m.stage(_stageLabel(s), v),
+        ),
+      );
+    } else {
+      final v = pick.payload as Map<String, dynamic>;
+      await _restoreWithMotion(
+        kind: MotionKind.cloudRestore,
+        summary: '${l10n.translate('bkhItemName', params: {'n': '${pick.serial}'})} • '
+            '${l10n.translate('backupRecordCount', params: {'count': '${v['record_count'] ?? '?'}'})}',
+        run: (m) => bs.restoreServerBackup(
+          '${v['id']}',
+          localUserId: _localUserId,
+          serverUserUuid: _serverUserUuid,
+          onProgress: (s, p) => m.stage(_stageLabel(s), p),
+        ),
+      );
+    }
+  }
+
+  Future<void> _restoreWithMotion({
+    required MotionKind kind,
+    required String summary,
+    required Future<RestoreResult> Function(MotionController m) run,
+  }) async {
+    if (_busy) return;
+    if (!await _confirmRestore(summary: summary) || !mounted) return;
+    final l10n = AppLocalizations.of(context);
+    if (!await verifySensitiveAction(context, ref,
+            reason: l10n.translate('bkhVerifyReason'), existingCredentialsOnly: true) ||
+        !mounted) {
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _errorBanner = null;
+    });
+    try {
+      await OperationMotion.run(context,
+          kind: kind,
+          doneText: l10n.translate('bk2Restored'),
+          failureText: (e) => e is _RestoreNotDone ? e.message : l10n.translate('bk2ErrGeneric'),
+          work: (m) async {
+        final result = await run(m);
+        if (!result.success) throw _RestoreNotDone(result.message);
+        return result;
+      });
+      try {
+        await BackupService.clearPendingServerRestore();
+      } catch (_) {}
+      ref.read(personalFinanceProvider.notifier).load();
+    } catch (_) {
+      // shown by the motion
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _progressStage = null;
+          _progressValue = null;
+        });
+      }
+      await _loadState();
+    }
   }
 
   // ── manage sheet ──
@@ -1324,7 +1447,6 @@ class _BackupPageState extends ConsumerState<BackupPage> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
-          const ContinuousBackupEntry(kind: BackupKind.personal),
           Text(l10n.translate('backupSourceSectionTitle'),
               style: TextStyle(
                   fontFamily: 'Cairo',
@@ -1378,7 +1500,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
             color: const Color(0xFF2E7D32),
             loading: _busy,
             onTap: hasBackup
-                ? () => _openManageSheet(restoreMode: true)
+                ? _openRestoreList
                 : null,
           ),
           const SizedBox(height: 10),
@@ -1773,4 +1895,10 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     );
   }
 
+}
+
+
+class _RestoreNotDone implements Exception {
+  const _RestoreNotDone(this.message);
+  final String message;
 }

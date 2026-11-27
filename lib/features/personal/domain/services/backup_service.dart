@@ -1,3 +1,4 @@
+import '../../../../core/backup/account_backup_keys.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -92,7 +93,20 @@ class BackupService {
   void bindIdentity({required int localUserId, required String serverUserUuid}) {
     _boundIdentity = BackupIdentity(
         localUserId: localUserId, serverUserUuid: serverUserUuid);
+    if (serverUserUuid.isNotEmpty) _server.userId = serverUserUuid;
   }
+
+  /// A device backup file's text: the snapshot encrypted with the account
+  /// key (AccountBackupKeys). Needs the key once online; after that offline.
+  Future<String> _sealForDisk(String json) async =>
+      BackupEnvelope.sealText(json, await _server.deviceKey());
+
+  /// The plain snapshot of a device file (older plain files as they are).
+  Future<String> _openFromDisk(String content) async =>
+      BackupEnvelope.isSealedText(content) ? BackupEnvelope.openText(content, await _server.deviceKey()) : content;
+
+  /// The server's own client (encrypted cloud versions, legacy migration).
+  ServerBackupService get server => _server;
 
   BackupIdentity? _resolveIdentity({int? localUserId, String? serverUserUuid}) {
     final bound = _boundIdentity;
@@ -106,6 +120,7 @@ class BackupService {
         : (bound?.serverUserUuid ?? '');
     final resolved =
         BackupIdentity(localUserId: effLocal, serverUserUuid: effUuid);
+    if (resolved.isValid) _server.userId = effUuid;
     return resolved.isValid ? resolved : null;
   }
 
@@ -499,6 +514,12 @@ class BackupService {
     }
     _backupInProgress = true;
     try {
+      // The account key encrypts the file: fetched once online, then cached.
+      try {
+        await _server.deviceKey();
+      } catch (_) {
+        return BackupResult(success: false, message: AppLocalizations.t('backupErrNeedOnline'), filePath: null);
+      }
       final sealed = await buildSnapshot(
         localUserId: identity.localUserId,
         serverUserUuid: identity.serverUserUuid,
@@ -508,7 +529,8 @@ class BackupService {
       if (!_hasAnyData(sealed)) {
         return BackupResult(success: false, message: AppLocalizations.t('backupErrEmptyFile'), filePath: null);
       }
-      final jsonContent = const JsonEncoder.withIndent('  ').convert(sealed);
+      // Device files are encrypted with the account's key (never plain).
+      final jsonContent = await _sealForDisk(const JsonEncoder.withIndent('  ').convert(sealed));
       final now = DateTime.now();
       final stamp = now.toIso8601String().replaceAll(RegExp(r'[^0-9]'), '').substring(0, 14);
       final version = await _nextDeviceVersion();
@@ -574,6 +596,12 @@ class BackupService {
     }
     _backupInProgress = true;
     try {
+      // The account key encrypts the file: fetched once online, then cached.
+      try {
+        await _server.deviceKey();
+      } catch (_) {
+        return BackupResult(success: false, message: AppLocalizations.t('backupErrNeedOnline'), filePath: null);
+      }
       final sealed = await buildSnapshot(
         localUserId: identity.localUserId,
         serverUserUuid: identity.serverUserUuid,
@@ -585,7 +613,8 @@ class BackupService {
             message: AppLocalizations.t('backupErrEmptyFile'),
             filePath: null);
       }
-      final jsonContent = const JsonEncoder.withIndent('  ').convert(sealed);
+      // Device files are encrypted with the account's key (never plain).
+      final jsonContent = await _sealForDisk(const JsonEncoder.withIndent('  ').convert(sealed));
       onProgress?.call('write', 0.85);
       final Map<dynamic, dynamic> nativeResult = await _channel.invokeMethod(
         'overwriteFixedBackup',
@@ -691,6 +720,12 @@ class BackupService {
     }
     _backupInProgress = true;
     try {
+      // The account key encrypts the file: fetched once online, then cached.
+      try {
+        await _server.deviceKey();
+      } catch (_) {
+        return BackupResult(success: false, message: AppLocalizations.t('backupErrNeedOnline'), filePath: null);
+      }
       final sealed = await buildSnapshot(
         localUserId: identity.localUserId,
         serverUserUuid: identity.serverUserUuid,
@@ -705,7 +740,8 @@ class BackupService {
           filePath: null,
         );
       }
-      final jsonContent = const JsonEncoder.withIndent('  ').convert(sealed);
+      // Device files are encrypted with the account's key (never plain).
+      final jsonContent = await _sealForDisk(const JsonEncoder.withIndent('  ').convert(sealed));
       final now = DateTime.now().toIso8601String();
       onProgress?.call('write', 0.85);
 
@@ -858,6 +894,12 @@ class BackupService {
     }
     _backupInProgress = true;
     try {
+      // The account key encrypts the file: fetched once online, then cached.
+      try {
+        await _server.deviceKey();
+      } catch (_) {
+        return BackupResult(success: false, message: AppLocalizations.t('backupErrNeedOnline'), filePath: null);
+      }
       final sealed = await buildSnapshot(
         localUserId: identity.localUserId,
         serverUserUuid: identity.serverUserUuid,
@@ -869,7 +911,8 @@ class BackupService {
           filePath: null,
         );
       }
-      final jsonContent = const JsonEncoder.withIndent('  ').convert(sealed);
+      // Device files are encrypted with the account's key (never plain).
+      final jsonContent = await _sealForDisk(const JsonEncoder.withIndent('  ').convert(sealed));
       final stamp = DateTime.now()
           .toIso8601String()
           .replaceAll(RegExp(r'[^0-9]'), '')
@@ -958,6 +1001,17 @@ class BackupService {
           success: false,
           message: AppLocalizations.t('backupErrEmpty'),
         );
+      }
+      if (BackupEnvelope.isSealedText(content)) {
+        try {
+          content = await _openFromDisk(content);
+        } catch (_) {
+          // Another account's file, or the key could not be fetched.
+          return BackupReadResult(
+            success: false,
+            message: AppLocalizations.t('backupErrOtherAccount'),
+          );
+        }
       }
 
       final dynamic decoded;
@@ -2110,7 +2164,8 @@ class BackupService {
         );
       }
 
-      final jsonContent = const JsonEncoder.withIndent('  ').convert(sealed);
+      // Device files are encrypted with the account's key (never plain).
+      final jsonContent = await _sealForDisk(const JsonEncoder.withIndent('  ').convert(sealed));
       final Map<dynamic, dynamic> nativeResult = await _channel.invokeMethod(
         'updateExistingBackup',
         {'uri': savedUri, 'content': jsonContent},
@@ -2231,8 +2286,9 @@ class BackupService {
           return false;
         }
         final doc = await _readDocument(uri);
-        final content = doc?['content'] as String?;
-        if (content == null || content.isEmpty) return false;
+        final raw = doc?['content'] as String?;
+        if (raw == null || raw.isEmpty) return false;
+        final content = await _openFromDisk(raw);
         final parsed = jsonDecode(content);
         if (parsed is! Map<String, dynamic>) return false;
         if ((parsed['backup_id']?.toString() ?? '') != backupId) {

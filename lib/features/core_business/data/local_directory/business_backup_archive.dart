@@ -126,6 +126,13 @@ final class BusinessBackupCode {
     );
   }
 
+  /// The code of the business's own files, derived from its account backup
+  /// key (owner's decision 27-11): nothing to write down or type — any
+  /// device of the owner opens them after signing in.
+  factory BusinessBackupCode.forAccount(List<int> accountKey) =>
+      BusinessBackupCode._(Uint8List.fromList(
+          Hmac(sha256, accountKey).convert(utf8.encode('fyona.business-file.v2')).bytes));
+
   factory BusinessBackupCode.parse(String input) {
     final text = input.trim();
     if (!RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(text)) throw _badBackup;

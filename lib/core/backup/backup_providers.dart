@@ -9,6 +9,8 @@ import '../../features/personal/data/ledger/personal_ledger.dart';
 import '../../features/personal/di/personal_providers.dart';
 import '../di/providers.dart';
 import '../media/media_store.dart';
+import '../../shared/providers/current_user_provider.dart';
+import 'account_backup_keys.dart';
 import 'backup_bridges.dart';
 import 'backup_cloud.dart';
 import 'backup_coordinator.dart';
@@ -17,6 +19,9 @@ enum BackupKind { personal, business }
 
 /// `ref.read` of a Ref or a WidgetRef.
 typedef BackupRead = T Function<T>(ProviderListenable<T> provider);
+
+/// The account's backup keys (server-derived, cached in the keystore).
+final accountBackupKeysProvider = Provider<AccountBackupKeys>((ref) => AccountBackupKeys(ref.read(apiClientProvider)));
 
 final backupCoordinatorProvider = Provider<BackupCoordinator>((ref) {
   final c = BackupCoordinator(remoteFor: (s) => ApiBackupRemote(ref.read(apiClientProvider), s));
@@ -54,6 +59,10 @@ Future<BackupSpace?> resolveBackupSpace(BackupRead read, BackupKind kind) async 
         dbPath: db.path,
         dbKeyHex: key,
         extras: () => BackupBridges.personalExtras(svc),
+        accountKey: () async {
+          final user = read(currentUserProvider)?.id;
+          return user == null ? null : read(accountBackupKeysProvider).personal('$user');
+        },
       );
     }
     final scope = backupBusinessScope(read);
@@ -65,6 +74,7 @@ Future<BackupSpace?> resolveBackupSpace(BackupRead read, BackupKind kind) async 
       section: MediaSection.business,
       dbPath: DirectoryDatabase.filePath(await businessDirectoryRoot(), scope.workspace),
       dbKeyHex: key,
+      accountKey: () => read(accountBackupKeysProvider).business(scope.workspace.organizationId),
     );
   } catch (_) {
     return null;

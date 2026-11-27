@@ -16,7 +16,6 @@ import '../../../../features/personal/data/merchant_api.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../auth/auth2/auth2_strings.dart' show a2;
 import '../../../../core/services/connectivity_service.dart';
-import '../../../../core/services/sync_engine.dart';
 import '../../../../core/services/currency/money_format_service.dart';
 import '../../../../core/utils/subscription_identity.dart';
 import '../../../../shared/models/user_model.dart';
@@ -103,8 +102,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   bool _emailCodeSent = false;
   bool _isSendingEmailOtp = false;
   bool _isVerifyingEmail = false;
-  int _pendingSync = 0;
-  Timer? _syncProbe;
 
   /// Breathing pulse (0..1) driving the verification badge glow so the
   /// neon light fades gradually and then intensifies strongly — in BOTH
@@ -130,15 +127,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       if (!mounted) return;
       try {
         ref.invalidate(subscriptionStatusProvider);
-      } catch (_) {}
-    });
-    _syncProbe = Timer.periodic(const Duration(seconds: 10), (_) async {
-      if (!mounted) return;
-      try {
-        final engine = ref.read(syncEngineProvider);
-        final snap = await engine.localSyncSnapshot();
-        if (!mounted) return;
-        setState(() => _pendingSync = (snap['pending'] as num?)?.toInt() ?? 0);
       } catch (_) {}
     });
     ref.listenManual(authProvider, (prev, next) {
@@ -194,7 +182,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   @override
   void dispose() {
     _pulseTimer?.cancel();
-    _syncProbe?.cancel();
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _newEmailCtrl.dispose();
@@ -518,15 +505,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             const SizedBox(height: 24),
             _sectionHeader(
               AppLocalizations.of(context).translate('profileBackupSync'),
-              icon: Icons.cloud_sync_outlined,
+              icon: Icons.backup_outlined,
             ),
             const SizedBox(height: 10),
-            // Personal keeps the ORIGINAL, fully-working sync + backup. Business
-            // shows the SAME layout but the actions are "قريباً" until developed.
-            if (!widget.business) ...[
-              _buildSyncStatus(isOnline, pendingCount: _pendingSync),
-              const SizedBox(height: 8),
-            ],
+            // Sync runs by itself in the background (no section, no button);
+            // the connection dot in the header already shows its state.
             _buildBackupSection(isOnline),
           ],
           if (!_employee) ...[const SizedBox(height: 28), _buildLogoutButton()],
@@ -1297,67 +1280,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildSyncStatus(
-    bool isOnline, {
-    String syncStatus = '',
-    int pendingCount = 0,
-  }) {
-    final s = syncStatus;
-    final syncing = s == 'syncing';
-    final syncError = s == 'sync_error' || s == 'failed';
-    final pending = pendingCount > 0;
-    final offline = !isOnline;
-    final Color color;
-    final String label;
-    if (syncing) {
-      color = AppColors.info;
-      label = 'جارٍ المزامنة…';
-    } else if (offline) {
-      color = AppColors.warning;
-      label = pending
-          ? 'غير متصل — لديك تغييرات تنتظر المزامنة'
-          : AppLocalizations.of(context).translate('profileOffline');
-    } else if (syncError) {
-      color = AppColors.danger;
-      label = pending
-          ? 'فشلت المزامنة — التغييرات محفوظة محلياً وستُرسل لاحقاً'
-          : 'فشلت المزامنة';
-    } else {
-      color = AppColors.success;
-      label = pending
-          ? 'متصل — جارٍ تحميل تغييراتك'
-          : AppLocalizations.of(context).translate('profileOnline');
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: color.withAlpha(15),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withAlpha(50)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-          ),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontFamily: 'Cairo',
-                fontSize: R.fontSize(context, 12),
-                color: color,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

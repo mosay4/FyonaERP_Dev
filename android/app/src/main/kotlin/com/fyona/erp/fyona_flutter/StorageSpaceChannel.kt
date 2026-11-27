@@ -47,8 +47,100 @@ object StorageSpaceChannel {
                         main.post { result.success(ok) }
                     }.start()
                 }
+                "listFyonaFiles" -> {
+                    // FYONA backup files of [extensions] in Download/FYONA ERP: this
+                    // install's own files (MediaStore), the folder itself (old
+                    // Android / readable), and a folder the user granted (tree).
+                    val exts = (call.argument<List<String>>("extensions") ?: emptyList()).map { it.lowercase() }
+                    val tree = call.argument<String>("treeUri")
+                    Thread {
+                        val files = try { listFiles(app, exts, tree) } catch (_: Throwable) { emptyList() }
+                        main.post { result.success(files) }
+                    }.start()
+                }
+                "copyUriToFile" -> {
+                    val uri = call.argument<String>("uri") ?: ""
+                    val path = call.argument<String>("path") ?: ""
+                    Thread {
+                        val ok = try { copyUri(app, uri, File(path)) } catch (_: Throwable) { false }
+                        main.post { result.success(ok) }
+                    }.start()
+                }
+                "deleteUri" -> {
+                    val uri = call.argument<String>("uri") ?: ""
+                    Thread {
+                        val ok = try { deleteUri(app, uri) } catch (_: Throwable) { false }
+                        main.post { result.success(ok) }
+                    }.start()
+                }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    private fun matches(name: String, exts: List<String>) =
+        exts.isEmpty() || exts.any { name.lowercase().endsWith(".$it") }
+
+    private fun listFiles(context: Context, exts: List<String>, tree: String?): List<Map<String, Any?>> {
+        val out = LinkedHashMap<String, Map<String, Any?>>()
+        fun add(uri: String, name: String, size: Long, modifiedSec: Long) {
+            if (matches(name, exts) && !out.containsKey(name)) {
+                out[name] = mapOf("uri" to uri, "name" to name, "size" to size, "modified" to modifiedSec)
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME,
+                MediaStore.Downloads.SIZE, MediaStore.Downloads.DATE_MODIFIED)
+            context.contentResolver.query(collection, projection, "${MediaStore.Downloads.RELATIVE_PATH} LIKE ?",
+                arrayOf("${Environment.DIRECTORY_DOWNLOADS}/$FOLDER%"), null)?.use { c ->
+                while (c.moveToNext()) {
+                    add(android.net.Uri.withAppendedPath(collection, c.getLong(0).toString()).toString(),
+                        c.getString(1) ?: "", c.getLong(2), c.getLong(3))
+                }
+            }
+        }
+        @Suppress("DEPRECATION")
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), FOLDER)
+        dir.listFiles()?.filter { it.isFile }?.forEach {
+            add(android.net.Uri.fromFile(it).toString(), it.name, it.length(), it.lastModified() / 1000L)
+        }
+        if (!tree.isNullOrEmpty()) {
+            val treeUri = android.net.Uri.parse(tree)
+            val children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(
+                treeUri, android.provider.DocumentsContract.getTreeDocumentId(treeUri))
+            val cols = arrayOf(android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                android.provider.DocumentsContract.Document.COLUMN_SIZE,
+                android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+            context.contentResolver.query(children, cols, null, null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val doc = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, c.getString(0))
+                    add(doc.toString(), c.getString(1) ?: "", c.getLong(2), c.getLong(3) / 1000L)
+                }
+            }
+        }
+        return out.values.toList()
+    }
+
+    private fun copyUri(context: Context, uri: String, target: File): Boolean {
+        target.parentFile?.mkdirs()
+        val tmp = File(target.path + ".part")
+        val parsed = android.net.Uri.parse(uri)
+        val input = if (parsed.scheme == "file") File(parsed.path ?: "").inputStream()
+            else context.contentResolver.openInputStream(parsed) ?: return false
+        input.use { i -> tmp.outputStream().use { o -> i.copyTo(o, 1 shl 20) } }
+        if (target.exists()) target.delete()
+        return tmp.renameTo(target)
+    }
+
+    private fun deleteUri(context: Context, uri: String): Boolean {
+        val parsed = android.net.Uri.parse(uri)
+        if (parsed.scheme == "file") return File(parsed.path ?: "").delete()
+        return try {
+            android.provider.DocumentsContract.deleteDocument(context.contentResolver, parsed)
+        } catch (_: Throwable) {
+            context.contentResolver.delete(parsed, null, null) > 0
         }
     }
 

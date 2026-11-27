@@ -152,6 +152,26 @@ async def _request(cfg: R2Config, method: str, key: str = "",
         return await client.request(method, url, headers=headers, content=body or None)
 
 
+async def put(cfg: R2Config, key: str, body: bytes, content_type: str = "application/octet-stream") -> None:
+    """Server-side upload (small objects only, e.g. an encrypted backup the
+    device sent through the API)."""
+    url = presign(cfg, "PUT", key, expires=600, headers={"content-type": content_type,
+                                                        "content-length": str(len(body))})
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        r = await client.put(url, content=body, headers={"content-type": content_type})
+    r.raise_for_status()
+
+
+async def get(cfg: R2Config, key: str) -> Optional[bytes]:
+    url = presign(cfg, "GET", key, expires=300)
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        r = await client.get(url)
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return r.content
+
+
 async def head(cfg: R2Config, key: str) -> Optional[int]:
     """Size of the object, or None when it does not exist."""
     r = await _request(cfg, "HEAD", key)

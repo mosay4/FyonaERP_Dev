@@ -6,10 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../../core/network/api_client.dart' show serverBaseUrlProvider;
 import '../../../../core/network/dio_provider.dart';
-import '../../../../core/export/presentation/accounting_export_page.dart';
-import '../../../../core/import/presentation/smart_import_page.dart';
-import '../../../../core/backup/backup_providers.dart';
-import '../../../../core/backup/presentation/continuous_backup_page.dart';
+import '../../../../core/backup/presentation/business_backup_home.dart';
 import '../../../../core/storage/free_space.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/styled_snack.dart';
@@ -327,11 +324,22 @@ class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
     final selection = _selection();
     final local = selection.local != null;
     final same = _shown == selection;
+    // A device-ledger branch: the redesigned backup (device + FYONA cloud,
+    // restore lists, no codes). Connected branches keep the server API.
+    if (local) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          title: const Text('النسخ الاحتياطي', style: TextStyle(fontFamily: 'Cairo')),
+        ),
+        body: BusinessBackupHome(key: ValueKey(selection)),
+      );
+    }
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text(
-          'النسخ الاحتياطي والمزامنة',
+          'النسخ الاحتياطي',
           style: TextStyle(fontFamily: 'Cairo'),
         ),
         actions: [
@@ -344,9 +352,6 @@ class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (local) const ContinuousBackupEntry(kind: BackupKind.business),
-          if (local) const AccountingExportEntry(),
-          if (local) const SmartImportEntry(),
           Text(
             local
                 ? 'نسخة مشفّرة من سجلات هذا الفرع على الجهاز. لا تشمل تسجيل الدخول أو الشخصي. '

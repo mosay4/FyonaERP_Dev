@@ -1,5 +1,8 @@
 import 'dart:convert';
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:cryptography/cryptography.dart';
+import 'package:fyona_flutter/core/backup/account_backup_keys.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -203,8 +206,17 @@ void main() {
     }
   }
 
-  setUp(() async => cleanDb());
-  tearDown(() async => cleanDb());
+  // Device files are encrypted with the account key (fetched from the
+  // server in the app): a fixed test key here, no network.
+  setUp(() async {
+    FlutterSecureStorage.setMockInitialValues({});
+    AccountBackupKeys.fetchOverride = (_) async => base64Encode(List.filled(32, 3));
+    await cleanDb();
+  });
+  tearDown(() async {
+    AccountBackupKeys.fetchOverride = null;
+    await cleanDb();
+  });
 
   // Seeds a rich multi-currency dataset through the REAL service path
   // (local-first mirror writes), returns the built snapshot maps.
@@ -1105,10 +1117,13 @@ void main() {
       final v1doc = await BackupService.readDocumentContent(v1.fileUri!);
       final v2doc = await BackupService.readDocumentContent(v2.fileUri!);
       // Amounts serialize as exact strings ("777.0"); v1 must not have it.
-      expect((v1doc!['content'] as String).contains('"amount": "777.0"'),
+      final key = SecretKey(List.filled(32, 3));
+      final v1plain = await BackupEnvelope.openText(v1doc!['content'] as String, key);
+      final v2plain = await BackupEnvelope.openText(v2doc!['content'] as String, key);
+      expect(v1plain.contains('"amount": "777.0"'),
           isFalse,
           reason: 'older versions are never touched');
-      expect((v2doc!['content'] as String).contains('"amount": "777.0"'),
+      expect(v2plain.contains('"amount": "777.0"'),
           isTrue,
           reason: 'newest version carries the fresh data');
       expect(await BackupService.getSavedUri(), v2.fileUri);
@@ -1309,7 +1324,7 @@ void main() {
       await Future<void>.delayed(const Duration(seconds: 3));
       final uri = await BackupService.getSavedUri();
       final doc = await BackupService.readDocumentContent(uri!);
-      final content = (doc!['content'] as String?) ?? '';
+      final content = await BackupEnvelope.openText((doc!['content'] as String?) ?? '', SecretKey(List.filled(32, 3)));
       expect(content.contains('AutoCover'), isTrue);
       await BackupService.setAutoSyncEnabled(false);
     });
@@ -2151,8 +2166,11 @@ void main() {
       final save = await bs.saveBackup(
           localUserId: uid, serverUserUuid: serverUuid);
       final doc = await BackupService.readDocumentContent(save.fileUri!);
-      Map<String, dynamic> readData() => (jsonDecode(
-              (doc!['content'] as String?) ?? '') as Map<String, dynamic>);
+      final stored = (doc!['content'] as String?) ?? '';
+      // The file on the device is encrypted; opened with the account key.
+      expect(BackupEnvelope.isSealedText(stored), isTrue);
+      final plain = await BackupEnvelope.openText(stored, SecretKey(List.filled(32, 3)));
+      Map<String, dynamic> readData() => (jsonDecode(plain) as Map<String, dynamic>);
       for (var round = 0; round < 3; round++) {
         final data = readData();
         final issues =

@@ -113,6 +113,10 @@ flutter:
     - assets/audio/recon_crystal.mp3
     - assets/audio/motion_section.wav
     - assets/audio/motion_branch.wav
+    - assets/audio/restore_start.wav
+    - assets/audio/restore_tick.wav
+    - assets/audio/restore_done.wav
+    - assets/audio/restore_fail.wav
     - assets/audio/chat_sent.wav
     - assets/audio/chat_received.wav
     - assets/audio/sara_welcome.wav

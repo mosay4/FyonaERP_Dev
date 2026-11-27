@@ -6,7 +6,11 @@ import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/backup/backup_cloud.dart';
+import 'package:fyona_flutter/core/backup/account_backup_keys.dart';
 import 'package:fyona_flutter/core/backup/backup_coordinator.dart';
+import 'package:fyona_flutter/core/backup/backup_crypto.dart';
+import 'package:fyona_flutter/core/backup/device_backup_folder.dart';
+import 'package:cryptography/cryptography.dart';
 import 'package:fyona_flutter/core/backup/backup_pack.dart';
 import 'package:fyona_flutter/core/storage/free_space.dart';
 import 'package:fyona_flutter/core/backup/backup_worker.dart';
@@ -302,5 +306,89 @@ void main() {
       expect(Directory('${dir.path}/phone2/imported').existsSync(), isFalse);
       expect(File('${dir.path}/phone2/restore-stop').existsSync(), isFalse);
     });
+  });
+
+  group('no code: the account key (server-derived) opens the backups', () {
+    final accountA = SecretKey(List.generate(32, (i) => i));
+    final accountB = SecretKey(List.generate(32, (i) => 100 + i));
+
+    Future<BackupSpace> spaceWith(SecretKey? account) async {
+      final s0 = await space();
+      return BackupSpace(id: s0.id, section: s0.section, dbPath: s0.dbPath, dbKeyHex: '',
+          accountKey: () async => account);
+    }
+
+    test('a new device restores from the cloud with NO code; another account cannot', () async {
+      final s = await spaceWith(accountA);
+      final c = BackupCoordinator(remoteFor: (_) => cloud, root: () async => Directory('${dir.path}/phoneA'));
+      await c.ensureEnabled(s);
+      await write(s.dbPath, "INSERT INTO t VALUES (1, 'رصيد', 125000)");
+      expect((await c.runNow(s)).cloudError, isNull);
+      FlutterSecureStorage.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({});
+      final c2 = BackupCoordinator(remoteFor: (_) => cloud, root: () async => Directory('${dir.path}/phoneB'));
+      final set = (await c2.listSets(s)).single;
+      final copy = await c2.rebuild(s, set); // no secret at all
+      final db = await openLedgerFile(copy.path, '');
+      expect(await db.rawQuery('SELECT amount FROM t'), [{'amount': 125000}]);
+      await db.close();
+      final other = await spaceWith(accountB);
+      await expectLater(c2.rebuild(other, set),
+          throwsA(isA<BackupRestoreFailure>().having((e) => e.code, 'code', 'key_needed')));
+    });
+
+    test('a space enabled before account keys gets them on its next run (new set)', () async {
+      final old = await spaceWith(null);
+      final c = BackupCoordinator(remoteFor: (_) => cloud, root: () async => Directory('${dir.path}/p'));
+      await c.enable(old); // recovery code only (older app)
+      await write(old.dbPath, "INSERT INTO t VALUES (2, 'x', 5)");
+      await c.runNow(old);
+      final first = (await c.listSets(old)).single.id;
+      final s = await spaceWith(accountA);
+      await write(s.dbPath, "INSERT INTO t VALUES (3, 'y', 6)");
+      await c.runNow(s);
+      final sets = await c.listSets(s);
+      final fresh = sets.map((e) => e.id).where((id) => id != first).single;
+      final kj = jsonDecode(File('${dir.path}/p/${s.id}/sets/$fresh/key.json').readAsStringSync()) as Map;
+      expect(kj['account'], isNotNull);
+      expect(await BackupKeys.unwrapForAccount(Map<String, dynamic>.from(kj['account'] as Map), accountA), isNotNull);
+    });
+
+    test('backup kept in the FYONA folder; listed, numbered and restored there', () async {
+      final folder = Directory('${dir.path}/Download/FYONA ERP');
+      DeviceBackupFolder.folderOverride = () async => folder;
+      addTearDown(() => DeviceBackupFolder.folderOverride = null);
+      final s = await spaceWith(accountA);
+      final c = BackupCoordinator(root: () async => Directory('${dir.path}/phone1'));
+      await c.ensureEnabled(s);
+      await c.configure(s.id, cloud: false);
+      for (var i = 0; i < 5; i++) {
+        await write(s.dbPath, "INSERT INTO t VALUES (${10 + i}, 'v', $i)");
+        await c.runNow(s, force: true);
+        await c.saveToDevice(s);
+        await Future<void>.delayed(const Duration(milliseconds: 1100)); // distinct names
+      }
+      final files = await c.deviceFiles(s);
+      expect(files.length, 3); // the 3 newest kept
+      // A new phone (app reinstalled): the folder is still there.
+      FlutterSecureStorage.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({});
+      final c2 = BackupCoordinator(root: () async => Directory('${dir.path}/phone2'));
+      final copy = await c2.restoreDeviceFile(s, files.first);
+      final db = await openLedgerFile(copy.path, '');
+      expect((await db.rawQuery('SELECT COUNT(*) AS n FROM t WHERE id >= 10')).single['n'], 5);
+      await db.close();
+    });
+  });
+
+  test('a personal backup text is encrypted with the account key; older plain text still reads', () async {
+    final k = SecretKey(List.filled(32, 9));
+    const plain = '{"schema_version":"4.0.0","rows":"سري"}';
+    final sealed = await BackupEnvelope.sealText(plain, k);
+    expect(BackupEnvelope.isSealedText(sealed), isTrue);
+    expect(sealed.contains('سري'), isFalse);
+    expect(await BackupEnvelope.openText(sealed, k), plain);
+    expect(BackupEnvelope.isSealedText(plain), isFalse);
+    await expectLater(BackupEnvelope.openText(sealed, SecretKey(List.filled(32, 8))), throwsA(anything));
   });
 }
