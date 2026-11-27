@@ -367,18 +367,61 @@ async def list_messages(
     return result
 
 
+_CLOUD_DROPS: set = set()  # keeps the background deletions alive
+_CLOUD_REF = re.compile(r"^fyc:([0-9a-f-]{36})/([0-9a-f]{64})")
+
+
+def cloud_media_keys(link_id: UUID, media_path: Optional[str], media: Optional[str]) -> List[str]:
+    """R2 keys of the encrypted attachments a message refers to (``fyc:``
+    references of THIS chat only; anything else is ignored)."""
+    refs: List[str] = [media_path or ""]
+    try:
+        for it in json.loads(media or "[]") or []:
+            if isinstance(it, dict):
+                refs += [str(it.get("url") or ""), str(it.get("thumbnail") or "")]
+    except (ValueError, TypeError):
+        pass
+    keys = []
+    for ref in refs:
+        m = _CLOUD_REF.match(ref.strip())
+        if m and UUID(m.group(1)) == link_id:
+            keys.append(f"t/c_{link_id.hex}/m/{m.group(2)}")
+    return keys
+
+
+async def _drop_cloud_media(keys: List[str]) -> None:
+    """Best effort: an attachment leaves Cloudflare with its message."""
+    from app.core import r2
+    try:
+        cfg = r2.R2Config.from_env()
+    except Exception:  # noqa: BLE001 — storage not configured (tests/dev)
+        return
+    for key in keys:
+        try:
+            await r2.delete(cfg, key)
+        except Exception:  # noqa: BLE001 — retried by no one; logged by r2
+            pass
+
+
 async def purge_delivered(db: AsyncSession, link_id: UUID) -> None:
     """Both devices keep the conversation. The server forgets a message once
     it was read (after a short grace so the sender's device sees the read
-    tick), and anything never delivered after 90 days."""
+    tick), and anything never delivered after 90 days. Its encrypted
+    attachments are removed from Cloudflare R2 at the same time."""
+    import asyncio
     from datetime import timedelta
     from sqlalchemy import delete, or_
     now = _now()
-    await db.execute(delete(ChatMessage).where(
-        ChatMessage.link_id == link_id,
-        or_(ChatMessage.read_at < now - timedelta(minutes=10),
-            ChatMessage.created_at < now - timedelta(days=90)),
-    ))
+    gone = or_(ChatMessage.read_at < now - timedelta(minutes=10),
+               ChatMessage.created_at < now - timedelta(days=90))
+    rows = (await db.execute(select(ChatMessage.media_path, ChatMessage.media).where(
+        ChatMessage.link_id == link_id, gone))).all()
+    keys = [k for path, media in rows for k in cloud_media_keys(link_id, path, media)]
+    await db.execute(delete(ChatMessage).where(ChatMessage.link_id == link_id, gone))
+    if keys:
+        task = asyncio.get_running_loop().create_task(_drop_cloud_media(keys))
+        _CLOUD_DROPS.add(task)
+        task.add_done_callback(_CLOUD_DROPS.discard)
 
 
 async def mark_read(

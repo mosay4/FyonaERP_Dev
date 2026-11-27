@@ -5,9 +5,11 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:http_parser/http_parser.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:workmanager/workmanager.dart';
+
+import '../../../core/media/chat_cloud_media.dart';
+import '../../../core/services/media/chat_media_store.dart';
 
 const String chatUploadTaskName = 'fyona.chat.upload';
 
@@ -412,29 +414,18 @@ class ChatBackgroundUpload {
     String name,
     void Function(int, int) onProgress,
   ) async {
-    final form = FormData.fromMap({
-      'file': await MultipartFile.fromFile(
-        path,
-        filename: name,
-        contentType: MediaType.parse(mimeFor(name)),
-      ),
-    });
-    final r = await dio.post(
-      '/chat/${job['link_id']}/media',
-      data: form,
-      onSendProgress: onProgress,
-      options: Options(
-        sendTimeout: const Duration(minutes: 60),
-        receiveTimeout: const Duration(minutes: 10),
-      ),
+    // Same path as the app: encrypted here, straight to Cloudflare R2.
+    final ref = await ChatCloudMedia(DioChatMediaRemote(dio)).upload(
+      '${job['link_id']}',
+      File(path),
+      name,
+      mimeFor(name),
+      onProgress: onProgress,
     );
-    final data = r.data is Map && r.data['data'] is Map
-        ? r.data['data']
-        : r.data;
-    return {
-      'url': '${data is Map ? data['url'] ?? '' : ''}',
-      'thumbnail': '${data is Map ? data['thumbnail'] ?? '' : ''}',
-    };
+    try {
+      await File(path).copy(await ChatMediaStore.pathFor(ref));
+    } catch (_) {}
+    return {'url': ref, 'thumbnail': ''};
   }
 
   static String mimeFor(String name) {

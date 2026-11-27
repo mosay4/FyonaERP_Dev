@@ -251,101 +251,16 @@ async def chat_invoices(
         raise HTTPException(status_code=403, detail=str(e))
 
 
-@router.post("/chat/{link_id}/media", summary="رفع صورة/تسجيل صوتي")
+@router.post("/chat/{link_id}/media", summary="رفع صورة/تسجيل صوتي (قديم)")
 async def upload_media(
     link_id: UUID,
-    file: UploadFile = File(...),
     user_id: UUID = Depends(get_current_user_uuid),
-    db: AsyncSession = Depends(get_db),
 ):
-    # Validate participation before accepting a file.
-    try:
-        await svc.conversation_info(db, user_id, link_id)
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    ct = (file.content_type or "application/octet-stream").lower()
-    allowed_ext = {"pdf", "doc", "docx", "xls", "xlsx", "csv", "txt",
-                   "odt", "ods", "ppt", "pptx"}
-    ext = (file.filename or "").rsplit(".", 1)
-    ext = ext[1].lower() if len(ext) == 2 else ""
-    media_ext = {"jpg", "jpeg", "png", "gif", "webp", "heic",
-                 "mp4", "mov", "m4v", "webm", "mkv", "3gp", "avi",
-                 "m4a", "aac", "mp3", "wav", "ogg", "opus"}
-    is_media = (ct.startswith("image/") or ct.startswith("audio/")
-                or ct.startswith("video/") or ext in media_ext)
-    is_doc = (ct.startswith("application/") or ct.startswith("text/"))
-    if not (is_media or (is_doc and ext in allowed_ext)):
-        raise HTTPException(status_code=400, detail="نوع الملف غير مدعوم")
-    if not ext:
-        ext = ("jpg" if ct.startswith("image/")
-               else ("m4a" if ct.startswith("audio/")
-                     else ("mp4" if ct.startswith("video/") else "bin")))
-    name = f"{link_id}_{_uuid.uuid4().hex}.{ext}"
-    # Stream to disk (large videos never sit in RAM) + 7-day auto-cleanup.
-    import os as _os
-    import shutil as _shutil
-    import time as _time
-    from pathlib import Path as _Path
-    from ...core.paths import UPLOAD_ROOT as _ROOT
-    _root = _Path(_ROOT)
-    dest = _root / "chat" / name
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    size = 0
-    with dest.open("wb") as out:
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > 300 * 1024 * 1024:
-                out.close()
-                try:
-                    dest.unlink()
-                except Exception:
-                    pass
-                raise HTTPException(status_code=400, detail="الملف كبير جدًا")
-            out.write(chunk)
-    if size == 0:
-        try:
-            dest.unlink()
-        except Exception:
-            pass
-        raise HTTPException(status_code=400, detail="الملف فارغ")
-    try:
-        cutoff = _time.time() - 7 * 24 * 3600
-        for f in (_root / "chat").iterdir():
-            if f.is_file() and f.stat().st_mtime < cutoff:
-                f.unlink()
-        _thumbs = _root / "chat" / "thumbs"
-        if _thumbs.is_dir():
-            for f in _thumbs.iterdir():
-                if f.is_file() and f.stat().st_mtime < cutoff:
-                    f.unlink()
-    except Exception:
-        pass
-    thumb_url = None
-    if ext in {"mp4", "mov", "m4v", "webm", "mkv", "3gp", "avi"}:
-        try:
-            import subprocess
-            from ...core.paths import UPLOAD_ROOT as _THUMB_ROOT
-            thumb_dir = _Path(_THUMB_ROOT) / "chat" / "thumbs"
-            thumb_dir.mkdir(parents=True, exist_ok=True)
-            thumb_path = thumb_dir / f"{_Path(name).stem}.jpg"
-            for seek in ("1", "0"):
-                proc = subprocess.run(
-                    ["ffmpeg", "-y", "-ss", seek, "-i", str(dest),
-                     "-frames:v", "1", "-vf", "scale=480:-2",
-                     "-q:v", "4", str(thumb_path)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=30,
-                )
-                if proc.returncode == 0 and thumb_path.exists() and                         thumb_path.stat().st_size > 0:
-                    thumb_url = f"uploads/chat/thumbs/{thumb_path.name}"
-                    break
-        except Exception:
-            thumb_url = None
-
-    rel = f"chat/{name}"
-    await db.commit()
-    return ok({"url": f"uploads/{rel}", "thumbnail": thumb_url})
+    """Retired: the server no longer stores chat files. The app encrypts an
+    attachment on the device and sends it to the chat's private Cloudflare
+    R2 space through /storage/upload-url (section "chat"); the message then
+    carries its ``fyc:`` reference."""
+    raise HTTPException(status_code=410, detail={
+        "code": "chat_media_moved",
+        "message": "حدّث التطبيق لإرسال المرفقات",
+    })

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../core/media/chat_cloud_media.dart';
 import '../../core/services/media/chat_media_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -257,7 +258,29 @@ class _SecureImageState extends ConsumerState<SecureImage> {
     await _loadByUrl();
   }
 
+  /// A chat attachment in the cloud (`fyc:` reference, encrypted): the
+  /// kept device copy, else downloaded, verified and decrypted once.
+  Future<void> _loadCloud(String ref) async {
+    final cached = _cache[ref];
+    if (cached == null) setState(() => _loading = true);
+    Uint8List? bytes = cached;
+    if (bytes == null) {
+      try {
+        final f = await ChatMediaStore.fetchFile(ref);
+        if (f != null) bytes = _cache[ref] = await f.readAsBytes();
+      } catch (_) {}
+    }
+    if (!mounted || widget.url?.trim() != ref) return;
+    setState(() {
+      _bytes = bytes;
+      _error = bytes == null ? Exception('attachment unavailable') : null;
+      _loading = false;
+    });
+  }
+
   Future<void> _loadByUrl() async {
+    final raw = widget.url?.trim() ?? '';
+    if (ChatCloudMedia.isRef(raw)) return _loadCloud(raw);
     final secureUrl = _secureUrl();
     if (secureUrl == null) {
       setState(() {

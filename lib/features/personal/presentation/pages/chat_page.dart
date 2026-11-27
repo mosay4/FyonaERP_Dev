@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:dio/dio.dart';
+import '../../../../core/media/chat_cloud_media.dart';
 import '../../../../core/services/media/chat_media_store.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:gal/gal.dart';
@@ -1164,8 +1165,17 @@ class _ChatPageState extends ConsumerState<ChatPage>
         ? ref.read(secureStorageProvider).getToken()
         : null;
 
-    // Already on this device: play the kept copy (works offline).
-    final kept = await ChatMediaStore.file(full);
+    // Already on this device: play the kept copy (works offline). A cloud
+    // attachment is encrypted, so it is fetched (verified, decrypted) first.
+    var kept = await ChatMediaStore.file(full);
+    if (kept == null && ChatCloudMedia.isRef(full)) {
+      if (mounted) showFyonaSnack(context, AppLocalizations.of(context).translate('chatMediaLoading'), success: true);
+      kept = await ChatMediaStore.fetchFile(full);
+      if (kept == null) {
+        if (mounted) showFyonaSnack(context, AppLocalizations.of(context).translate('chatMediaUnavailable'), success: false);
+        return;
+      }
+    }
     if (!mounted) return;
     if (kept == null) {
       // Keep a copy for later while it streams now.

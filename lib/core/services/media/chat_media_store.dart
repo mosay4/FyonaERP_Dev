@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../config/app_config.dart';
+import '../../media/chat_cloud_media.dart';
 
 /// Chat attachments (pictures, videos, voice notes, files) kept on the
 /// device for good. The server only carries a file until both sides have it
@@ -15,8 +16,11 @@ abstract final class ChatMediaStore {
   static final Map<String, Future<Uint8List?>> _pending = {};
   static Directory? _dir;
 
+  /// Cloud (R2) side of new attachments; set once the API is ready.
+  static ChatCloudMedia? cloud;
+
   /// Chat attachments only (other protected images keep their own cache).
-  static bool isChatMedia(String url) => url.contains('uploads/chat/');
+  static bool isChatMedia(String url) => url.contains('uploads/chat/') || ChatCloudMedia.isRef(url);
 
   /// The same attachment whatever host or form the URL was written in.
   static String _path(String url) {
@@ -28,7 +32,7 @@ abstract final class ChatMediaStore {
   /// Full address to download a stored path (as the chat page builds it).
   static String absolute(String url) {
     final u = url.trim();
-    if (u.isEmpty || u.startsWith('http')) return u;
+    if (u.isEmpty || u.startsWith('http') || ChatCloudMedia.isRef(u)) return u;
     return '${AppConfig.apiHostUrl}/${_path(u)}';
   }
 
@@ -37,7 +41,7 @@ abstract final class ChatMediaStore {
   static void keep(Dio dio, Iterable<Map> messages) {
     for (final m in messages) {
       for (final url in urlsOf(m)) {
-        if (!url.contains('uploads/')) continue;
+        if (!url.contains('uploads/') && !ChatCloudMedia.isRef(url)) continue;
         unawaited(bytes(dio, absolute(url)).catchError((Object _) => null));
       }
     }
@@ -52,7 +56,7 @@ abstract final class ChatMediaStore {
       b = ((b ^ url.codeUnitAt(url.length - 1 - i)) * 0x01000193) & 0xFFFFFFFF;
     }
     // Keep the extension: players pick the format from it.
-    final name = url.split('?').first.split('/').last;
+    final name = url.split('?').first.split('#').first.split('/').last;
     final dot = name.lastIndexOf('.');
     final ext = dot > 0 && name.length - dot <= 6 ? name.substring(dot).toLowerCase() : '';
     return '${a.toRadixString(16).padLeft(8, '0')}${b.toRadixString(16).padLeft(8, '0')}$ext';
@@ -86,6 +90,10 @@ abstract final class ChatMediaStore {
       try {
         final local = await file(url);
         if (local != null) return await local.readAsBytes();
+        if (ChatCloudMedia.isRef(url)) {
+          final kept = await fetchFile(url);
+          return kept == null ? null : await kept.readAsBytes();
+        }
         final res = await dio.get<List<int>>(
           url,
           options: Options(responseType: ResponseType.bytes),
@@ -97,6 +105,25 @@ abstract final class ChatMediaStore {
         return out;
       } finally {
         unawaited(_pending.remove(url));
+      }
+    }();
+  }
+
+  static final Map<String, Future<File?>> _fetching = {};
+
+  /// A cloud attachment as a file on this device (downloaded, verified and
+  /// decrypted once; streamed to disk, so a long video never sits in memory).
+  static Future<File?> fetchFile(String ref) async {
+    final local = await file(ref);
+    if (local != null) return local;
+    final c = cloud;
+    if (c == null || !ChatCloudMedia.isRef(ref)) return null;
+    return _fetching[ref] ??= () async {
+      try {
+        final target = File(await pathFor(ref));
+        return await c.fetch(ref, target) ? target : null;
+      } finally {
+        unawaited(_fetching.remove(ref));
       }
     }();
   }

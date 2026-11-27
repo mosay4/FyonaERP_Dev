@@ -1,11 +1,11 @@
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http_parser/http_parser.dart';
 import '../../../../core/di/providers.dart' show apiClientProvider;
 import '../../../../core/network/api_client.dart';
 import '../../../../shared/providers/current_user_provider.dart';
 import 'peer_store.dart';
+import '../../../../core/media/chat_cloud_media.dart';
 import '../../../../core/services/media/chat_media_store.dart';
 import '../../../../core/services/currency/currency_engine.dart';
 
@@ -31,7 +31,11 @@ class MerchantApi {
     PeerStore? store,
     double? Function(String from, String to)? rate,
   }) : _store = store,
-       _rate = rate;
+       _rate = rate {
+    // New chat attachments go through Cloudflare R2 (encrypted on this
+    // device); older `uploads/chat/…` links still download as before.
+    ChatMediaStore.cloud = ChatCloudMedia(DioChatMediaRemote(_client.dio));
+  }
 
   Future<Map<String, dynamic>?> _shared(String linkId) async =>
       await _store?.debtSnapshot(linkId);
@@ -726,45 +730,36 @@ class MerchantApi {
     void Function(int sent, int total)? onProgress,
     CancelToken? cancelToken,
   }) async {
-    final part = (path != null && path.isNotEmpty)
-        ? await MultipartFile.fromFile(
-            path,
-            filename: filename,
-            contentType: MediaType.parse(mime),
-          )
-        : MultipartFile.fromBytes(
-            bytes,
-            filename: filename,
-            contentType: MediaType.parse(mime),
-          );
-    final r = await _client.dio.post(
-      '/chat/$linkId/media',
-      data: FormData.fromMap({'file': part}),
-      onSendProgress: onProgress,
-      cancelToken: cancelToken,
-      // Large videos can take minutes; the global 30s send timeout used to
-      // abort uploads part-way. Give media its own generous budget.
-      options: Options(
-        sendTimeout: const Duration(minutes: 60),
-        receiveTimeout: const Duration(minutes: 10),
-      ),
-    );
-    final data = _data(r) as Map? ?? const {};
-    // The sender keeps its own copy under the server address (never
-    // downloads its own file again; it stays after the server deletes it).
+    // Encrypted on this device and sent straight to the chat's private
+    // cloud space: the FYONA server only signs the transfer (no bytes).
+    File? temp;
+    var source = (path != null && path.isNotEmpty) ? File(path) : null;
+    if (source == null) {
+      temp = File('${Directory.systemTemp.path}/fyona-chat-${DateTime.now().microsecondsSinceEpoch}');
+      await temp.writeAsBytes(bytes, flush: true);
+      source = temp;
+    }
     try {
-      final url = '${data['url'] ?? ''}';
-      if (url.isNotEmpty) {
-        if (path != null && path.isNotEmpty) {
-          await File(path).copy(await ChatMediaStore.pathFor(url));
-        } else {
-          await ChatMediaStore.save(url, bytes);
-        }
-      }
-    } catch (_) {}
-    return {
-      'url': '${data['url'] ?? ''}',
-      'thumbnail': '${data['thumbnail'] ?? ''}',
-    };
+      final ref = await (ChatMediaStore.cloud ?? ChatCloudMedia(DioChatMediaRemote(_client.dio))).upload(
+        linkId,
+        source,
+        filename,
+        mime,
+        onProgress: onProgress,
+        cancelled: () => cancelToken?.isCancelled == true,
+      );
+      // The sender keeps its own copy (never downloads its own file again).
+      try {
+        await source.copy(await ChatMediaStore.pathFor(ref));
+      } catch (_) {}
+      return {'url': ref, 'thumbnail': ''};
+    } on ChatUploadCancelled {
+      throw DioException.requestCancelled(
+        requestOptions: RequestOptions(path: '/storage/upload-url'),
+        reason: 'cancelled',
+      );
+    } finally {
+      if (temp != null && await temp.exists()) await temp.delete();
+    }
   }
 }
