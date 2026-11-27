@@ -89,13 +89,20 @@ class BackupSnapshotBuilder {
     required String appVersion,
     String source = 'device',
     PersonalCacheRepository? cache,
+    // Backup v2 restore: the same snapshot built from a verified, restored
+    // copy of the ledger instead of the live one (defaults: live sources).
+    Future<List<Map<String, dynamic>>> Function(String table)? tableSource,
+    Future<List<Map<String, dynamic>>> Function(String entityType)? mirrorSource,
+    Map<String, dynamic>? preferences,
   }) async {
     final tables = <String, dynamic>{};
     for (final table in snapshotTables) {
       try {
         // Personal tables come from the user's encrypted ledger (same
         // archive shape as before); the rest from the app database.
-        var rows = PersonalLedgerBackup.isLedgerTable(table)
+        var rows = tableSource != null
+            ? await tableSource(table)
+            : PersonalLedgerBackup.isLedgerTable(table)
             ? await PersonalLedgerBackup.exportTable(table)
             : await DatabaseHelper.query(table);
         if (table == 'users') {
@@ -113,10 +120,10 @@ class BackupSnapshotBuilder {
       }
     }
 
-    final preferences = await _readUserPrefs();
+    final prefs = preferences ?? await _readUserPrefs();
+    final repo = mirrorSource == null ? (cache ?? PersonalCacheRepository()) : null;
     final entities = await _buildEntities(
-      cache ?? PersonalCacheRepository(),
-      localUserId,
+      mirrorSource ?? (type) => repo!.getCollection(localUserId, type),
     );
 
     final counts = <String, dynamic>{};
@@ -134,11 +141,15 @@ class BackupSnapshotBuilder {
       'source': source,
       'counts': counts,
       'tables': tables,
-      'preferences': preferences,
+      'preferences': prefs,
       'entities': entities,
       'meta': {'snapshot_quiesced': true},
     };
   }
+
+  /// The user-data preferences a snapshot carries (backup v2 stores them
+  /// next to the ledger capture).
+  static Future<Map<String, dynamic>> readUserPrefs() => _readUserPrefs();
 
   /// Typed user preferences (StringList-safe — the old mapper dropped them).
   static Future<Map<String, dynamic>> _readUserPrefs() async {
@@ -261,15 +272,14 @@ class BackupSnapshotBuilder {
   /// the same derivation the app's own offline fallback uses — with the
   /// transaction UUID as the stable payment id (idempotent across retries).
   static Future<Map<String, dynamic>> _buildEntities(
-    PersonalCacheRepository cache,
-    int localUserId,
+    Future<List<Map<String, dynamic>>> Function(String type) collection,
   ) async {
     Map<String, dynamic> asMap(dynamic v) =>
         v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
 
     Future<List<Map<String, dynamic>>> mirror(String type) async {
       try {
-        final rows = await cache.getCollection(localUserId, type);
+        final rows = await collection(type);
         return rows.map(asMap).where((m) => m.isNotEmpty).toList();
       } catch (_) {
         return const [];

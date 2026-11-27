@@ -405,6 +405,7 @@ Future<List<String>> _columns(
 Future<void> _requireMainSchema(DatabaseExecutor db) async {
   final tables = await db.rawQuery('''
     SELECT name FROM main.sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+      AND name NOT LIKE '\\_bk\\_%' ESCAPE '\\'
   ''');
   final actual = tables.map((r) => r['name']).toSet();
   final expected = {

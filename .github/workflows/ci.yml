@@ -150,6 +150,40 @@ jobs:
         shell: bash
         run: flutter test --no-pub $QA_DEFINES test/printing
 
+  backup-media:
+    name: Backup v2 + media layer (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Analyze backup and media (errors fail)
+        shell: bash
+        run: flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings lib/core/backup lib/core/media test/backup test/media
+      # Exact restore at 100 / 10k / 100k products, live capture, kill mid-backup,
+      # tampering, recovery code, cloud outage, real Business + Personal ledgers.
+      - name: Backup, restore, kill and tamper tests (measurements printed)
+        shell: bash
+        env:
+          FYONA_OS_KILL_TEST: '1' # real SIGKILL test (runs on Linux only)
+        run: flutter test --no-pub $QA_DEFINES -r expanded test/backup test/media | tee backup-results.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backup-measurements-${{ matrix.os }}
+          path: backup-results.txt
+
   backend-tests:
     name: Backend relay, local mode, guard (PostgreSQL)
     needs: changes

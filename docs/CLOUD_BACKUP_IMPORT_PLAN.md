@@ -54,3 +54,43 @@ Test data is disposable (owner): no migration of old test images/backups.
 5. Chat media → R2 (server disk no longer holds chat files).
 6. Smart import engine + Sara column mapping + UI.
 7. CI (new suites), load/size measurements, APK, final report.
+
+## Phase 3 — Backup v2 (implemented)
+
+Code: `lib/core/backup/` (engine, crypto, service, worker, cloud, coordinator,
+bridges, providers, presentation). Tests: `test/backup/`. CI job `backup-media`.
+
+* **Capture**: SQL triggers on every data table of the ledger write the row to
+  `_bk_changes` inside the user's own transaction (a saved operation is in the
+  log at the same instant; a rolled-back one never is). Values are encoded by
+  their actual type (text stays text, blobs `{"$b":hex}`) so a trigger can
+  never fail a user write. Measured cost: within noise (~2 ms per sale either way).
+* **Set** = fuzzy non-blocking snapshot (keyset paging, own connection, background
+  isolate) + ordered change parts + encrypted media + wrapped key + `manifest.enc`
+  written LAST. A set without its manifest does not exist for restore. New set
+  every 7 days / 200 parts; 3 newest kept (device and cloud).
+* **Container** `FYBK` v2: 1 MiB ChaCha20-Poly1305 frames; AAD binds file id,
+  frame index and "last" flag → flip, truncation, reordering, wrong key all refused.
+* **Keys**: random 256-bit key in the platform keystore (`fyona_backup_v2`).
+  Wrapped with a 120-bit recovery code (Crockford, shown once) and an optional
+  password — Argon2id (19 MiB, t=2) + ChaCha20-Poly1305, off the UI isolate.
+  FYONA never sees key, code or password.
+* **Cloud**: local set folder mirrored to R2 (`area: b`) by presigned URLs,
+  manifest last; offline → device copy continues, cloud catches up.
+* **Restore** never swaps the live database. The set is fully verified (every
+  part authenticated, row counts + numeric totals of every table, SQLite
+  integrity, user_version) into a NEW file, then applied through the app's
+  existing, proven restore paths:
+  * Personal → rebuilt v4 snapshot → `BackupService.restoreFromBackup` (same
+    validation, merge by stable ids, relay to the user's other devices).
+  * Business → per-branch archive → `restoreBackup` (empty branch only, marked
+    as recovered: cannot publish to the relay until re-approved). Owner only.
+  So no accounting, sync, conflict or permission rule changed.
+* Additive changes outside `lib/core/backup`: `_requireMainSchema` ignores
+  `_bk_*`; `BackupSnapshotBuilder.build` optional sources; `BackupService`
+  read-only `boundIdentity` / `cachedHmacKey`; one entry card on each backup page.
+
+Measured (host CPU, test suite): 100 products 0.25 s / 6 KB; 10k 3.7 s / 373 KB;
+100k 38 s / 3.6 MB encrypted (background isolate, UI not blocked).
+Kill test: 15 rounds, job killed at random moments — every offered set verified.
+Known limit: Business restore via the v1 archive is bounded by its 64 MB cap.

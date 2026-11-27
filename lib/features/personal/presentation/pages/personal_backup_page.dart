@@ -1,3 +1,5 @@
+import 'package:fyona_flutter/core/backup/backup_providers.dart';
+import 'package:fyona_flutter/core/backup/presentation/continuous_backup_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -1322,6 +1324,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
+          const ContinuousBackupEntry(kind: BackupKind.personal),
           Text(l10n.translate('backupSourceSectionTitle'),
               style: TextStyle(
                   fontFamily: 'Cairo',

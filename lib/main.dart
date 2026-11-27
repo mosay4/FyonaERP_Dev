@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'core/diagnostics/exit_report.dart';
+import 'core/backup/backup_providers.dart';
 import 'core/media/media_api.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -390,6 +391,8 @@ class _AppWithSyncState extends ConsumerState<_AppWithSync>
       try { ref.read(saraSmartCoordinatorProvider).start(); } catch (_) {}
       // Media files (product photos, chat files) reach the cloud in the background.
       try { ref.read(mediaUploaderProvider); } catch (_) {}
+      // Continuous encrypted backups (only for spaces the user turned on).
+      try { ref.read(backupSchedulerProvider); } catch (_) {}
       // A freeze / crash last time: offer the system report (real cause).
       Future.delayed(const Duration(seconds: 4), () {
         if (mounted) ExitReport.checkAndOffer(() => rootNavigatorKey.currentContext);

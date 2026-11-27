@@ -82,6 +82,13 @@ class BackupService {
   /// Set by providers on login/user change. Auto paths resolve explicit >
   /// bound > refuse (never silent defaults).
   // ignore: use_setters_to_change_properties
+  /// The identity backups are bound to (read-only; backup v2 uses it).
+  BackupIdentity? get boundIdentity => _boundIdentity;
+
+  /// Cached snapshot HMAC key ('' when none yet) — backup v2 seals the
+  /// snapshot it rebuilds exactly like a device backup.
+  Future<String> cachedHmacKey() => _server.getCachedHmacKey();
+
   void bindIdentity({required int localUserId, required String serverUserUuid}) {
     _boundIdentity = BackupIdentity(
         localUserId: localUserId, serverUserUuid: serverUserUuid);

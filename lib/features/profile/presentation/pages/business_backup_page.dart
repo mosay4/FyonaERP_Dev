@@ -6,6 +6,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../../core/network/api_client.dart' show serverBaseUrlProvider;
 import '../../../../core/network/dio_provider.dart';
+import '../../../../core/backup/backup_providers.dart';
+import '../../../../core/backup/presentation/continuous_backup_page.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/styled_snack.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
@@ -319,6 +321,7 @@ class _BusinessBackupPageState extends ConsumerState<BusinessBackupPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (local) const ContinuousBackupEntry(kind: BackupKind.business),
           Text(
             local
                 ? 'نسخة مشفّرة من سجلات هذا الفرع على الجهاز. لا تشمل تسجيل الدخول أو الشخصي. '
