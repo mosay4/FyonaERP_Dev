@@ -82,8 +82,11 @@ void main() {
 
   if (!DirectoryPilotBuild.signupEnabled) return;
 
-  test('5 500 products with units, barcodes, pictures and categories + parties + accounts: exact', () async {
-    final e = await buildLegacyDb('${dir.path}/old.db');
+  // Windows CI disks write each row slowly (~100 ms): there it checks the
+  // import works (300 products); the 5 500 run on Linux.
+  final count = Platform.isWindows ? 300 : 5500;
+  test('$count products with units, barcodes, pictures and categories + parties + accounts: exact', () async {
+    final e = await buildLegacyDb('${dir.path}/old.db', products: count);
     final file = File('${dir.path}/old.db');
     final sha = '${await sha256.bind(file.openRead()).first}';
     final w = DirectoryWorkspace(server: DirectoryPilotBuild.baseUrl, accountId: _id(), organizationId: _id());
