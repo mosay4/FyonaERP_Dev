@@ -291,6 +291,30 @@ class AuthService:
             city=city,
         )
 
+    _ROTATION_GRACE_SECONDS = 120
+
+    async def _remember_rotated(self, old_hash: Optional[str], session_id) -> None:
+        if not old_hash:
+            return
+        try:
+            from app.core.redis import cache_set
+
+            await cache_set(f"rt-grace:{old_hash}", str(session_id), self._ROTATION_GRACE_SECONDS)
+        except Exception:  # noqa: BLE001 — never block a refresh on the cache
+            pass
+
+    async def _grace_session(self, token_hash: str):
+        try:
+            from app.core.redis import cache_get
+
+            sid = await cache_get(f"rt-grace:{token_hash}")
+            if not sid:
+                return None
+            session = await self._session_repo.get(UUID(sid))
+            return session if session is not None and session.is_active else None
+        except Exception:  # noqa: BLE001
+            return None
+
     async def refresh_token(
         self,
         refresh_token: str,
@@ -299,6 +323,13 @@ class AuthService:
     ) -> TokenResponse:
         token_hash = hash_refresh_token(refresh_token)
         session = await self._session_repo.get_by_refresh_token(token_hash)
+        if not session:
+            # The app may have been closed while a refresh was in flight: the
+            # server rotated the token but the reply never reached the phone,
+            # which still holds the previous one. For a short window that
+            # previous token renews the SAME session again instead of
+            # ending a session the user never signed out of.
+            session = await self._grace_session(token_hash)
         if not session:
             raise ValueError("الجلسة غير صالحة أو منتهية")
         if not session.is_active:
@@ -318,6 +349,7 @@ class AuthService:
         # device-blank session on every refresh, flooding the sessions list
         # with "unknown device" rows and tripping the 5-device cap.
         new_raw = create_refresh_token(str(user.id))
+        await self._remember_rotated(session.refresh_token, session.id)
         session.refresh_token = hash_refresh_token(new_raw)
         session.expires_at = datetime.now(timezone.utc) + timedelta(
             days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS

@@ -704,18 +704,35 @@ async def refresh(body: RefreshIn, request: Request, db: AsyncSession = Depends(
     try:
         session = (await db.execute(select(UserSession).where(
             UserSession.refresh_token == hash_refresh_token(body.refresh_token)))).scalar_one_or_none()
+        if session is None:
+            session = await _svc(db)._grace_session(hash_refresh_token(body.refresh_token))
         if session is None or not session.is_active:
             raise AuthError("verification_expired", 401)
+        from app.api.v1.auth import _client_info
+
+        info = _client_info(request)
         if session.fingerprint != body.device_id:
-            raise AuthError("device_not_trusted", 401)
+            # A session that was never bound to an auth2 device key (signed in
+            # through the password login: its fingerprint is the build id, not
+            # a device key) is renewed exactly like /auth/refresh renews it —
+            # the refresh token itself is the proof. Ending it here logged the
+            # user out every hour although they never signed out.
+            # A session bound to ANOTHER device key stays refused.
+            bound = await a2.get_device(db, session.user_id, session.fingerprint or "")
+            if bound is not None:
+                raise AuthError("device_not_trusted", 401)
+            try:
+                tokens = await _svc(db).refresh_token(body.refresh_token,
+                                                      ip_address=info["ip_address"],
+                                                      user_agent=info["user_agent"])
+            except ValueError:
+                raise AuthError("verification_expired", 401)
+            return tokens.model_dump()
         dev = await a2.get_device(db, session.user_id, body.device_id)
         if not a2.device_is_trusted(dev):
             raise AuthError("device_revoked", 401)
         await _proof(db, public_key=dev.public_key, device_id=dev.device_id, purpose="refresh",
                      nonce=body.nonce, signature=body.signature)
-        from app.api.v1.auth import _client_info
-
-        info = _client_info(request)
         try:
             tokens = await _svc(db).refresh_token(body.refresh_token,
                                                   ip_address=info["ip_address"],

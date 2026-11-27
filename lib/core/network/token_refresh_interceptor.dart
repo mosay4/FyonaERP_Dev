@@ -39,6 +39,7 @@ class TokenRefreshInterceptor extends Interceptor {
       _pendingRequests.add(_PendingRequest(
         requestOptions: err.requestOptions,
         handler: handler,
+        error: err,
       ));
       return;
     }
@@ -93,7 +94,13 @@ class TokenRefreshInterceptor extends Interceptor {
       handler.next(err);
     } finally {
       _isRefreshing = false;
+      // Requests that waited for a refresh that did not succeed fail like
+      // their own 401 (they used to be dropped and never completed).
+      final waiting = List<_PendingRequest>.of(_pendingRequests);
       _pendingRequests.clear();
+      for (final p in waiting) {
+        p.handler.next(p.error);
+      }
     }
   }
 
@@ -140,7 +147,12 @@ class TokenRefreshInterceptor extends Interceptor {
         );
       } on DioException catch (e) {
         final code = e.response?.statusCode;
-        if (code != 404 && code != 405) rethrow;
+        // A session signed in through the password login is not bound to
+        // this device key: the server answers `device_not_trusted`. That is
+        // not "signed out" — renew it through the classic refresh below.
+        if (code != 404 && code != 405 && !isUnboundSessionBody(e.response?.data)) {
+          rethrow;
+        }
       }
     }
     return _dio.post(
@@ -189,10 +201,12 @@ class TokenRefreshInterceptor extends Interceptor {
 class _PendingRequest {
   final RequestOptions requestOptions;
   final ErrorInterceptorHandler handler;
+  final DioException error;
 
   _PendingRequest({
     required this.requestOptions,
     required this.handler,
+    required this.error,
   });
 }
 
@@ -207,6 +221,15 @@ bool isDeviceRevokedBody(dynamic body) {
   final detail = body['detail'];
   if (detail is Map) return detail['code']?.toString() == 'device_revoked';
   return body['code']?.toString() == 'device_revoked';
+}
+
+/// Server body `{detail:{code:'device_not_trusted'}}`: the refresh token is
+/// valid but belongs to a session that is not bound to this device key.
+bool isUnboundSessionBody(dynamic body) {
+  if (body is! Map) return false;
+  final detail = body['detail'];
+  if (detail is Map) return detail['code']?.toString() == 'device_not_trusted';
+  return body['code']?.toString() == 'device_not_trusted';
 }
 
 /// auth2 routes that never carry a session (a 401 there is a wrong

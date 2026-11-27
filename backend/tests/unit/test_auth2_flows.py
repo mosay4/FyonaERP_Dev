@@ -627,3 +627,65 @@ class TestLegacyAndAdmin:
         assert r.status_code == 200, r.text
         assert r.json()["budgets"]["sms"]["daily_usd"] == 0.5
         assert r.json()["budgets"]["global"]["monthly_usd"] == 20
+
+
+class TestSessionNeverEndsByItself:
+    """A user stays signed in until they sign out or the owner ends the
+    session: the hourly refresh must never log them out by itself."""
+
+    async def test_password_login_session_is_renewed_not_ended(self, env):
+        dev = DeviceKey()
+        auth = await register(env, dev)
+        # Simulate a session from the password login: its fingerprint is the
+        # build id, not an auth2 device key.
+        async with env.factory() as db:
+            s = (await db.execute(select(UserSession))).scalars().first()
+            s.fingerprint = "android:UP1A.231005.007"
+            await db.commit()
+            sid = s.id
+        rt = auth["refresh_token"]
+        for _ in range(3):  # every hour, again and again
+            r = await env.client.post("/auth2/refresh", json={
+                "refresh_token": rt, "device_id": dev.id, **(await proof(env, dev, "refresh"))})
+            assert r.status_code == 200, r.text
+            rt = r.json()["refresh_token"]
+        # The owner ends the session: now (and only now) it is over.
+        async with env.factory() as db:
+            s = await db.get(UserSession, sid)
+            s.is_active = False
+            await db.commit()
+        r = await env.client.post("/auth2/refresh", json={
+            "refresh_token": rt, "device_id": dev.id, **(await proof(env, dev, "refresh"))})
+        assert r.status_code == 401
+
+    async def test_lost_refresh_reply_does_not_log_out(self, env, monkeypatch):
+        import app.core.redis as redis_mod
+
+        store: dict = {}
+
+        async def cache_set(key, value, expire=300):
+            store[key] = value
+
+        async def cache_get(key):
+            return store.get(key)
+
+        monkeypatch.setattr(redis_mod, "cache_set", cache_set)
+        monkeypatch.setattr(redis_mod, "cache_get", cache_get)
+        dev = DeviceKey()
+        auth = await register(env, dev)
+        old = auth["refresh_token"]
+        r = await env.client.post("/auth2/refresh", json={
+            "refresh_token": old, "device_id": dev.id, **(await proof(env, dev, "refresh"))})
+        assert r.status_code == 200
+        # The reply was lost (app closed mid-refresh): the phone still holds
+        # the previous token. It renews the same session instead of failing.
+        r2 = await env.client.post("/auth2/refresh", json={
+            "refresh_token": old, "device_id": dev.id, **(await proof(env, dev, "refresh"))})
+        assert r2.status_code == 200, r2.text
+        r3 = await env.client.post("/auth/refresh", json={"refresh_token": r2.json()["refresh_token"]})
+        assert r3.status_code == 200
+        # Outside the window (key gone) the old token is refused.
+        store.clear()
+        r4 = await env.client.post("/auth2/refresh", json={
+            "refresh_token": old, "device_id": dev.id, **(await proof(env, dev, "refresh"))})
+        assert r4.status_code == 401
