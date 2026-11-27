@@ -218,8 +218,10 @@ void main() {
   });
 
   final bench = int.tryParse(Platform.environment['FYONA_IMPORT_BENCH'] ?? '');
-  test('large file: ${bench ?? 10000} customers', () async {
-    final n = bench ?? 10000;
+  // Windows CI disks write each row slowly: there it checks the import
+  // works (1 000 rows); 10 000 run on Linux, 100 000 with the bench flag.
+  final n = bench ?? (Platform.isWindows ? 1000 : 10000);
+  test('large file: $n customers', () async {
     final rnd = Random(9);
     final b = StringBuffer('الاسم,الجوال,الرصيد\n');
     var total = 0;
