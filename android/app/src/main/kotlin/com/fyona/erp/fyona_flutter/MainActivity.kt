@@ -425,6 +425,8 @@ class MainActivity : FlutterFragmentActivity() {
         // Trusted-device key pair (Android Keystore, StrongBox/TEE).
         DeviceKeyChannel.register(this, flutterEngine.dartExecutor.binaryMessenger)
         ExitDiagnostics.register(this, flutterEngine.dartExecutor.binaryMessenger)
+        // Free space before large restores; streamed save of large backups.
+        StorageSpaceChannel.register(this, flutterEngine.dartExecutor.binaryMessenger)
         // Print Center transports: Bluetooth classic / BLE / USB.
         PrinterChannel.register(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "fyona/motion_audio")

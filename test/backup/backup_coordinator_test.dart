@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -5,6 +7,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/backup/backup_cloud.dart';
 import 'package:fyona_flutter/core/backup/backup_coordinator.dart';
+import 'package:fyona_flutter/core/backup/backup_pack.dart';
+import 'package:fyona_flutter/core/storage/free_space.dart';
 import 'package:fyona_flutter/core/backup/backup_worker.dart';
 import 'package:fyona_flutter/core/media/media_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -80,6 +84,7 @@ void main() {
     cloud = await FakeCloud.start();
   });
   tearDown(() async {
+    FreeSpace.probe = null;
     await cloud.close();
     await dir.delete(recursive: true);
   });
@@ -153,5 +158,149 @@ void main() {
     final before = (await c.status(s.id)).lastOkAt;
     await write(s.dbPath, "INSERT INTO t VALUES (4, 'z', 3)");
     expect((await c.runNow(s)).lastOkAt, before);
+  });
+
+  group('backup kept as ONE file on the phone (no cloud)', () {
+    Future<(BackupSpace, BackupCoordinator, String, File)> made() async {
+      final s = await space();
+      final c = BackupCoordinator(root: () async => Directory('${dir.path}/phone1'));
+      final code = await c.enable(s, cloud: false);
+      await write(s.dbPath, "INSERT INTO t VALUES (1, 'رصيد افتتاحي', 125000)");
+      await write(s.dbPath, "WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v + 1 FROM n WHERE v < 3000) "
+          "INSERT INTO t SELECT 1 + v, hex(randomblob(400)), v FROM n");
+      expect((await c.runNow(s)).lastError, isNull);
+      await write(s.dbPath, 'UPDATE t SET amount = amount - 500 WHERE id = 1');
+      expect((await c.runNow(s)).lastError, isNull);
+      final set = (await c.listSets(s)).single;
+      final out = File('${dir.path}/Download/fyona.$backupPackExtension');
+      final steps = <double>[];
+      final size = await c.exportToFile(s, set, out, onProgress: (_, d) => steps.add(d));
+      expect(size, out.lengthSync());
+      expect(steps.last, 1.0);
+      // Nothing readable in the file.
+      expect(latin1.decode(out.readAsBytesSync()).contains('125000'), isFalse);
+      return (s, c, code, out);
+    }
+
+    /// A new phone: empty vault and settings, no cloud.
+    BackupCoordinator newPhone() {
+      FlutterSecureStorage.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({});
+      return BackupCoordinator(root: () async => Directory('${dir.path}/phone2'));
+    }
+
+    /// The file as the picker streams it, counting the bytes read.
+    (Stream<List<int>>, int Function()) stream(File f) {
+      var read = 0;
+      return (f.openRead().map((b) {
+        read += b.length;
+        return b;
+      }), () => read);
+    }
+
+    Future<List<Map<String, Object?>>> rows(String path) async {
+      final db = await openLedgerFile(path, '');
+      try {
+        return await db.rawQuery('SELECT id, amount FROM t WHERE id = 1');
+      } finally {
+        await db.close();
+      }
+    }
+
+    test('restores on a new phone with the recovery code, with progress', () async {
+      final (s, _, code, file) = await made();
+      final c2 = newPhone();
+      final stages = <String, double>{};
+      var asked = 0;
+      final copy = await c2.importFile(s, file.openRead(), size: file.lengthSync(),
+          askSecret: () async {
+            asked++;
+            return code;
+          },
+          onProgress: (st, d) => stages[st] = d);
+      expect(asked, 1);
+      expect(await rows(copy.path), [{'id': 1, 'amount': 124500}]);
+      expect(stages['reading'], 1.0);
+      expect(stages['records'], 1.0);
+      File(copy.path).deleteSync();
+      // Nothing of the file is left in the app's folders.
+      expect(Directory('${dir.path}/phone2/imported').existsSync(), isFalse);
+    });
+
+    test('the same phone opens it with its own key (no code asked)', () async {
+      final (s, c, _, file) = await made();
+      final copy = await c.importFile(s, file.openRead(), askSecret: () async => fail('asked'));
+      expect(await rows(copy.path), [{'id': 1, 'amount': 124500}]);
+      File(copy.path).deleteSync();
+    });
+
+    test('wrong code: refused after reading only the small index', () async {
+      final (s, _, _, file) = await made();
+      final c2 = newPhone();
+      final (input, read) = stream(file);
+      await expectLater(c2.importFile(s, input, askSecret: () async => 'AAAA-BBBB-CCCC-DDDD-EEEE-FFFF'),
+          throwsA(isA<BackupRestoreFailure>().having((e) => e.code, 'code', 'wrong_code')));
+      expect(read(), lessThan(file.lengthSync() ~/ 2));
+      expect(Directory('${dir.path}/phone2/imported').existsSync(), isFalse);
+    });
+
+    test('not a FYONA file, truncated, altered, or a part the manifest does not list: refused', () async {
+      final (s, _, code, file) = await made();
+      final c2 = newPhone();
+      Future<void> refused(List<int> bytes, String want) => expectLater(
+          c2.importFile(s, Stream.value(bytes), askSecret: () async => code),
+          throwsA(isA<BackupRestoreFailure>().having((e) => e.code, 'code', want)));
+      final good = file.readAsBytesSync();
+      await refused(utf8.encode('PK\x03\x04 not a backup' * 100), 'not_a_backup');
+      await refused(good.sublist(0, good.length - 10), 'not_a_backup');
+      final altered = Uint8List.fromList(good)..[good.length - 100] ^= 1;
+      await expectLater(c2.importFile(s, Stream.value(altered), askSecret: () async => code),
+          throwsA(isA<BackupRestoreFailure>().having((e) => e.code, 'code', anyOf('tampered', 'not_verified'))));
+      // Header naming an extra part (path tricks are refused by name too).
+      final len = ByteData.sublistView(good, 10, 14).getUint32(0);
+      final header = jsonDecode(utf8.decode(good.sublist(14, 14 + len))) as Map;
+      for (final name in ['extra.fybk', '../../evil.fybk']) {
+        final h = Map.of(header)..['files'] = [...header['files'] as List, {'n': name, 's': 3}];
+        final hb = utf8.encode(jsonEncode(h));
+        await refused([...good.sublist(0, 10), ...(ByteData(4)..setUint32(0, hb.length)).buffer.asUint8List(), ...hb,
+          ...good.sublist(14 + len), 1, 2, 3], 'not_a_backup');
+      }
+      expect(Directory('${dir.path}/phone2/imported').existsSync(), isFalse);
+      expect(File('${dir.path}/evil.fybk').existsSync(), isFalse);
+    });
+
+    test('not enough free space: refused before copying, nothing changed', () async {
+      final (s, _, code, file) = await made();
+      final c2 = newPhone();
+      FreeSpace.probe = (_) async => 10 * 1024 * 1024;
+      final (input, read) = stream(file);
+      await expectLater(c2.importFile(s, input, size: file.lengthSync(), askSecret: () async => code),
+          throwsA(isA<NotEnoughSpace>().having((e) => e.missingMb, 'missing MB', greaterThan(100))));
+      expect(read(), 0);
+      FreeSpace.probe = null;
+      // Size unknown (some pickers): checked once the index proves the file.
+      FreeSpace.probe = (_) async => 10 * 1024 * 1024;
+      final (input2, read2) = stream(file);
+      await expectLater(c2.importFile(s, input2, askSecret: () async => code), throwsA(isA<NotEnoughSpace>()));
+      expect(read2(), lessThan(file.lengthSync()));
+      expect(Directory('${dir.path}/phone2/imported').existsSync(), isFalse);
+    });
+
+    test('disk fills up during the rebuild: stopped cleanly, nothing left', () async {
+      final (s, _, code, file) = await made();
+      FlutterSecureStorage.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({});
+      final c2 = BackupCoordinator(
+          root: () async => Directory('${dir.path}/phone2'), spaceCheckEvery: const Duration(milliseconds: 1));
+      var calls = 0;
+      // Room for the checks before starting; then the disk is nearly full.
+      FreeSpace.probe = (_) async => ++calls <= 2 ? 1 << 40 : 1024;
+      await expectLater(c2.importFile(s, file.openRead(), askSecret: () async => code),
+          throwsA(isA<BackupRestoreFailure>().having((e) => e.code, 'code', 'no_space')));
+      final left = Directory(dir.path).listSync().where((f) => f.path.contains('.restore-'));
+      expect(left, isEmpty);
+      expect(Directory('${dir.path}/phone2/imported').existsSync(), isFalse);
+      expect(File('${dir.path}/phone2/restore-stop').existsSync(), isFalse);
+    });
   });
 }

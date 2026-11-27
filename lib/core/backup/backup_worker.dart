@@ -110,6 +110,10 @@ Future<BackupJobResult> runBackupJobInline(BackupJob job) async {
 /// Restore result: problems (empty = verified) + the set's app extras.
 typedef RestoreOutcome = ({List<String> problems, Map<String, dynamic>? extras});
 
+/// [onProgress] gets (stage, 0..1) from the worker: `media` then `records`.
+/// When the file [stopFile] appears (the caller saw the disk filling up)
+/// the rebuild stops at its next step and nothing is kept: problems
+/// `['no_space']`.
 Future<RestoreOutcome> runRestoreJob({
   required String setRoot,
   required String backupId,
@@ -119,7 +123,27 @@ Future<RestoreOutcome> runRestoreJob({
   String? mediaRoot,
   String? workRoot,
   Set<String> exclude = const {},
-}) =>
+  void Function(String stage, double done)? onProgress,
+  String? stopFile,
+}) async {
+  final port = ReceivePort();
+  final sub = port.listen((m) {
+    if (m is List && m.length == 2) onProgress?.call('${m[0]}', (m[1] as num).toDouble());
+  });
+  final send = port.sendPort;
+  try {
+    return await _restoreIn(setRoot, backupId, backupKey, targetPath, dbKeyHex, mediaRoot, workRoot, exclude, send, stopFile);
+  } finally {
+    await sub.cancel();
+    port.close();
+  }
+}
+
+
+// Top-level: the isolate closure captures only these plain values (never
+// the caller's callbacks).
+Future<RestoreOutcome> _restoreIn(String setRoot, String backupId, Uint8List backupKey, String targetPath,
+        String dbKeyHex, String? mediaRoot, String? workRoot, Set<String> exclude, SendPort send, String? stopFile) =>
     Isolate.run(() async {
       final f = File(targetPath);
       if (f.existsSync()) f.deleteSync();
@@ -128,10 +152,19 @@ Future<RestoreOutcome> runRestoreJob({
         final src = LocalBackupDestination(Directory(setRoot));
         final key = BackupKeys.keyFrom(backupKey);
         final restorer = BackupRestorer(engine: BackupEngine(exclude: exclude));
+        var last = -1.0;
         final problems = await restorer.restore(src, backupId, key, db,
             mediaStore: mediaRoot == null ? null : MediaStore(Directory(mediaRoot)),
-            work: workRoot == null ? null : Directory(workRoot));
+            work: workRoot == null ? null : Directory(workRoot), onFraction: (stage, done) {
+          if (stopFile != null && File(stopFile).existsSync()) throw const _Stopped();
+          if (done - last >= 0.005 || done >= 1 || done < last) {
+            last = done;
+            send.send([stage, done]);
+          }
+        });
         return (problems: problems, extras: await restorer.extras(src, backupId, key));
+      } on _Stopped {
+        return (problems: ['no_space'], extras: null);
       } on BackupTampered catch (e) {
         return (problems: ['tampered: ${e.reason}'], extras: null);
       } on FormatException {
@@ -140,3 +173,7 @@ Future<RestoreOutcome> runRestoreJob({
         await db.close();
       }
     });
+
+class _Stopped implements Exception {
+  const _Stopped();
+}

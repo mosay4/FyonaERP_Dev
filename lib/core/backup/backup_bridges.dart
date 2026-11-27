@@ -12,6 +12,7 @@ import '../../features/personal/data/ledger/personal_ledger_database.dart';
 import '../../features/personal/domain/services/backup/backup_integrity.dart';
 import '../../features/personal/domain/services/backup/backup_snapshot.dart';
 import '../../features/personal/domain/services/backup_service.dart' as v1;
+import '../storage/free_space.dart';
 import 'backup_worker.dart';
 
 /// Applying a verified v2 copy goes through the app's OWN, proven restore
@@ -111,7 +112,12 @@ abstract final class BackupBridges {
     required DirectoryAccess access,
     required DirectoryPilotStore live,
     required bool Function() allowed,
+    void Function(String stage, double done)? onProgress,
   }) async {
+    // The branch archive is about the copy's size; the live branch then
+    // grows by as much while the copy is already deleted.
+    await FreeSpace.require(File(copyPath).parent.path, await File(copyPath).length() + freeSpaceMargin);
+    onProgress?.call('preparing', 0);
     final work = Directory('${File(copyPath).parent.path}/bk2-apply-${DateTime.now().microsecondsSinceEpoch}');
     await work.create(recursive: true);
     final storage = access.workspace.storageId;
@@ -140,7 +146,8 @@ abstract final class BackupBridges {
       }
       return await live.withLedger(grant, () => access,
           (l) => l.restoreBackup(grant, source: archive, code: code, allowed: allowed,
-              maxBytes: businessBackupRebuildMaxBytes));
+              maxBytes: businessBackupRebuildMaxBytes,
+              onProgress: onProgress == null ? null : (f) => onProgress('applying', f)));
     } finally {
       await copy.close();
       if (await work.exists()) await work.delete(recursive: true);

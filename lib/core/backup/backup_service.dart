@@ -496,13 +496,32 @@ class BackupRestorer {
     return (jsonDecode(utf8.decode(await BackupContainer.open(b, key))) as Map).cast<String, dynamic>();
   }
 
+  /// [onProgress]: (stage, count done); [onFraction]: (stage, 0..1) with
+  /// stage `media` (files verified) then `records` (rows rebuilt, against
+  /// the row count the manifest promises; the last step, the full check,
+  /// is not counted so 1.0 is only reported once verified).
   Future<List<String>> restore(BackupDestination src, String backupId, SecretKey key, Database target,
-      {MediaStore? mediaStore, Directory? work, void Function(String stage, int done)? onProgress}) async {
+      {MediaStore? mediaStore,
+      Directory? work,
+      void Function(String stage, int done)? onProgress,
+      void Function(String stage, double done)? onFraction}) async {
     final man = await manifest(src, backupId, key);
     final dir = work ?? Directory('${Directory.systemTemp.path}/fyona-restore-${DateTime.now().microsecondsSinceEpoch}');
     await dir.create(recursive: true);
+    final mediaTotal = (man['media'] as List? ?? const []).length;
+    final rows = ((man['checkpoint'] as Map?)?['counts'] as Map? ?? const {})
+        .values
+        .fold<int>(0, (a, b) => a + (b as num).toInt());
+    void report(String stage, int done) {
+      onProgress?.call(stage, done);
+      final total = stage == 'media' ? mediaTotal : rows;
+      onFraction?.call(stage, total <= 0 ? 0.99 : (done / total).clamp(0, 0.99).toDouble());
+    }
+
     try {
-      return await _restore(src, backupId, key, target, man, mediaStore, dir, onProgress);
+      final problems = await _restore(src, backupId, key, target, man, mediaStore, dir, report);
+      if (problems.isEmpty) onFraction?.call('records', 1);
+      return problems;
     } finally {
       if (await dir.exists()) await dir.delete(recursive: true);
     }

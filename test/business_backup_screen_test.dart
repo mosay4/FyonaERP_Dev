@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fyona_flutter/core/storage/free_space.dart';
 import 'package:fyona_flutter/core/config/directory_pilot_build.dart';
 import 'package:fyona_flutter/core/di/providers.dart' show apiClientProvider;
 import 'package:fyona_flutter/core/localization/app_localizations.dart';
@@ -106,6 +107,9 @@ class _LocalCredentials extends AuthLocalDataSource {
 String _id() => const Uuid().v4();
 
 void main() {
+  // The device's free space is a platform call; widget tests run without it.
+  setUp(() => FreeSpace.probe = (_) async => null);
+  tearDown(() => FreeSpace.probe = null);
   testWidgets(
     'local backup verifies existing credentials without changing security settings',
     (tester) async {
@@ -315,7 +319,15 @@ void main() {
           await tester.runAsync(
             () => Future<void>.delayed(const Duration(milliseconds: 7)),
           );
-          expect(find.byType(LinearProgressIndicator), findsNothing);
+          // Only the restore's own percentage bar (large files) may show.
+          expect(
+            find.byWidgetPredicate(
+              (w) =>
+                  w is LinearProgressIndicator &&
+                  w.key != const ValueKey('business-backup-progress'),
+            ),
+            findsNothing,
+          );
         }
         expect(finder, findsOneWidget);
       }

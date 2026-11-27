@@ -13,6 +13,7 @@ import UIKit
   private var deviceIdentity: FyonaDeviceIdentity?
   private var appleSignIn: FyonaAppleSignIn?
   private var printer: FyonaPrinterBle?
+  private var storageSpace: FyonaStorageSpace?
 
   override func application(
     _ application: UIApplication,
@@ -34,6 +35,9 @@ import UIKit
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "FyonaPrinterBle") {
       printer = FyonaPrinterBle(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "FyonaStorageSpace") {
+      storageSpace = FyonaStorageSpace(messenger: registrar.messenger())
     }
   }
 }
@@ -646,5 +650,30 @@ final class FyonaPrinterBle: NSObject, CBCentralManagerDelegate, CBPeripheralDel
 
   func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
     ready.signal()
+  }
+}
+
+/// Channel `com.fyona.erp/storage_space` — freeBytes {path}: space the app
+/// may still write on that volume (before a large restore). Same contract
+/// as Android. iOS saves large backups through the share sheet (Files).
+final class FyonaStorageSpace: NSObject {
+  private let channel: FlutterMethodChannel
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "com.fyona.erp/storage_space", binaryMessenger: messenger)
+    super.init()
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "freeBytes" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let path = (call.arguments as? [String: Any])?["path"] as? String ?? NSHomeDirectory()
+      DispatchQueue.global(qos: .utility).async {
+        let url = URL(fileURLWithPath: path)
+        let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        let free = values?.volumeAvailableCapacityForImportantUsage
+        DispatchQueue.main.async { result(free.map { NSNumber(value: $0) }) }
+      }
+    }
   }
 }

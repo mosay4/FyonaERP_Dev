@@ -15,6 +15,9 @@ const businessBackupMaxBytes = 64 * 1024 * 1024;
 /// is a sanity ceiling against a runaway file.
 const businessBackupRebuildMaxBytes = 64 * 1024 * 1024 * 1024;
 
+/// Rows copied per statement during a restore (progress granularity).
+const _restoreSlice = 20000;
+
 // A backup includes every persisted branch fact, including replay markers,
 // balances, pending commands and archived source rows. A replica admission,
 // auth/vault state and the recovery receipt are never copied as live state.
@@ -229,6 +232,43 @@ extension BusinessBackupLedger on BusinessLedger {
     });
   }
 
+  /// Proves that [source] — only its first bytes, in a file of the
+  /// announced length — is a FYONA branch file made with [code], before the
+  /// rest is copied. SQLCipher authenticates every page with the code: a
+  /// wrong code or a file that is not ours fails on page 1 ("not a
+  /// database"). With the right code page 1 authenticates and only pages
+  /// not copied yet are missing (reported as damaged) — that is the
+  /// genuine case. The complete file is fully verified by [restoreBackup].
+  Future<void> checkBackupHead(
+    BusinessLedgerAccess access, {
+    required File source,
+    required BusinessBackupCode code,
+  }) async {
+    _branch(access, BusinessLedgerAction.manageBackup);
+    await _directory._io.synchronized(() async {
+      final db = _directory._db;
+      await db.execute('PRAGMA trusted_schema = OFF');
+      final path = Uri.file(source.absolute.path).replace(query: 'mode=ro&immutable=1').toString();
+      var attached = false;
+      try {
+        await db.execute('ATTACH DATABASE ? AS $_archive KEY ?', [path, code._sqlCipherKey]);
+        attached = true;
+        await db.rawQuery('PRAGMA $_archive.user_version');
+      } on DatabaseException catch (e) {
+        // SQLITE_CORRUPT: page 1 authenticated, later pages still to come.
+        if (((e.getResultCode() ?? 0) & 0xFF) != 11) throw _badBackup;
+      } finally {
+        if (attached) {
+          try {
+            await db.execute('DETACH DATABASE $_archive');
+          } on DatabaseException {
+            // Nothing else is attached under this name.
+          }
+        }
+      }
+    });
+  }
+
   /// Only an empty branch can be restored, even if its sibling has a ledger.
   /// The exact same ciphertext is idempotent, including after later writes.
   /// A recovered ledger has no permission to publish or resume a relay.
@@ -239,6 +279,7 @@ extension BusinessBackupLedger on BusinessLedger {
     required bool Function() allowed,
     String? expectedId,
     int maxBytes = businessBackupMaxBytes,
+    void Function(double done)? onProgress,
   }) async {
     final branch = _branch(access, BusinessLedgerAction.manageBackup);
     _requireBackupAccess(access, allowed);
@@ -293,6 +334,8 @@ extension BusinessBackupLedger on BusinessLedger {
           }
         }
         await txn.execute('PRAGMA defer_foreign_keys = ON');
+        final all = [for (final t in tables) counts[t] as int].fold<int>(0, (a, b) => a + b);
+        var copied = 0;
         for (final table in tables) {
           if (await _archiveCount(txn, '$_archive.$table') != counts[table] ||
               (await txn.rawQuery(
@@ -316,16 +359,55 @@ extension BusinessBackupLedger on BusinessLedger {
             columns.remove('sequence');
           }
           final fields = columns.map((name) => '"$name"').join(',');
-          final order = table == BusinessLedger._legs
-              ? 'ORDER BY sequence'
-              : '';
-          await txn.execute(
-            '''
-            INSERT INTO main.$table ($fields)
-            SELECT $fields FROM $_archive.$table WHERE branch_id = ? $order
-          ''',
-            [branch],
-          );
+          // Copied in slices of [_restoreSlice] rows, in the same order as
+          // before, so a large branch reports progress; still ONE
+          // transaction: nothing is visible until every table is in.
+          final rows = counts[table] as int;
+          if (table == BusinessLedger._legs) {
+            // Ledger order (sequence) through a temporary row order index.
+            await txn.execute('DROP TABLE IF EXISTS temp._bk_restore_order');
+            await txn.execute(
+              'CREATE TEMP TABLE _bk_restore_order AS '
+              'SELECT rowid AS r FROM $_archive.$table WHERE branch_id = ? ORDER BY sequence',
+              [branch],
+            );
+            for (var lo = 1; lo <= rows; lo += _restoreSlice) {
+              final aliased = columns.map((name) => 'a."$name"').join(',');
+              await txn.execute(
+                '''
+                INSERT INTO main.$table ($fields)
+                SELECT $aliased FROM temp._bk_restore_order o
+                JOIN $_archive.$table a ON a.rowid = o.r
+                WHERE o.rowid BETWEEN ? AND ? ORDER BY o.rowid
+              ''',
+                [lo, lo + _restoreSlice - 1],
+              );
+              copied += (rows - lo + 1).clamp(0, _restoreSlice);
+              onProgress?.call(all == 0 ? 1 : copied / all);
+            }
+            await txn.execute('DROP TABLE temp._bk_restore_order');
+          } else {
+            final span = (await txn.rawQuery(
+              'SELECT min(rowid) AS lo, max(rowid) AS hi FROM $_archive.$table',
+            )).single;
+            final first = span['lo'] as int?, last = span['hi'] as int?;
+            if (first != null && last != null) {
+              for (var lo = first; lo <= last; lo += _restoreSlice) {
+                final hi = lo + _restoreSlice - 1;
+                await txn.execute(
+                  '''
+                  INSERT INTO main.$table ($fields)
+                  SELECT $fields FROM $_archive.$table
+                  WHERE branch_id = ? AND rowid BETWEEN ? AND ? ORDER BY rowid
+                ''',
+                  [branch, lo, hi],
+                );
+                copied += ((hi < last ? hi : last) - lo + 1);
+                onProgress?.call(all == 0 ? 1 : (copied / all).clamp(0, 1).toDouble());
+              }
+            }
+          }
+          _requireBackupAccess(access, allowed);
         }
         if ((await txn.rawQuery('PRAGMA main.foreign_key_check')).isNotEmpty)
           throw _badBackup;

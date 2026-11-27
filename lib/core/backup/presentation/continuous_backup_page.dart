@@ -13,6 +13,8 @@ import '../../theme/app_colors.dart';
 import '../backup_bridges.dart';
 import '../backup_coordinator.dart';
 import '../backup_providers.dart';
+import '../../storage/free_space.dart';
+import 'backup_file_io.dart';
 
 String _t(String key, [Map<String, dynamic>? p]) => AppLocalizations.t(key, p);
 const _font = 'Cairo';
@@ -55,6 +57,8 @@ class _ContinuousBackupPageState extends ConsumerState<ContinuousBackupPage> {
   bool _loading = true;
   bool _busy = false;
   String? _progress;
+  double? _fraction;
+  String? _stage;
 
   BackupCoordinator get _c => ref.read(backupCoordinatorProvider);
 
@@ -97,13 +101,28 @@ class _ContinuousBackupPageState extends ConsumerState<ContinuousBackupPage> {
         setState(() {
           _busy = false;
           _progress = null;
+          _fraction = null;
+          _stage = null;
         });
       }
       await _load();
     }
   }
 
+  /// Stage + percentage from long operations (throttled to 0.5 %).
+  void _onProgress(String stage, double done) {
+    if (!mounted) return;
+    final f = _fraction;
+    if (stage == _stage && f != null && (done - f).abs() < 0.005 && done < 1) return;
+    setState(() {
+      _stage = stage;
+      _fraction = done.clamp(0, 1).toDouble();
+      _progress = _t('bk2Stage_$stage');
+    });
+  }
+
   String _failure(Object e) {
+    if (e is NotEnoughSpace) return _t('bk2NoSpace', {'mb': '${e.missingMb}'});
     if (e is BackupRestoreFailure) return _t('bk2Err_${e.code}');
     if (e is BusinessBackupRejected && e.problem == BusinessBackupProblem.notEmpty) return _t('bk2Err_not_empty');
     return _t('bk2ErrGeneric');
@@ -215,61 +234,99 @@ class _ContinuousBackupPageState extends ConsumerState<ContinuousBackupPage> {
     );
   }
 
+  Future<bool> _confirmRestore() async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(_t('bk2RestoreTitle'), style: const TextStyle(fontFamily: _font)),
+          content: Text(_t(widget.kind == BackupKind.business ? 'bk2RestoreBodyBusiness' : 'bk2RestoreBodyPersonal'),
+              style: const TextStyle(fontFamily: _font, fontSize: 13)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('cancel'))),
+            FilledButton(
+                key: const Key('bk2-restore-confirm'),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text(_t('bk2Restore'))),
+          ],
+        ),
+      ) ==
+      true;
+
   Future<void> _restore(BackupSetInfo set) async {
     final space = _space;
-    if (space == null) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(_t('bk2RestoreTitle'), style: const TextStyle(fontFamily: _font)),
-        content: Text(_t(widget.kind == BackupKind.business ? 'bk2RestoreBodyBusiness' : 'bk2RestoreBodyPersonal'),
-            style: const TextStyle(fontFamily: _font, fontSize: 13)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('cancel'))),
-          FilledButton(
-              key: const Key('bk2-restore-confirm'),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(_t('bk2Restore'))),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    String? secret;
+    if (space == null || !await _confirmRestore()) return;
     await _guard(_t('bk2Verifying'), () async {
       ({String path, Map<String, dynamic>? extras}) copy;
       try {
-        copy = await _c.rebuild(space, set);
+        copy = await _c.rebuild(space, set, onProgress: _onProgress);
       } on BackupRestoreFailure catch (e) {
         if (e.code != 'key_needed' && e.code != 'wrong_code') rethrow;
         if (!mounted) return;
-        secret = await _askSecret();
-        if (secret == null || secret!.isEmpty) return;
+        final secret = await _askSecret();
+        if (secret == null || secret.isEmpty) return;
         if (mounted) setState(() => _progress = _t('bk2Verifying'));
-        copy = await _c.rebuild(space, set, secret: secret);
+        copy = await _c.rebuild(space, set, secret: secret, onProgress: _onProgress);
       }
-      if (mounted) setState(() => _progress = _t('bk2Applying'));
-      if (widget.kind == BackupKind.personal) {
-        try {
-          final res = await BackupBridges.applyPersonal(ref.read(backupServiceProvider), copy.path, space.dbKeyHex,
-              copy.extras, appVersion: AppConfig.appVersion);
-          _snack(res.success ? _t('bk2Restored') : res.message);
-        } finally {
-          final f = File(copy.path);
-          if (f.existsSync()) f.deleteSync();
-        }
-      } else {
-        final scope = backupBusinessScope(ref.read);
-        if (scope == null) throw const BackupRestoreFailure('apply_failed');
-        final r = await BackupBridges.applyBusiness(
-          copyPath: copy.path,
-          dbKeyHex: space.dbKeyHex,
-          access: scope,
-          live: ref.read(directoryPilotStoreProvider),
-          allowed: () => backupBusinessAllowed(ref.read, scope),
-        );
-        _snack(r.alreadyRestored ? _t('bk2AlreadyRestored') : _t('bk2Restored'));
+      await _apply(space, copy);
+    });
+  }
+
+  /// A backup file kept on this device (or copied from another one).
+  Future<void> _restoreFromFile() async {
+    final space = _space;
+    if (space == null || !await _confirmRestore()) return;
+    await _guard(_t('bk2Stage_reading'), () async {
+      final picked = await ref.read(backupFileIoProvider).pick();
+      if (picked == null) return;
+      final copy = await _c.importFile(space, picked.data,
+          size: picked.size, askSecret: () async => mounted ? _askSecret() : null, onProgress: _onProgress);
+      await _apply(space, copy);
+    });
+  }
+
+  Future<void> _saveAsFile(BackupSetInfo set) async {
+    final space = _space;
+    if (space == null) return;
+    await _guard(_t('bk2Stage_saving'), () async {
+      final name = 'fyona-${widget.kind.name}-${set.id}.fyonaset';
+      final out = File('${Directory.systemTemp.path}/fyona-export-${DateTime.now().microsecondsSinceEpoch}/$name');
+      try {
+        await _c.exportToFile(space, set, out, onProgress: _onProgress);
+        if (await ref.read(backupFileIoProvider).save(out, name)) _snack(_t('bk2SavedFile'));
+      } finally {
+        if (await out.parent.exists()) await out.parent.delete(recursive: true);
       }
     });
+  }
+
+  Future<void> _apply(BackupSpace space, ({String path, Map<String, dynamic>? extras}) copy) async {
+    if (mounted) setState(() => _progress = _t('bk2Applying'));
+    if (widget.kind == BackupKind.personal) {
+      try {
+        final res = await BackupBridges.applyPersonal(ref.read(backupServiceProvider), copy.path, space.dbKeyHex,
+            copy.extras, appVersion: AppConfig.appVersion, onProgress: (_, f) => _onProgress('applying', f));
+        _snack(res.success ? _t('bk2Restored') : res.message);
+      } finally {
+        final f = File(copy.path);
+        if (f.existsSync()) f.deleteSync();
+      }
+    } else {
+      final scope = backupBusinessScope(ref.read);
+      if (scope == null) {
+        final f = File(copy.path);
+        if (f.existsSync()) f.deleteSync();
+        throw const BackupRestoreFailure('apply_failed');
+      }
+      final r = await BackupBridges.applyBusiness(
+        copyPath: copy.path,
+        dbKeyHex: space.dbKeyHex,
+        access: scope,
+        live: ref.read(directoryPilotStoreProvider),
+        allowed: () => backupBusinessAllowed(ref.read, scope),
+        onProgress: _onProgress,
+      );
+      _snack(r.alreadyRestored ? _t('bk2AlreadyRestored') : _t('bk2Restored'));
+    }
   }
 
   String _when(int? ms) {
@@ -302,9 +359,12 @@ class _ContinuousBackupPageState extends ConsumerState<ContinuousBackupPage> {
                         style: TextStyle(fontFamily: _font, fontSize: 12.5, color: AppColors.textSecondary)),
                     const SizedBox(height: 12),
                     if (_progress != null) ...[
-                      const LinearProgressIndicator(),
+                      LinearProgressIndicator(key: const Key('bk2-progress'), value: _fraction),
                       const SizedBox(height: 6),
-                      Text(_progress!, style: const TextStyle(fontFamily: _font, fontSize: 12)),
+                      Text(
+                          _fraction == null ? _progress! : '${_progress!} — ${(_fraction! * 100).floor()}%',
+                          key: const Key('bk2-progress-text'),
+                          style: const TextStyle(fontFamily: _font, fontSize: 12)),
                       const SizedBox(height: 12),
                     ],
                     _card([
@@ -363,6 +423,16 @@ class _ContinuousBackupPageState extends ConsumerState<ContinuousBackupPage> {
                     const SizedBox(height: 18),
                     Text(_t('bk2Sets'), style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800)),
                     const SizedBox(height: 8),
+                    _card([
+                      ListTile(
+                        key: const Key('bk2-from-file'),
+                        enabled: !_busy,
+                        leading: const Icon(Icons.file_open_outlined, color: AppColors.primary),
+                        title: Text(_t('bk2FromFile'), style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
+                        subtitle: Text(_t('bk2FromFileHint'), style: const TextStyle(fontFamily: _font, fontSize: 12)),
+                        onTap: _busy ? null : _restoreFromFile,
+                      ),
+                    ]),
                     if (_sets.isEmpty)
                       Text(_t('bk2NoSets'), style: TextStyle(fontFamily: _font, fontSize: 12, color: AppColors.textSecondary)),
                     for (final set in _sets)
@@ -374,10 +444,19 @@ class _ContinuousBackupPageState extends ConsumerState<ContinuousBackupPage> {
                             [if (set.local) _t('bk2OnDevice'), if (set.cloud) _t('bk2InCloud')].join(' · '),
                             style: const TextStyle(fontFamily: _font, fontSize: 12),
                           ),
-                          trailing: TextButton(
-                            onPressed: _busy ? null : () => _restore(set),
-                            child: Text(_t('bk2Restore'), style: const TextStyle(fontFamily: _font)),
-                          ),
+                          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                            if (set.local)
+                              IconButton(
+                                key: Key('bk2-save-${set.id}'),
+                                tooltip: _t('bk2SaveFile'),
+                                onPressed: _busy ? null : () => _saveAsFile(set),
+                                icon: const Icon(Icons.save_alt_rounded),
+                              ),
+                            TextButton(
+                              onPressed: _busy ? null : () => _restore(set),
+                              child: Text(_t('bk2Restore'), style: const TextStyle(fontFamily: _font)),
+                            ),
+                          ]),
                         ),
                       ]),
                   ],

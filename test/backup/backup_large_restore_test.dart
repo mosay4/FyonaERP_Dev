@@ -23,6 +23,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/backup/backup_bridges.dart';
 import 'package:fyona_flutter/core/backup/backup_crypto.dart';
+import 'package:fyona_flutter/core/backup/backup_engine.dart';
+import 'package:fyona_flutter/core/backup/backup_pack.dart';
+import 'package:fyona_flutter/core/backup/backup_service.dart';
 import 'package:fyona_flutter/core/backup/backup_worker.dart';
 import 'package:fyona_flutter/core/config/directory_pilot_build.dart';
 import 'package:fyona_flutter/core/media/media_store.dart';
@@ -31,6 +34,7 @@ import 'package:fyona_flutter/features/core_business/data/local_commerce/local_c
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_database.dart';
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_pilot.dart';
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_scope.dart';
+import 'package:fyona_flutter/features/core_business/data/local_ledger/business_local_backups.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:uuid/uuid.dart';
 
@@ -502,6 +506,75 @@ void main() {
       report.add('  verified: ${tables.length} tables x 2 branches, $rows rows identical (SHA-256 per table), '
           'account balances identical through the app API (debts, invoices, payments, stock: row by row), ${refs.length} attachments (${_mb(mediaBytes)} MB) byte-exact, '
           'second restore refused, no duplicate rows');
+
+      // ---- 9. From a FILE kept on the phone (no cloud), on more new devices.
+      Future<String> branchState(Directory root, FixtureDirectoryKeys keys, DirectoryAccess b) async {
+        final db = await openLedgerFile(DirectoryDatabase.filePath(root, workspace), (await keys.read(workspace.storageId))!);
+        try {
+          final bad = <String>[];
+          for (final t in tables) {
+            final got = await _digest(db, t, b.branchId);
+            if (got != source['$t/${b.branchId}']) bad.add(t);
+          }
+          return bad.isEmpty ? 'identical' : 'DIFF ${bad.take(4)}';
+        } finally {
+          await db.close();
+        }
+      }
+
+      // 9a. The whole continuous set saved as one .fyonaset file.
+      {
+        final pack = File('${dir.path}/phone/fyona-business.$backupPackExtension');
+        final setId = '${state['id']}';
+        final man = await BackupRestorer(engine: BackupEngine())
+            .manifest(LocalBackupDestination(Directory(sets)), setId, BackupKeys.keyFrom(keyBytes));
+        final (packBytes, packMs, _) = await _measured(() => writeBackupPack(Directory('$sets/$setId'), setId, backupPartsOf(man), pack));
+        final root3 = Directory('${dir.path}/device3')..createSync();
+        final keys3 = FixtureDirectoryKeys(Directory('${dir.path}/device3-keys')..createSync());
+        final store3 = DirectoryPilotStore(root: () async => root3, keys: keys3);
+        await store3.remember(branches.first, _entitlement());
+        final imported = Directory('${dir.path}/device3-import');
+        final copy = '${root3.path}/copy.sqlite';
+        final (_, ms3, rss3) = await _measured(() async {
+          final id = await readBackupPack(pack.openRead(), imported, authenticate: (id, d) async =>
+              backupPartsOf(await BackupRestorer(engine: BackupEngine())
+                  .manifest(LocalBackupDestination(imported), id, BackupKeys.keyFrom(keyBytes))).toSet());
+          final out = await runRestoreJob(setRoot: imported.path, backupId: id, backupKey: keyBytes, targetPath: copy,
+              dbKeyHex: dbKey, mediaRoot: '${dir.path}/device3-media', workRoot: '${dir.path}/device3-work');
+          expect(out.problems, isEmpty);
+          imported.deleteSync(recursive: true);
+          await BackupBridges.applyBusiness(copyPath: copy, dbKeyHex: dbKey, access: branches.first, live: store3, allowed: () => true);
+        });
+        await store3.close();
+        expect(await branchState(root3, keys3, branches.first), 'identical');
+        report.add('  from a .fyonaset FILE (${_mb(packBytes)} MB, written in ${(packMs / 1000).toStringAsFixed(1)} s): '
+            'read + verified + restored branch #0 on a new device in ${(ms3 / 1000).toStringAsFixed(1)} s, RSS peak +${_mb(rss3)} MB, identical');
+        pack.deleteSync();
+      }
+
+      // 9b. The branch backup file (.fyonabiz) of branch #1: over 64 MB.
+      {
+        final storeF = DirectoryPilotStore(root: () async => root1, keys: keys1);
+        final code = BusinessBackupCode.generate();
+        final (made, mkMs, mkRss) = await _measured(() => LocalBusinessBackups(branches.last, storeF,
+            () async => Directory('${dir.path}/phone-biz'), () => branches.last).create(code));
+        await storeF.close();
+        final root4 = Directory('${dir.path}/device4')..createSync();
+        final keys4 = FixtureDirectoryKeys(Directory('${dir.path}/device4-keys')..createSync());
+        final store4 = DirectoryPilotStore(root: () async => root4, keys: keys4);
+        await store4.remember(branches.last, _entitlement());
+        var last = <BusinessBackupStage, double>{};
+        final (r, ms4, rss4) = await _measured(() => LocalBusinessBackups(branches.last, store4,
+                () async => Directory('${dir.path}/device4-biz'), () => branches.last)
+            .restoreStream(made.file.openRead(), code, size: made.bytes, onProgress: (s, d) => last[s] = d));
+        await store4.close();
+        expect(r.alreadyRestored, isFalse);
+        expect(last[BusinessBackupStage.applying], 1.0);
+        expect(await branchState(root4, keys4, branches.last), 'identical');
+        report.add('  from a .fyonabiz branch FILE (${_mb(made.bytes)} MB${made.bytes > businessBackupMaxBytes ? ', over the 64 MB cap for unknown files' : ''}; '
+            'made in ${(mkMs / 1000).toStringAsFixed(1)} s, RSS +${_mb(mkRss)} MB): restored branch #1 on a new device in '
+            '${(ms4 / 1000).toStringAsFixed(1)} s, RSS peak +${_mb(rss4)} MB, identical');
+      }
       dir.deleteSync(recursive: true);
     }, timeout: const Timeout(Duration(hours: 3)));
   }

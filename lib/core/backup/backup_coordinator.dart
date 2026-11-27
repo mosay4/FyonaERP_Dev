@@ -10,9 +10,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:synchronized/synchronized.dart';
 
 import '../media/media_store.dart';
+import '../storage/free_space.dart';
 import 'backup_cloud.dart';
 import 'backup_crypto.dart';
 import 'backup_engine.dart';
+import 'backup_pack.dart';
 import 'backup_service.dart';
 import 'backup_worker.dart';
 
@@ -68,10 +70,14 @@ class BackupSetInfo {
   }
 }
 
+/// (stage, 0..1) of a long backup operation, for a percentage on screen.
+typedef BackupProgress = void Function(String stage, double done);
+
 class BackupRestoreFailure implements Exception {
   const BackupRestoreFailure(this.code, [this.detail]);
 
-  /// key_needed | wrong_code | tampered | not_verified | no_set | apply_failed
+  /// key_needed | wrong_code | tampered | not_verified | no_set |
+  /// apply_failed | no_space | not_a_backup
   final String code;
   final String? detail;
   @override
@@ -88,6 +94,7 @@ class BackupCoordinator {
     FlutterSecureStorage? vault,
     Future<Directory> Function()? root,
     this.interval = const Duration(minutes: 2),
+    this.spaceCheckEvery = const Duration(seconds: 2),
   })  : _vault = vault ??
             const FlutterSecureStorage(
                 aOptions: AndroidOptions(storageNamespace: 'fyona_backup_v2', resetOnError: false)),
@@ -97,6 +104,9 @@ class BackupCoordinator {
   final FlutterSecureStorage _vault;
   final Future<Directory> Function() _root;
   final Duration interval;
+
+  /// How often free space is watched during a rebuild.
+  final Duration spaceCheckEvery;
   final _locks = <String, Lock>{};
   Timer? _timer;
 
@@ -261,8 +271,9 @@ class BackupCoordinator {
   /// The key comes from this device's vault, else from [secret] (recovery
   /// code or password) with the set's wrapped key. Nothing live is touched:
   /// the caller applies the verified copy through the app's own restore.
+  /// [onProgress]: (stage, 0..1) — `download`, `media`, `records`.
   Future<({String path, Map<String, dynamic>? extras})> rebuild(BackupSpace space, BackupSetInfo set,
-      {String? secret}) async {
+      {String? secret, BackupProgress? onProgress}) async {
     final root = await _sets(space.id);
     var from = root;
     if (!set.local) {
@@ -273,48 +284,166 @@ class BackupCoordinator {
       final mirror = BackupMirror(CloudBackupDestination(remote, temp: Directory('${root.parent.path}/tmp')));
       await mirror.pull(set.id, Directory('${from.path}/${set.id}'), const ['manifest.enc', 'key.json']);
     }
-    var key = await _key(space.id);
-    if (key == null || !await _opens(from, set.id, key)) {
-      if (secret == null) throw const BackupRestoreFailure('key_needed');
-      final kj = File('${from.path}/${set.id}/key.json');
-      if (!await kj.exists()) throw const BackupRestoreFailure('no_set');
-      final w = jsonDecode(await kj.readAsString()) as Map;
-      final wraps = [for (final v in w.values) Map<String, dynamic>.from(v as Map)];
-      final found = await _unwrapOff(wraps, secret);
-      if (found == null) throw const BackupRestoreFailure('wrong_code');
-      key = found;
-      if (!await _opens(from, set.id, key)) throw const BackupRestoreFailure('wrong_code');
-    }
+    final key = await _keyFor(space, from, set.id, secret == null ? null : () async => secret);
     if (!set.local) {
       // Now that the key opens the manifest, fetch exactly the listed parts.
       final man = await BackupRestorer(engine: _engine).manifest(
           LocalBackupDestination(from), set.id, BackupKeys.keyFrom(key));
       final parts = backupPartsOf(man);
+      if (set.bytes > 0) await FreeSpace.require(root.parent.path, set.bytes + freeSpaceMargin);
       final remote = remoteFor!.call(space.section);
-      await BackupMirror(CloudBackupDestination(remote, temp: Directory('${root.parent.path}/tmp')))
-          .pull(set.id, Directory('${from.path}/${set.id}'), parts);
+      final mirror = BackupMirror(CloudBackupDestination(remote, temp: Directory('${root.parent.path}/tmp')));
+      final into = Directory('${from.path}/${set.id}');
+      for (var i = 0; i < parts.length; i++) {
+        await mirror.pull(set.id, into, [parts[i]]);
+        onProgress?.call('download', (i + 1) / parts.length);
+      }
     }
+    return _rebuildFrom(space, from, set.id, key, onProgress);
+  }
+
+  /// The set's key: this device's own when it opens the manifest, else
+  /// unwrapped from key.json with the secret [ask] returns.
+  Future<Uint8List> _keyFor(BackupSpace space, Directory from, String id, Future<String?> Function()? ask) async {
+    final own = await _key(space.id);
+    if (own != null && await _opens(from, id, own)) return own;
+    final secret = ask == null ? null : await ask();
+    if (secret == null || secret.isEmpty) throw const BackupRestoreFailure('key_needed');
+    final kj = File('${from.path}/$id/key.json');
+    if (!await kj.exists() || await kj.length() > 1024 * 1024) throw const BackupRestoreFailure('no_set');
+    final Object? w;
+    try {
+      w = jsonDecode(await kj.readAsString());
+    } on FormatException {
+      throw const BackupRestoreFailure('not_a_backup');
+    }
+    if (w is! Map) throw const BackupRestoreFailure('not_a_backup');
+    final wraps = [for (final v in w.values) if (v is Map) Map<String, dynamic>.from(v)];
+    final found = await _unwrapOff(wraps, secret);
+    if (found == null || !await _opens(from, id, found)) throw const BackupRestoreFailure('wrong_code');
+    return found;
+  }
+
+  Future<({String path, Map<String, dynamic>? extras})> _rebuildFrom(
+      BackupSpace space, Directory from, String id, Uint8List key, BackupProgress? onProgress) async {
     // Leftovers of an interrupted earlier restore are never reused.
     await _sweepRestores(space);
+    final setDir = Directory('${from.path}/$id');
+    var media = 0, records = 0;
+    await for (final f in setDir.list()) {
+      if (f is! File) continue;
+      final n = f.uri.pathSegments.last;
+      if (n.startsWith('m-')) {
+        media += await f.length();
+      } else {
+        records += await f.length();
+      }
+    }
+    // Staged media + the new ledger (records expand when unpacked; the
+    // monitor below stops cleanly if that is still not enough).
+    final ledgerDir = File(space.dbPath).parent.path;
+    await FreeSpace.require(ledgerDir, media + 4 * records + freeSpaceMargin);
     final target = '${space.dbPath}.restore-${DateTime.now().millisecondsSinceEpoch}';
+    final root = await _sets(space.id);
     final work = Directory('${root.parent.path}/restore-work');
-    final out = await runRestoreJob(
-      workRoot: work.path,
-      setRoot: from.path,
-      backupId: set.id,
-      backupKey: key,
-      targetPath: target,
-      dbKeyHex: space.dbKeyHex,
-      mediaRoot: MediaStore.ready?.root.path,
-      exclude: space.exclude,
-    );
+    await work.create(recursive: true);
+    final stop = File('${work.parent.path}/restore-stop');
+    if (await stop.exists()) await stop.delete();
+    final watch = Timer.periodic(spaceCheckEvery, (_) async {
+      final free = await FreeSpace.of(ledgerDir);
+      if (free != null && free < freeSpaceMargin ~/ 2 && !stop.existsSync()) stop.createSync(recursive: true);
+    });
+    final RestoreOutcome out;
+    try {
+      out = await runRestoreJob(
+        workRoot: work.path,
+        setRoot: from.path,
+        backupId: id,
+        backupKey: key,
+        targetPath: target,
+        dbKeyHex: space.dbKeyHex,
+        mediaRoot: MediaStore.ready?.root.path,
+        exclude: space.exclude,
+        onProgress: onProgress,
+        stopFile: stop.path,
+      );
+    } finally {
+      watch.cancel();
+      if (await stop.exists()) await stop.delete();
+    }
     if (out.problems.isNotEmpty) {
       final f = File(target);
       if (f.existsSync()) f.deleteSync();
+      final first = out.problems.first;
       throw BackupRestoreFailure(
-          out.problems.first.startsWith('tampered') ? 'tampered' : 'not_verified', out.problems.join('; '));
+          first == 'no_space' ? 'no_space' : first.startsWith('tampered') ? 'tampered' : 'not_verified',
+          out.problems.join('; '));
     }
     return (path: target, extras: out.extras);
+  }
+
+  /// Saves the local set [set] as ONE file [out] (see backup_pack.dart) the
+  /// user can keep on the phone and restore from without the cloud. The
+  /// file holds the set exactly as backed up: encrypted, and opened only
+  /// with this device's key or the recovery code / password.
+  Future<int> exportToFile(BackupSpace space, BackupSetInfo set, File out, {BackupProgress? onProgress}) =>
+      _lock(space.id).synchronized(() async {
+        if (!set.local) throw const BackupRestoreFailure('no_set');
+        final key = await _key(space.id);
+        if (key == null) throw const BackupRestoreFailure('key_needed');
+        final root = await _sets(space.id);
+        final man = await BackupRestorer(engine: _engine)
+            .manifest(LocalBackupDestination(root), set.id, BackupKeys.keyFrom(key));
+        final names = backupPartsOf(man);
+        var bytes = 0;
+        for (final n in ['key.json', 'manifest.enc', ...names]) {
+          final f = File('${root.path}/${set.id}/$n');
+          if (!await f.exists()) throw const BackupRestoreFailure('no_set');
+          bytes += await f.length();
+        }
+        await out.parent.create(recursive: true);
+        await FreeSpace.require(out.parent.path, bytes + freeSpaceMargin);
+        return writeBackupPack(Directory('${root.path}/${set.id}'), set.id, names, out,
+            onProgress: (d, t) => onProgress?.call('saving', t == 0 ? 1 : d / t));
+      });
+
+  /// Restores from a backup file the user picked (made by [exportToFile],
+  /// on this or another device). Only its small index is read before the
+  /// key opens it ([askSecret] is asked when this device's key does not);
+  /// then exactly the parts it lists are copied, checked for room first,
+  /// and rebuilt like any set. Returns the verified copy to apply.
+  Future<({String path, Map<String, dynamic>? extras})> importFile(BackupSpace space, Stream<List<int>> input,
+      {int? size, Future<String?> Function()? askSecret, BackupProgress? onProgress}) async {
+    final root = await _sets(space.id);
+    final dir = Directory('${root.parent.path}/imported');
+    if (await dir.exists()) await dir.delete(recursive: true);
+    await dir.create(recursive: true);
+    if (size != null) {
+      if (size > backupPackMaxBytes) throw const BackupRestoreFailure('not_a_backup');
+      await FreeSpace.require(dir.path, size + freeSpaceMargin);
+    }
+    try {
+      Uint8List? key;
+      final String id;
+      try {
+        id = await readBackupPack(input, dir,
+            authenticate: (id, setDir) async {
+              key = await _keyFor(space, dir, id, askSecret);
+              final man = await BackupRestorer(engine: _engine)
+                  .manifest(LocalBackupDestination(dir), id, BackupKeys.keyFrom(key!));
+              return backupPartsOf(man).toSet();
+            },
+            beforeBulk: (rest) => FreeSpace.require(dir.path, rest + freeSpaceMargin),
+            onProgress: (d, t) => onProgress?.call('reading', t == 0 ? 1 : d / t));
+      } on BackupPackRejected {
+        throw const BackupRestoreFailure('not_a_backup');
+      } on BackupTampered {
+        throw const BackupRestoreFailure('tampered');
+      }
+      return await _rebuildFrom(space, dir, id, key!, onProgress);
+    } finally {
+      if (await dir.exists()) await dir.delete(recursive: true);
+    }
   }
 
   static final _engine = BackupEngine();
