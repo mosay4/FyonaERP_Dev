@@ -13,6 +13,7 @@ extension BusinessImportActivity on BusinessLedger {
     required Map<String, String> parties,
     required Map<String, String> openings,
     required List<String> products,
+    Map<String, String> accounts = const {},
   }) {
     final branch = _branch(access, BusinessLedgerAction.readDebt);
     return _directory._transaction((txn) async {
@@ -29,6 +30,13 @@ extension BusinessImportActivity on BusinessLedger {
             ) ||
             await any('SELECT 1 FROM $_commerceInvoices WHERE branch_id = ? AND party_id = ?', [branch, p])) {
           busy.add(p);
+        }
+      }
+      // An account: anything but the opening movement of its import.
+      for (final e in accounts.entries) {
+        if (await any('SELECT 1 FROM ${BusinessLedger._legs} WHERE branch_id = ? AND account_id = ? AND command_id != ?',
+            [branch, e.key, e.value])) {
+          busy.add(e.key);
         }
       }
       for (final id in products) {
@@ -53,6 +61,10 @@ extension BusinessImportActivity on BusinessLedger {
           '(SELECT 1 FROM ${DirectoryDatabase._deleted} d WHERE d.branch_id = p.branch_id AND d.kind = p.kind AND d.party_id = p.id)',
           [branch])) {
         out.add('${r['kind']}|${fold('${r['name']}')}');
+      }
+      for (final r in await txn.rawQuery(
+          'SELECT account_name, bank_name FROM ${BusinessLedger._accounts} WHERE branch_id = ?', [branch])) {
+        out.add('account|${fold('${r['account_name']}')}|${fold('${r['bank_name']}')}');
       }
       for (final r in await txn.rawQuery(
           'SELECT name, barcode FROM $_commerceProducts WHERE branch_id = ? AND deleted_us IS NULL', [branch])) {

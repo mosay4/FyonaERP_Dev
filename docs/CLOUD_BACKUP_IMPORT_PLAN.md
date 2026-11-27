@@ -212,3 +212,32 @@ memory). Personal ledgers are small (no stock / invoice volume); a streamed Pers
   `imports/<workspace>.sqlite` (same key); the imported cards/debts/products are in the ledger (backed up).
 * Not in this version: bank/cash account balances (the ledger has no safe undo for an account yet —
   entered by hand) and old invoices as documents (refused as "no place", not stored).
+
+
+## 27-11 (evening) — Owner's brief: backups without codes, redesign, smart import for the whole database
+
+* **Key management (owner's decision):** every backup — device file or cloud, Personal or Business —
+  is encrypted on the device with the ACCOUNT key. The server derives it (HMAC-SHA256) from
+  `FYONA_BACKUP_MASTER_KEY`, kept in the server's private secret file (`backup-master-key`, 600) —
+  never in the database, never next to the backups. Endpoints: `GET /backups/account-key` (the user),
+  `GET /business-storage/account-key` (business owner only). A new device gets it after sign-in; the app
+  asks the fingerprint / app PIN before any restore. No recovery code. Cached in the keystore → offline backups.
+  Risk stated to the owner: someone holding BOTH the server secret and the stored backups could read them.
+* Personal "FYONA server" backups: the device encrypts, the server stores the ciphertext in Cloudflare R2
+  (`t/u_<user>/b/personal-v1/…`), not on its disk; older plain versions are re-uploaded encrypted by the app
+  and the plain copy deleted. Device files: encrypted envelope (older plain files still read).
+* Continuous backup: the set key is also wrapped by the account key; older sets keep their recovery code.
+  A branch file's (.fyonabiz) SQLCipher code derives from the business key.
+* Business backup screen redesigned (one button: device + FYONA cloud; restore from the device's FYONA folder or
+  from FYONA cloud, numbered 1..N, newest highest, date/time/size). Personal keeps its design; its restore shows
+  the same numbered lists. Motion for restores and the smart import (real progress, check only after the
+  verified result, original soft sounds, mute). "Backup and sync" → "Backup" (sync stays automatic).
+* Smart import for the whole database: tables classified (products, units, barcodes, pictures incl. SQLite BLOBs,
+  categories, customers, suppliers, accounts; past invoices/vouchers refused — already in today's balances;
+  employees/settings/assets: no place), links verified by value matching, own row numbers never taken as links;
+  Sara (DeepSeek, live-tested) only for tables the rules leave unclear, every answer re-checked.
+  Test: a 12-table legacy POS database with 5 500 products → 5 445 imported with 2 722 units, 1 375 barcodes,
+  785 pictures, 40 categories; 1 188 customers, 150 suppliers, 5 accounts; totals exact; another branch untouched;
+  same file again refused.
+* Speed: rebuild target (scratch, verified at the end) without per-commit sync; cloud parts fetched 3 at a time;
+  import analysis reads each column once.

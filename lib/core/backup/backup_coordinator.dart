@@ -329,10 +329,17 @@ class BackupCoordinator {
       final remote = remoteFor!.call(space.section);
       final mirror = BackupMirror(CloudBackupDestination(remote, temp: Directory('${root.parent.path}/tmp')));
       final into = Directory('${from.path}/${set.id}');
-      for (var i = 0; i < parts.length; i++) {
-        await mirror.pull(set.id, into, [parts[i]]);
-        onProgress?.call('download', (i + 1) / parts.length);
+      // Three parts at a time (each is resumable on its own).
+      var next = 0, done = 0;
+      Future<void> worker() async {
+        while (next < parts.length) {
+          final part = parts[next++];
+          await mirror.pull(set.id, into, [part]);
+          onProgress?.call('download', ++done / parts.length);
+        }
       }
+
+      await Future.wait([worker(), worker(), worker()]);
     }
     return _rebuildFrom(space, from, set.id, key, onProgress);
   }

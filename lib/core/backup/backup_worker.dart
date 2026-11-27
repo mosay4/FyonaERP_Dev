@@ -148,6 +148,12 @@ Future<RestoreOutcome> _restoreIn(String setRoot, String backupId, Uint8List bac
       final f = File(targetPath);
       if (f.existsSync()) f.deleteSync();
       final db = await openLedgerFile(targetPath, dbKeyHex, create: true, direct: true);
+      // A scratch file: it is fully verified at the end and deleted on any
+      // failure, so it needs no per-commit disk sync and no rollback journal
+      // — the bulk rebuild runs much faster with the same checks.
+      await db.execute('PRAGMA synchronous = OFF');
+      await db.rawQuery('PRAGMA journal_mode = MEMORY');
+      await db.execute('PRAGMA cache_size = -32768');
       try {
         final src = LocalBackupDestination(Directory(setRoot));
         final key = BackupKeys.keyFrom(backupKey);

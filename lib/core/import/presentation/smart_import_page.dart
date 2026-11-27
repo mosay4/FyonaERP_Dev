@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -15,10 +16,12 @@ import '../../../features/core_business/data/local_directory/directory_secure_st
 import '../../../features/inventory/presentation/providers/inventory_providers.dart';
 import '../../di/providers.dart';
 import '../../localization/app_localizations.dart';
+import '../../backup/presentation/operation_motion.dart';
 import '../../media/media_store.dart';
 import '../../theme/app_colors.dart';
 import '../business_import.dart';
 import '../import_plan.dart';
+import '../import_schema.dart';
 import '../import_source.dart';
 import '../sara_mapping.dart';
 
@@ -37,11 +40,12 @@ final smartImportConfirmProvider = Provider<ImportConfirm>(
 );
 
 /// Where one table of the file goes.
-enum ImportDestination { customers, suppliers, products, none }
+enum ImportDestination { customers, suppliers, products, accounts, none }
 
 ImportTarget? _targetOf(ImportDestination d) => switch (d) {
       ImportDestination.customers || ImportDestination.suppliers => ImportTarget.parties,
       ImportDestination.products => ImportTarget.products,
+      ImportDestination.accounts => ImportTarget.accounts,
       ImportDestination.none => null,
     };
 
@@ -87,14 +91,27 @@ Future<void> openSmartImport(BuildContext context) => Navigator.of(context).push
       MaterialPageRoute<void>(fullscreenDialog: true, builder: (_) => const SmartImportPage()),
     );
 
+ImportDestination destinationOf(TableRole r) => switch (r) {
+      TableRole.customers => ImportDestination.customers,
+      TableRole.suppliers => ImportDestination.suppliers,
+      TableRole.products => ImportDestination.products,
+      TableRole.accounts => ImportDestination.accounts,
+      _ => ImportDestination.none,
+    };
+
 class _TableState {
-  _TableState(this.table, this.destination)
-      : mapping = _targetOf(destination) == null ? {} : autoMapColumns(_targetOf(destination)!, table.columns);
-  final ImportTable table;
+  _TableState(this.analysis)
+      : destination = destinationOf(analysis.role),
+        mapping = Map.of(analysis.mapping);
+  final TableAnalysis analysis;
+  ImportTable get table => analysis.table;
   ImportDestination destination;
   Map<String, String> mapping;
   List<List<String?>> sample = const [];
   ImportReview? review;
+
+  /// Joined into the products (units, barcodes, pictures, categories).
+  bool get partOfProducts => analysis.role.productPart && analysis.link != null;
 }
 
 class SmartImportPage extends ConsumerStatefulWidget {
@@ -162,8 +179,10 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
       deleteProduct: inv.deleteProduct,
       categories: inv.categories,
       createCategory: inv.createCategory,
+      createUnit: inv.createUnit,
+      addBarcode: inv.addBarcode,
       picture: (name) async {
-        final p = images.read(name);
+        final p = await images.load(name);
         if (p == null) return null;
         return (await MediaStore.instance()).put(p.$1, mime: p.$2);
       },
@@ -223,7 +242,9 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
         final tables = await readImportFile(f);
         final sha = '${await sha256.bind(f.openRead()).first}';
         final images = await readImportImages(f);
-        final states = [for (final t in tables) _TableState(t, suggestDestination(t))];
+        setState(() => _progress = _t('siAnalyzing'));
+        final analysis = await analyzeImportSchema(tables);
+        final states = [for (final a in analysis) _TableState(a)];
         for (final s in states) {
           s.sample = await s.table.sample(5);
         }
@@ -290,6 +311,24 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
         _snack(_t('siSaraDone'));
       });
 
+  Future<void> _askSaraSchema() => _guard(() async {
+        final all = [for (final t in _tables) t.analysis];
+        final answers = await saraImportSchema(ref.read(apiClientProvider), all.where((a) => a.role == TableRole.unknown).toList());
+        if (answers == null) {
+          _snack(_t('siSaraFailed'));
+          return;
+        }
+        final n = await applySaraSchema(all, answers);
+        setState(() {
+          for (final t in _tables) {
+            t.destination = destinationOf(t.analysis.role);
+            t.mapping = Map.of(t.analysis.mapping);
+            t.review = null;
+          }
+        });
+        _snack(n > 0 ? _t('siSaraDone') : _t('siSaraFailed'));
+      });
+
   Future<void> _toReview() => _guard(() async {
         final reg = await _reg();
         final existing = await _importer(reg).existingNames();
@@ -302,12 +341,17 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
           final s = active[i];
           if (s.review != null) continue;
           setState(() => _progress = '${s.table.name} (${i + 1}/${active.length})');
+          final parts = s.destination == ImportDestination.products
+              ? await joinProductParts([for (final t in _tables) if (t.partOfProducts || t.analysis.role == TableRole.categories) t.analysis], s.table)
+              : null;
           s.review = await ImportReview.load(s.table, _targetOf(s.destination)!, s.mapping,
               defaultKind: s.destination == ImportDestination.suppliers ? 'supplier' : 'customer',
               defaultCurrency: _currency.text.trim().toUpperCase(),
               existing: existing,
               branches: branches,
-              images: _images.names, onRows: (n) {
+              images: _images.names,
+              blobImages: _images.has('fyblob:'),
+              parts: parts, onRows: (n) {
             if (mounted) setState(() => _progress = _t('siRows', {'n': '$n'}));
           });
         }
@@ -325,32 +369,39 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
     final total = ready.fold<int>(0, (a, s) => a + s.review!.acceptedCount);
     if (total == 0 || _file == null || _sha == null) return;
     if (!await ref.read(smartImportConfirmProvider)(context, ref, _t('siConfirmReason', {'n': '$total'}))) return;
-    await _guard(() async {
-      final reg = await _reg();
-      final imp = _importer(reg);
-      var base = 0;
-      final ids = <String>[];
-      for (final s in ready) {
-        final p = s.review!.toPreview();
-        final sha = '$_sha|${s.table.name}|${s.destination.name}';
-        ids.add(await imp.apply(p, fileSha: '${sha256.convert(sha.codeUnits)}', fileName: _file!.uri.pathSegments.last,
-            onProgress: (d, n) {
-          if (!mounted) return;
-          setState(() {
-            _progress = _t('siImporting', {'done': '${base + d}', 'total': '$total'});
-            _fraction = (base + d) / total;
-          });
-        }));
-        base += p.ready;
-      }
+    if (!mounted) return;
+    setState(() => _busy = true);
+    try {
+      final ids = await OperationMotion.run<List<String>>(context,
+          kind: MotionKind.smartImport,
+          doneText: _t('siDoneShort', {'n': '$total'}),
+          failureText: _failure, work: (m) async {
+        final reg = await _reg();
+        final imp = _importer(reg);
+        var base = 0;
+        final ids = <String>[];
+        for (final s in ready) {
+          final p = s.review!.toPreview();
+          m.stage(_t('siImportingTable', {'t': _t('siDest_${s.destination.name}')}), base / total);
+          final key = '$_sha|${s.table.name}|${s.destination.name}';
+          ids.add(await imp.apply(p, fileSha: '${sha256.convert(utf8.encode(key))}', fileName: _file!.uri.pathSegments.last,
+              onProgress: (d, n) => m.progress((base + d) / total)));
+          base += p.ready;
+        }
+        return ids;
+      });
       _snack(_t('siDone', {'id': ids.map((i) => i.substring(0, 8)).join(', ')}));
       setState(() {
         _step = 0;
         _tables = const [];
         _file = null;
       });
+    } catch (_) {
+      // shown by the motion
+    } finally {
+      if (mounted) setState(() => _busy = false);
       await _loadBatches();
-    });
+    }
   }
 
   Future<void> _undo(String id) async {
@@ -485,9 +536,10 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
             key: Key('si-table-$i'),
             onTap: () => setState(() => _current = i),
             title: Text(_tables[i].table.name, style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
-            subtitle: Text(_t('siColumnsCount', {'n': '${_tables[i].table.columns.length}'}),
-                style: const TextStyle(fontFamily: _font, fontSize: 12)),
-            trailing: DropdownButton<ImportDestination>(
+            subtitle: _tableNote(_tables[i]),
+            trailing: _tables[i].partOfProducts
+                ? const Icon(Icons.link_rounded, color: AppColors.primary)
+                : DropdownButton<ImportDestination>(
               key: Key('si-dest-$i'),
               value: _tables[i].destination,
               items: [
@@ -496,6 +548,16 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
               ],
               onChanged: _busy ? null : (d) => _setDestination(_tables[i], d!),
             ),
+          ),
+        ),
+      if (_tables.any((t) => t.analysis.role == TableRole.unknown))
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: TextButton.icon(
+            key: const Key('si-sara-schema'),
+            onPressed: _busy ? null : _askSaraSchema,
+            icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+            label: Text(_t('siSaraSchema'), style: const TextStyle(fontFamily: _font)),
           ),
         ),
       const SizedBox(height: 12),
@@ -578,6 +640,24 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
     ]);
   }
 
+  /// What the file's table was recognised as, or why it is not imported.
+  Widget _tableNote(_TableState t) {
+    final a = t.analysis;
+    final cols = _t('siColumnsCount', {'n': '${t.table.columns.length}'});
+    if (t.partOfProducts) {
+      return Text('${_t('siPart_${a.role.name}')} · ${_t('siLinkedBy', {'c': a.link!.column})}',
+          style: const TextStyle(fontFamily: _font, fontSize: 12, color: _green));
+    }
+    if (t.destination == ImportDestination.none) {
+      final why = a.reason ?? 'no_place';
+      return Text('⚠ ${_t('siWhy_$why')}',
+          style: const TextStyle(fontFamily: _font, fontSize: 12, color: _yellow, fontWeight: FontWeight.w700));
+    }
+    final who = a.by == 'sara' ? _t('siBySara') : _t('siByRules');
+    final sure = a.confidence >= .9 ? '' : ' · ${_t('siCheckIt')}';
+    return Text('$cols · $who$sure', style: const TextStyle(fontFamily: _font, fontSize: 12));
+  }
+
   Widget _warning(String text) => Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
@@ -597,7 +677,7 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
 
   Widget _reviewStep() {
     final reviewed = [for (var i = 0; i < _tables.length; i++) if (_tables[i].review != null) i];
-    final skipped = [for (final t in _tables) if (t.review == null) t];
+    final skipped = [for (final t in _tables) if (t.review == null && !t.partOfProducts) t];
     if (reviewed.isEmpty) return const SizedBox.shrink();
     if (!reviewed.contains(_current)) _current = reviewed.first;
     final s = _tables[_current];
@@ -624,7 +704,10 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
           key: ValueKey(s),
           review: s.review!,
           images: _images,
-          skipped: [for (final t in skipped) t.table.name],
+          skipped: [
+            for (final t in skipped)
+              _t('siSkippedTableWhy', {'t': t.table.name, 'why': _t('siWhy_${t.analysis.reason ?? 'no_place'}')}),
+          ],
           onChanged: () => setState(() {}),
         ),
       ),
@@ -706,7 +789,9 @@ class _ImportReviewViewState extends State<ImportReviewView> {
 
   List<String> get _fields => [
         for (final f in importFields[r.target]!)
-          if (r.mapping.containsKey(f.key)) f.key,
+          if (r.mapping.containsKey(f.key) || (f.key == 'image' && r.rows.any((x) => x['image'] != null))) f.key,
+        if (r.rows.any((x) => x.units.isNotEmpty)) '_units',
+        if (r.rows.any((x) => x.barcodes.isNotEmpty)) '_codes',
       ];
 
   @override
@@ -757,6 +842,7 @@ class _ImportReviewViewState extends State<ImportReviewView> {
   }
 
   double _width(String f) => switch (f) {
+        '_units' || '_codes' => 90,
         'name' => 200,
         'image' => 70,
         'phone' || 'barcode' || 'sku' || 'category' => 130,
@@ -798,7 +884,7 @@ class _ImportReviewViewState extends State<ImportReviewView> {
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
             child: _yellowNote([
-              for (final t in widget.skipped) _t('siSkippedTable', {'t': t}),
+              for (final t in widget.skipped) t,
               if (r.unusedColumns.isNotEmpty) _t('siSkippedColumns', {'c': r.unusedColumns.join('، ')}),
             ].join('\n')),
           ),
@@ -971,10 +1057,15 @@ class _ImportReviewViewState extends State<ImportReviewView> {
             width: _width(f),
             child: InkWell(
               key: Key('si-cell-${row.row}-$f'),
-              onTap: () => _editCell(row, f),
+              onTap: f.startsWith('_') ? () => _showParts(row) : () => _editCell(row, f),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: f == 'image' ? _picture(row[f]) : Text(row[f] ?? '—',
+                child: f == 'image'
+                    ? _picture(row[f])
+                    : f.startsWith('_')
+                        ? Text('${f == '_units' ? row.units.length : row.barcodes.length}',
+                            style: const TextStyle(fontFamily: _font, fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.primary))
+                        : Text(row[f] ?? '—',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontFamily: _font, fontSize: 12.5, color: row[f] == null ? AppColors.textSecondary : null)),
@@ -999,9 +1090,37 @@ class _ImportReviewViewState extends State<ImportReviewView> {
     );
   }
 
+  Future<void> _showParts(ReviewRow row) => showModalBottomSheet<void>(
+        context: context,
+        builder: (_) => SafeArea(
+          child: ListView(padding: const EdgeInsets.all(16), shrinkWrap: true, children: [
+            Text(row['name'] ?? '', style: const TextStyle(fontFamily: _font, fontSize: 16, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            for (final u in row.units)
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.inventory_2_outlined),
+                title: Text('${u['name'] ?? '—'} × ${u['factor'] ?? '1'}', style: const TextStyle(fontFamily: _font)),
+                subtitle: Text([u['barcode'], u['sale_price'], u['cost_price']].whereType<String>().join(' · ')),
+              ),
+            for (final b in row.barcodes)
+              ListTile(dense: true, leading: const Icon(Icons.qr_code_2_rounded), title: Text(b)),
+          ]),
+        ),
+      );
+
   final _thumbs = <String, Uint8List?>{};
+  final _loading = <String>{};
   Widget _picture(String? name) {
     if (name == null) return const Text('—');
+    if (ImportImages.isBlob(name) && !_thumbs.containsKey(name)) {
+      if (_loading.add(name)) {
+        widget.images?.load(name).then((p) {
+          if (mounted) setState(() => _thumbs[name] = p?.$1);
+        });
+      }
+      return const SizedBox(width: 36, height: 36, child: Icon(Icons.image_outlined, size: 18));
+    }
     final b = _thumbs.putIfAbsent(name, () => widget.images?.read(name)?.$1);
     if (b == null) return const Icon(Icons.image_not_supported_outlined, size: 18, color: _yellow);
     return ClipRRect(

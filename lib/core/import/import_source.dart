@@ -678,11 +678,26 @@ Future<List<ImportTable>> _sqlite(File file) async {
         final d = await open();
         try {
           final q = cols.map((c) => '"${c.replaceAll('"', '""')}"').join(', ');
-          final cur = await d.rawQueryCursor('SELECT $q FROM "${t.replaceAll('"', '""')}"', [], bufferSize: 2000);
+          final tq = '"${t.replaceAll('"', '""')}"';
+          // A picture stored IN the database (BLOB) becomes a reference the
+          // import reads only when that row is imported (ImportImages).
+          QueryCursor cur;
+          var withRowid = true;
+          try {
+            cur = await d.rawQueryCursor('SELECT rowid AS "__fy_rowid", $q FROM $tq', [], bufferSize: 2000);
+          } catch (_) {
+            withRowid = false;
+            cur = await d.rawQueryCursor('SELECT $q FROM $tq', [], bufferSize: 2000);
+          }
           try {
             while (await cur.moveNext()) {
               final r = cur.current;
-              yield [for (final c in cols) r[c] is List<int> ? null : _cell(r[c])];
+              yield [
+                for (final c in cols)
+                  r[c] is List<int>
+                      ? (withRowid ? blobRef(t, r['__fy_rowid'] as int, c) : null)
+                      : _cell(r[c]),
+              ];
             }
           } finally {
             await cur.close();
@@ -729,30 +744,68 @@ const _imageExt = {'jpg', 'jpeg', 'png', 'webp', 'gif'};
 
 /// Pictures found in a ZIP, by file name (lower case). Read only when a
 /// product that names one is imported; checked to really be a picture.
+/// A picture kept inside a SQLite table (BLOB): `fyblob:<table,rowid,col>`.
+String blobRef(String table, int rowid, String column) =>
+    'fyblob:${base64Url.encode(utf8.encode(jsonEncode([table, rowid, column])))}';
+
 class ImportImages {
-  ImportImages._(this._zip, this._entries);
+  ImportImages._(this._zip, this._entries, [this._sqlite]);
   final _Zip? _zip;
   final Map<String, _ZipEntry> _entries;
+  final File? _sqlite;
   static final none = ImportImages._(null, const {});
 
   Set<String> get names => _entries.keys.toSet();
 
-  /// The picture's bytes and type, or null when missing / not a picture.
-  (Uint8List, String)? read(String name) {
-    final e = _entries[name.split('/').last.split('\\').last.toLowerCase()];
-    if (e == null || _zip == null || e.size > importMaxImageBytes) return null;
-    final b = _zip.read(e);
+  static bool isBlob(String name) => name.startsWith('fyblob:');
+
+  /// Whether [name] can be found here (a ZIP file name or a SQLite blob).
+  bool has(String name) =>
+      isBlob(name) ? _sqlite != null : _entries.containsKey(name.split('/').last.split('\\').last.toLowerCase());
+
+  /// Any picture: from the ZIP, or read from the SQLite row it lives in.
+  Future<(Uint8List, String)?> load(String name) async {
+    if (!isBlob(name)) return read(name);
+    final f = _sqlite;
+    if (f == null) return null;
+    try {
+      final ref = jsonDecode(utf8.decode(base64Url.decode(name.substring(7)))) as List;
+      final uri = Uri.file(f.absolute.path).replace(query: 'mode=ro&immutable=1').toString();
+      final db = await databaseFactoryFfi.openDatabase(uri, options: OpenDatabaseOptions(readOnly: true, singleInstance: false));
+      try {
+        final t = '${ref[0]}'.replaceAll('"', '""'), c = '${ref[2]}'.replaceAll('"', '""');
+        final rows = await db.rawQuery('SELECT "$c" AS b FROM "$t" WHERE rowid = ?', [ref[1]]);
+        final b = rows.isEmpty ? null : rows.first['b'];
+        if (b is! List<int> || b.length > importMaxImageBytes) return null;
+        return _sniff(Uint8List.fromList(b));
+      } finally {
+        await db.close();
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static (Uint8List, String)? _sniff(Uint8List b) {
     if (b.length >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return (b, 'image/jpeg');
     if (b.length >= 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) return (b, 'image/png');
     if (b.length >= 12 && ascii.decode(b.sublist(8, 12), allowInvalid: true) == 'WEBP') return (b, 'image/webp');
     if (b.length >= 4 && ascii.decode(b.sublist(0, 4), allowInvalid: true) == 'GIF8') return (b, 'image/gif');
     return null;
   }
+
+  /// The picture's bytes and type, or null when missing / not a picture.
+  (Uint8List, String)? read(String name) {
+    final e = _entries[name.split('/').last.split('\\').last.toLowerCase()];
+    if (e == null || _zip == null || e.size > importMaxImageBytes) return null;
+    return _sniff(_zip.read(e));
+  }
 }
 
 Future<ImportImages> readImportImages(File file) async {
-  final head = await file.openRead(0, 4).fold<List<int>>([], (a, b) => a..addAll(b));
+  final head = await file.openRead(0, 16).fold<List<int>>([], (a, b) => a..addAll(b));
   final name = file.path.toLowerCase();
+  if (_isSqlite(head)) return ImportImages._(null, const {}, file);
   if (!_isZip(head) || name.endsWith('.xlsx')) return ImportImages.none;
   final zip = _Zip.open(await file.readAsBytes());
   final out = <String, _ZipEntry>{};

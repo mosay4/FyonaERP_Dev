@@ -77,7 +77,13 @@ class BusinessImporter {
     this.categories,
     this.createCategory,
     this.picture,
+    this.createUnit,
+    this.addBarcode,
   });
+
+  /// The app's own unit / extra barcode operations (LocalInventoryApi).
+  final Future<Map<String, dynamic>> Function(String productId, Map<String, dynamic> body)? createUnit;
+  final Future<Map<String, dynamic>> Function(String productId, Map<String, dynamic> body)? addBarcode;
 
   final DirectoryPilotStore store;
   final DirectoryAccess access;
@@ -104,6 +110,8 @@ class BusinessImporter {
         BusinessLedgerAction.readDebt,
         BusinessLedgerAction.deleteParty,
         BusinessLedgerAction.manageProducts,
+        BusinessLedgerAction.createBank,
+        BusinessLedgerAction.manageBank,
       });
 
   /// One batch per (file, branch, target): the same file twice is refused.
@@ -142,6 +150,7 @@ class BusinessImporter {
           'customers': preview.parties.where((p) => p.kind == 'customer').length,
           'suppliers': preview.parties.where((p) => p.kind == 'supplier').length,
           'products': preview.products.length,
+          'accounts': preview.accounts.length,
         }),
       });
     }
@@ -163,6 +172,27 @@ class BusinessImporter {
         await db.insert('import_items', {
           'batch_id': id, 'kind': 'party', 'entity_id': '${res['party_id']}', 'party_kind': r.kind,
           'opening_id': res['invoice_id'], 'row_no': r.row,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        if (++done % 200 == 0 || done == total) {
+          await db.update('import_batches', {'rows_done': done}, where: 'id = ?', whereArgs: [id]);
+          onProgress?.call(done, total);
+        }
+      }
+    } else if (preview.target == ImportTarget.accounts) {
+      for (final r in preview.accounts) {
+        final cmd = _rowCommand(id, r.row, 'account');
+        final res = await store.withLedger(g, () => access, (l) => l.createAccount(
+              g,
+              commandId: cmd,
+              bankName: r.bank,
+              accountName: r.name,
+              accountNumber: r.number,
+              iban: r.iban,
+              currency: r.currency,
+              openingMinor: r.amountMinor,
+            ));
+        await db.insert('import_items', {
+          'batch_id': id, 'kind': 'account', 'entity_id': '${res['id']}', 'opening_id': cmd, 'row_no': r.row,
         }, conflictAlgorithm: ConflictAlgorithm.ignore);
         if (++done % 200 == 0 || done == total) {
           await db.update('import_batches', {'rows_done': done}, where: 'id = ?', whereArgs: [id]);
@@ -195,7 +225,26 @@ class BusinessImporter {
           if (r.sku != null) 'sku': r.sku,
           if (category != null) 'category_id': category,
           if (image != null) 'image': image,
+          if (r.minStock != null) 'min_stock': r.minStock,
+          if (r.description != null) 'description': r.description,
         });
+        final pid = '${created['id']}';
+        // Its other units (factor, own prices and barcode) and extra codes.
+        for (var u = 0; u < r.units.length && createUnit != null; u++) {
+          final unit = r.units[u];
+          await createUnit!(pid, {
+            'command_id': _uuid.v5(_ns, '$cmd|unit|$u'),
+            'name': unit.name,
+            'factor': unit.factor,
+            if (unit.barcode != null) 'barcode': unit.barcode,
+            if (unit.sale != null) 'sale_price': unit.sale,
+            if (unit.cost != null) 'purchase_price': unit.cost,
+          });
+        }
+        for (var b = 0; b < r.barcodes.length && addBarcode != null; b++) {
+          if (r.barcodes[b] == r.barcode) continue;
+          await addBarcode!(pid, {'command_id': _uuid.v5(_ns, '$cmd|barcode|$b'), 'barcode': r.barcodes[b]});
+        }
         await db.insert('import_items', {
           'batch_id': id, 'kind': 'product', 'entity_id': '${created['id']}', 'row_no': r.row,
         }, conflictAlgorithm: ConflictAlgorithm.ignore);
@@ -230,8 +279,9 @@ class BusinessImporter {
         if (i['kind'] == 'party' && i['opening_id'] != null) '${i['entity_id']}': '${i['opening_id']}',
     };
     final products = [for (final i in items.where((i) => i['kind'] == 'product')) '${i['entity_id']}'];
+    final accounts = {for (final i in items.where((i) => i['kind'] == 'account')) '${i['entity_id']}': '${i['opening_id']}'};
     final busy = await store.withLedger(g, () => access,
-        (l) => l.importLaterActivity(g, parties: parties, openings: openings, products: products));
+        (l) => l.importLaterActivity(g, parties: parties, openings: openings, products: products, accounts: accounts));
     if (busy.isNotEmpty) throw ImportRefused('busy_after_import', busy.length);
     var done = 0;
     for (final e in parties.entries) {
@@ -244,6 +294,15 @@ class BusinessImporter {
             commandId: _uuid.v5(_ns, 'undo|$id|${e.key}'),
           ));
       if (++done % 200 == 0) onProgress?.call(done, items.length);
+    }
+    if (accounts.isNotEmpty) {
+      final ids = accounts.keys.toList();
+      for (var i = 0; i < ids.length; i += 400) {
+        final chunk = ids.sublist(i, i + 400 > ids.length ? ids.length : i + 400);
+        await store.withLedger(g, () => access, (l) => l.closeBankAccounts(g,
+            commandId: _uuid.v5(_ns, 'undo|$id|accounts|$i'), accountIds: chunk));
+      }
+      done += accounts.length;
     }
     for (final p in products) {
       await deleteProduct(p);

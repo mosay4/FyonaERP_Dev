@@ -52,3 +52,26 @@ def test_ai_unavailable_is_a_clear_503(monkeypatch):
     r = _client().post("/api/v1/ai/import-mapping", json={"target": "parties", "columns": ["a"], "sample": []})
     assert r.status_code == 503
     assert "secret" not in r.text
+
+
+def test_schema_answers_are_checked_against_the_real_tables():
+    tables = [im.TableIn(name="tbl_items", columns=["ItemName", "Qty", "Price"]),
+              im.TableIn(name="tbl_staff", columns=["Name", "Salary"])]
+    raw = {"tables": [
+        {"name": "tbl_items", "role": "products", "mapping": {"name": "ItemName", "stock": "Qty", "sale_price": "Nope"}},
+        {"name": "tbl_staff", "role": "unsupported", "mapping": {}},
+        {"name": "ghost", "role": "products", "mapping": {}},
+        {"name": "tbl_items", "role": "made-up", "mapping": {}},
+    ]}
+    got = im.validate_schema(raw, tables)
+    assert got == [
+        {"name": "tbl_items", "role": "products", "mapping": {"name": "ItemName", "stock": "Qty"}, "link": None},
+        {"name": "tbl_staff", "role": "unsupported", "mapping": {}, "link": None},
+    ]
+
+
+def test_customer_tables_use_the_party_fields():
+    tables = [im.TableIn(name="T_CL", columns=["ClNo", "ClName", "Tel", "Due"])]
+    got = im.validate_schema({"tables": [{"name": "T_CL", "role": "customers",
+                                          "mapping": {"name": "ClName", "phone": "Tel", "balance": "Due"}}]}, tables)
+    assert got[0]["mapping"] == {"name": "ClName", "phone": "Tel", "balance": "Due"}

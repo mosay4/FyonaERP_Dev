@@ -36,14 +36,40 @@ FIELDS = {
         "sale_price": "سعر البيع",
         "cost_price": "سعر الشراء أو التكلفة",
         "stock": "الكمية في المخزون",
+        "category": "التصنيف",
+        "image": "الصورة",
+        "min_stock": "الحد الأدنى",
+        "description": "الوصف",
     },
+    "accounts": {
+        "name": "اسم الحساب أو الصندوق",
+        "bank": "اسم البنك",
+        "number": "رقم الحساب",
+        "iban": "الآيبان",
+        "balance": "الرصيد الحالي",
+        "currency": "العملة",
+    },
+    "units": {"name": "اسم الوحدة", "factor": "كم وحدة أساسية فيها", "barcode": "باركود الوحدة",
+              "sale_price": "سعر بيع الوحدة", "cost_price": "سعر شراء الوحدة"},
+    "barcodes": {"barcode": "باركود إضافي للمنتج"},
+    "images": {"image": "صورة المنتج"},
+    "categories": {"name": "اسم التصنيف"},
+}
+
+ROLES = {
+    "customers": "عملاء", "suppliers": "موردون", "products": "منتجات", "accounts": "حسابات بنكية أو صناديق",
+    "units": "وحدات المنتجات (مرتبطة بالمنتجات)", "barcodes": "باركودات إضافية للمنتجات",
+    "images": "صور المنتجات", "categories": "تصنيفات المنتجات",
+    "history": "سجلات سابقة: فواتير، سندات، حركات، مدفوعات",
+    "unsupported": "بيانات لا مكان لها في برنامج محاسبة للتجارة (موظفون، رواتب، أصول، إعدادات…)",
+    "unknown": "غير واضح",
 }
 
 _TIMEOUT = 25.0
 
 
 class MappingIn(BaseModel):
-    target: Literal["parties", "products"]
+    target: Literal["parties", "products", "accounts"]
     columns: List[str] = Field(min_length=1, max_length=200)
     sample: List[List[Optional[str]]] = Field(default_factory=list, max_length=30)
 
@@ -114,3 +140,77 @@ async def import_mapping(body: MappingIn, user_id: UUID = Depends(get_current_us
     except ValueError:
         mapping = {}
     return {"success": True, "data": {"mapping": mapping, "source": "sara"}}
+
+
+class TableIn(BaseModel):
+    name: str = Field(max_length=120)
+    columns: List[str] = Field(min_length=1, max_length=200)
+    sample: List[List[Optional[str]]] = Field(default_factory=list, max_length=5)
+
+
+class SchemaIn(BaseModel):
+    tables: List[TableIn] = Field(min_length=1, max_length=30)
+
+
+def validate_schema(raw: object, tables: List[TableIn]) -> list:
+    """Keep only known roles and fields mapped to real columns."""
+    by_name = {t.name: t for t in tables}
+    out = []
+    items = raw.get("tables") if isinstance(raw, dict) else None
+    for it in items if isinstance(items, list) else []:
+        if not isinstance(it, dict):
+            continue
+        t = by_name.get(str(it.get("name")))
+        role = str(it.get("role") or "")
+        if t is None or role not in ROLES:
+            continue
+        fields = FIELDS.get("parties" if role in ("customers", "suppliers") else role, {})
+        cols = [str(c)[:80] for c in t.columns]
+        mapping = {}
+        m = it.get("mapping") if isinstance(it.get("mapping"), dict) else {}
+        used = set()
+        for f in fields:
+            c = m.get(f)
+            if isinstance(c, str) and c in cols and c not in used:
+                mapping[f] = c
+                used.add(c)
+        link = it.get("link") if isinstance(it.get("link"), str) and it.get("link") in cols else None
+        out.append({"name": t.name, "role": role, "mapping": mapping, "link": link})
+    return out
+
+
+@router.post("/ai/import-schema", summary="سارة تقترح ما هو كل جدول في ملف الاستيراد")
+async def import_schema(body: SchemaIn, user_id: UUID = Depends(get_current_user_uuid)):
+    from app.domain.services.ai_router import build_client, route
+
+    tables = [{"name": t.name[:120], "columns": [str(c)[:80] for c in t.columns],
+               "sample_rows": [[("" if v is None else str(v))[:60] for v in r[: len(t.columns)]] for r in t.sample[:5]]}
+              for t in body.tables]
+    roles = "\n".join(f"- {k}: {v}" for k, v in ROLES.items())
+    fields = "\n".join(f"- {'customers / suppliers' if k == 'parties' else k}: {', '.join(v)}" for k, v in FIELDS.items())
+    system = (
+        "You classify the tables of a business's old database for import into FYONA ERP. "
+        "Answer JSON only: {\"tables\": [{\"name\": <table>, \"role\": <role>, "
+        "\"mapping\": {<field>: <exact column title>}, \"link\": <column pointing at the products table or null>}]}. "
+        "Never invent a column. If unsure, use role unknown. Roles:\n" + roles + "\nFields per role:\n" + fields
+    )
+    r = route("classify tables", tools=False, base_tokens=1500)
+    if not r.api_key:
+        raise HTTPException(503, detail={"code": "sara_unavailable", "message": "سارة غير متاحة الآن"})
+    client = build_client(r)
+    try:
+        client = client.with_options(timeout=40.0, max_retries=0)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        resp = await asyncio.wait_for(client.chat.completions.create(
+            model=r.model,
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": json.dumps({"tables": tables}, ensure_ascii=False)}],
+            temperature=0, max_tokens=3000, response_format={"type": "json_object"},
+        ), 40.0)
+        text = (resp.choices[0].message.content or "").strip()
+        result = validate_schema(json.loads(text), body.tables)
+    except Exception:  # noqa: BLE001 — never echo provider errors
+        raise HTTPException(503, detail={"code": "sara_unavailable", "message": "سارة غير متاحة الآن"})
+    return {"success": True, "data": {"tables": result, "source": "sara"}}
