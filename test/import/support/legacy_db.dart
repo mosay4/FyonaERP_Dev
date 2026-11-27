@@ -56,7 +56,10 @@ Future<LegacyExpect> buildLegacyDb(String path, {int products = 5500, int seed =
     if (i % 211 == 0) name = null;
     if (i % 307 == 0) name = 'صنف رقم ${i - 1} ${['أحمر', 'أزرق', 'كبير', 'صغير'][(i - 1) % 4]}';
     if (i % 401 == 0) qty = -3;
-    final ok = name != null && seen.add(name) && qty >= 0;
+    // A repeated name has its own barcode: a second product (FYONA allows
+    // it, the review notes it). A negative quantity is added as zero.
+    final ok = name != null;
+    if (name != null) seen.add(name);
     if (ok) e.productsOk++;
     final buy = (i % 90 + 1) + .25, sale = buy * 1.3;
     b.insert('tbl_items', {
@@ -66,7 +69,7 @@ Future<LegacyExpect> buildLegacyDb(String path, {int products = 5500, int seed =
     });
     if (ok && i % 100 == 7) {
       e.sample[name] = {'barcode': '628${'$i'.padLeft(10, '0')}', 'sale': double.parse(sale.toStringAsFixed(2)),
-          'stock': qty, 'category': 'قسم ${i % 40 + 1}', 'units': i % 2 == 1 ? 1 : 0, 'image': i % 7 == 0};
+          'stock': qty < 0 ? 0.0 : qty, 'category': 'قسم ${i % 40 + 1}', 'units': i % 2 == 1 ? 1 : 0, 'image': i % 7 == 0};
     }
     if (i % 2 == 1) {
       e.units++;

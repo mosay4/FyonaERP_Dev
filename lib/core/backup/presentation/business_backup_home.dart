@@ -18,6 +18,7 @@ import '../backup_coordinator.dart';
 import '../backup_providers.dart';
 import '../device_backup_folder.dart';
 import 'backup_list_sheet.dart';
+import 'feature_intro.dart';
 import 'operation_motion.dart';
 
 String _t(String key, [Map<String, dynamic>? p]) => AppLocalizations.t(key, p);
@@ -133,7 +134,15 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
       for (final f in legacy) BackupListItem(f.name, f.modified, f.size, device: f, legacy: true),
     ]..sort((a, b) => a.when.compareTo(b.when));
     final pick = await BackupListSheet.show(context,
-        title: _t('bkhFromDevice'), icon: Icons.phone_android_rounded, items: items, empty: _t('bkhNoDevice'));
+        title: _t('bkhFromDevice'),
+        icon: Icons.phone_android_rounded,
+        items: items,
+        empty: _t('bkhNoDevice'),
+        onDelete: (picked) async => [
+              for (final it in picked)
+                if (await _tryDelete(() => DeviceBackupFolder.delete(it.device!))) it,
+            ]);
+    await _load();
     if (pick == null || !mounted) return;
     await _restore(MotionKind.deviceRestore, pick);
   }
@@ -152,9 +161,26 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
     final items = [for (final s in sets) BackupListItem(s.id, s.startedAt?.toLocal() ?? DateTime.now(), s.bytes, cloud: s)]
       ..sort((a, b) => a.when.compareTo(b.when));
     final pick = await BackupListSheet.show(context,
-        title: _t('bkhFromCloud'), icon: Icons.cloud_rounded, items: items, empty: error ?? _t('bkhNoCloud'));
+        title: _t('bkhFromCloud'),
+        icon: Icons.cloud_rounded,
+        items: items,
+        empty: error ?? _t('bkhNoCloud'),
+        onDelete: (picked) async => [
+              for (final it in picked)
+                if (await _tryDelete(() => _c.deleteCloudSet(space, it.cloud!.id))) it,
+            ]);
+    await _load();
     if (pick == null || !mounted) return;
     await _restore(MotionKind.cloudRestore, pick);
+  }
+
+  Future<bool> _tryDelete(Future<void> Function() run) async {
+    try {
+      await run();
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _restore(MotionKind kind, BackupListItem item) async {
@@ -235,6 +261,50 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
     }
   }
 
+  bool get _owner {
+    final scope = ref.watch(businessLocalLedgerScopeProvider);
+    return scope != null && !scope.member;
+  }
+
+  void _openExport() => showFeatureIntro(
+        context,
+        title: _t('axTitle'),
+        icon: Icons.ios_share_rounded,
+        colors: const [Color(0xFF0F766E), Color(0xFF14B8A6)],
+        scenes: [
+          IntroScene(const [Icons.event_rounded], _t('axIntro1')),
+          IntroScene(const [Icons.account_balance_wallet_rounded, Icons.all_inbox_rounded, Icons.checklist_rounded], _t('axIntro2')),
+          IntroScene(const [Icons.table_view_rounded, Icons.ios_share_rounded], _t('axIntro3')),
+        ],
+        points: [
+          (Icons.account_balance_wallet_rounded, _t('axPoint1')),
+          (Icons.checklist_rounded, _t('axPoint2')),
+          (Icons.table_view_rounded, _t('axPoint3')),
+        ],
+        start: _t('axStart'),
+        onStart: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountingExportPage())),
+      );
+
+  void _openImport() => showFeatureIntro(
+        context,
+        title: _t('siTitle'),
+        icon: Icons.auto_awesome_rounded,
+        colors: const [Color(0xFF7B2FF7), Color(0xFFE0457B)],
+        scenes: [
+          IntroScene(const [Icons.upload_file_rounded], _t('siIntro1')),
+          IntroScene(const [Icons.table_chart_rounded, Icons.auto_awesome_rounded], _t('siIntro2')),
+          IntroScene(const [Icons.check_circle_rounded, Icons.block_rounded, Icons.fact_check_rounded], _t('siIntro3')),
+          IntroScene(const [Icons.fingerprint_rounded, Icons.verified_rounded], _t('siIntro4')),
+        ],
+        points: [
+          (Icons.auto_awesome_rounded, _t('siPoint1')),
+          (Icons.fact_check_rounded, _t('siPoint2')),
+          (Icons.shield_rounded, _t('siPoint3')),
+        ],
+        start: _t('siStart'),
+        onStart: () => openSmartImport(context),
+      );
+
   String _when(int? ms) {
     if (ms == null) return _t('bkhNever');
     final d = DateTime.fromMillisecondsSinceEpoch(ms).toLocal();
@@ -300,9 +370,30 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
             subtitle: Text(_t('bkhAutoHint'), style: const TextStyle(fontFamily: _font, fontSize: 12)),
           ),
         ),
-        const SizedBox(height: 18),
-        const AccountingExportEntry(),
-        const SmartImportEntry(),
+        if (_owner) ...[
+          const SizedBox(height: 18),
+          Row(children: [
+            Expanded(
+              child: FeatureButton(
+                key: const Key('bkh-export'),
+                title: _t('axTitle'),
+                icon: Icons.ios_share_rounded,
+                colors: const [Color(0xFF0F766E), Color(0xFF14B8A6)],
+                onTap: _busy ? null : _openExport,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FeatureButton(
+                key: const Key('bkh-import'),
+                title: _t('siTitle'),
+                icon: Icons.auto_awesome_rounded,
+                colors: const [Color(0xFF7B2FF7), Color(0xFFE0457B)],
+                onTap: _busy ? null : _openImport,
+              ),
+            ),
+          ]),
+        ],
       ]),
     );
   }

@@ -45,6 +45,19 @@ class ImportTable {
   /// Rows (one list per row, aligned with [columns]); read again each call.
   Stream<List<String?>> rows() => _rows();
 
+  int? _count;
+
+  /// How many rows (read once, then remembered).
+  Future<int> count() async {
+    final known = _count;
+    if (known != null) return known;
+    var n = 0;
+    await for (final _ in rows()) {
+      n++;
+    }
+    return _count = n;
+  }
+
   Future<List<List<String?>>> sample([int n = 30]) async {
     final out = <List<String?>>[];
     await for (final r in rows()) {

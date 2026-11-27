@@ -22,13 +22,24 @@ Future<AccountingExportFile> exportBusinessAccounting({
   MediaStore? media,
   bool images = true,
   String appVersion = '',
+  Set<String>? only,
 }) async {
   if (access.member || !access.financialCutover) throw const DirectoryAccessDenied();
   if (await work.exists()) await work.delete(recursive: true);
   await work.create(recursive: true);
   final grant = BusinessLedgerAccess(access, {BusinessLedgerAction.readBank, BusinessLedgerAction.readDebt});
-  final writer = AccountingExportWriter(
-      work: work, sheets: businessExportSheets, numeric: businessExportNumeric, arabic: arabic);
+  // Only the parts asked for (final balances, all, or chosen parts).
+  final sheets = {
+    for (final e in businessExportSheets.entries)
+      if (only == null || only.contains(e.key)) e.key: e.value,
+  };
+  if (sheets.isEmpty) throw ArgumentError('nothing to export');
+  if (!sheets.containsKey('opening_stock')) images = false;
+  final writer = AccountingExportWriter(work: work, sheets: sheets, numeric: businessExportNumeric, arabic: arabic);
+  Future<void> emit(String sheet, List<Object?> row) async {
+    if (sheets.containsKey(sheet)) await writer.add(sheet, row);
+  }
+
   String name(String ref, String productId) {
     final f = images ? media?.fileOf(ref) : null;
     return f == null ? '' : 'images/$productId.${_ext(f)}';
@@ -36,7 +47,7 @@ Future<AccountingExportFile> exportBusinessAccounting({
 
   try {
     final result = await store.withLedger(grant, () => access,
-        (l) => l.exportAccounting(grant, cutoff: cutoff, emit: writer.add, imageName: name));
+        (l) => l.exportAccounting(grant, cutoff: cutoff, emit: emit, imageName: name));
     final files = <String, File>{};
     var missing = 0;
     for (final e in result.images.entries) {
@@ -56,6 +67,7 @@ Future<AccountingExportFile> exportBusinessAccounting({
       'generated_at': DateTime.now().toUtc().toIso8601String(),
       'scope': {'organization': access.workspace.organizationId, 'branch': access.branchId},
       'language': arabic ? 'ar' : 'en',
+      'parts': sheets.keys.toList(),
       ...result.toJson(),
       'definitions': {
         'balance_cutoff': 'today\'s balance with every later movement taken back (end of the cut-off day, device time)',

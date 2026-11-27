@@ -5,7 +5,6 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../localization/app_localizations.dart';
 
@@ -186,10 +185,6 @@ class _MotionScreenState extends State<_MotionScreen> with TickerProviderStateMi
         ),
         child: SafeArea(
           child: Stack(children: [
-            Align(
-              alignment: AlignmentDirectional.topEnd,
-              child: _MuteButton(),
-            ),
             Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Text(_title,
@@ -373,52 +368,13 @@ class _OrbitPainter extends CustomPainter {
   bool shouldRepaint(_OrbitPainter o) => true;
 }
 
-class _MuteButton extends StatefulWidget {
-  @override
-  State<_MuteButton> createState() => _MuteButtonState();
-}
-
-class _MuteButtonState extends State<_MuteButton> {
-  @override
-  Widget build(BuildContext context) => IconButton(
-        key: const Key('motion-mute'),
-        tooltip: _t(_Sfx.muted ? 'motionUnmute' : 'motionMute'),
-        onPressed: () async {
-          await _Sfx.setMuted(!_Sfx.muted);
-          if (mounted) setState(() {});
-        },
-        icon: Icon(_Sfx.muted ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: Colors.white70),
-      );
-}
-
-/// Soft cues; muted by the user's choice (remembered), and silent when the
-/// phone is on silent/vibrate/DND (same rule as the app's other motions).
+/// Soft cues, always part of the motion (no in-app mute, owner's choice);
+/// the phone's own silent/vibrate/DND mode still silences them.
 abstract final class _Sfx {
-  static bool muted = false;
-  static bool _loaded = false;
   static AudioPlayer? _player;
   static const _gate = MethodChannel('fyona/motion_audio');
-  static const _key = 'operation_motion_muted';
-
-  static Future<void> _load() async {
-    if (_loaded) return;
-    _loaded = true;
-    try {
-      muted = (await SharedPreferences.getInstance()).getBool(_key) ?? false;
-    } catch (_) {}
-  }
-
-  static Future<void> setMuted(bool v) async {
-    muted = v;
-    try {
-      await (await SharedPreferences.getInstance()).setBool(_key, v);
-    } catch (_) {}
-    if (v) await _player?.stop();
-  }
 
   static Future<bool> _canPlay() async {
-    await _load();
-    if (muted) return false;
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return defaultTargetPlatform != TargetPlatform.linux;
     try {
       return await _gate.invokeMethod<bool>('canPlay') == true;

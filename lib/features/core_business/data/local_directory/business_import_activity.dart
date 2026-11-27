@@ -57,19 +57,35 @@ extension BusinessImportActivity on BusinessLedger {
     return _directory._transaction((txn) async {
       final out = <String>{};
       for (final r in await txn.rawQuery(
-          'SELECT kind, name FROM ${DirectoryDatabase._table} p WHERE branch_id = ? AND NOT EXISTS '
+          'SELECT kind, name, phone FROM ${DirectoryDatabase._table} p WHERE branch_id = ? AND NOT EXISTS '
           '(SELECT 1 FROM ${DirectoryDatabase._deleted} d WHERE d.branch_id = p.branch_id AND d.kind = p.kind AND d.party_id = p.id)',
           [branch])) {
         out.add('${r['kind']}|${fold('${r['name']}')}');
+        // A phone is used once per kind in a branch (FYONA's own rule).
+        final phone = '${r['phone'] ?? ''}'.trim();
+        if (phone.isNotEmpty) out.add('phone|${r['kind']}|$phone');
       }
       for (final r in await txn.rawQuery(
           'SELECT account_name, bank_name FROM ${BusinessLedger._accounts} WHERE branch_id = ?', [branch])) {
         out.add('account|${fold('${r['account_name']}')}|${fold('${r['bank_name']}')}');
       }
       for (final r in await txn.rawQuery(
-          'SELECT name, barcode FROM $_commerceProducts WHERE branch_id = ? AND deleted_us IS NULL', [branch])) {
+          'SELECT name, barcode, sku FROM $_commerceProducts WHERE branch_id = ? AND deleted_us IS NULL', [branch])) {
         out.add('product|${fold('${r['name']}')}');
-        if (r['barcode'] != null && '${r['barcode']}'.isNotEmpty) out.add('product|${r['barcode']}');
+        if (r['barcode'] != null && '${r['barcode']}'.isNotEmpty) {
+          out
+            ..add('product|${r['barcode']}')
+            ..add('code|${r['barcode']}');
+        }
+        if (r['sku'] != null && '${r['sku']}'.isNotEmpty) out.add('sku|${r['sku']}');
+      }
+      // Every barcode in use (units and extra codes too): FYONA keeps one
+      // barcode for one thing in a branch.
+      for (final r in await txn.rawQuery(
+          'SELECT barcode FROM $_commerceUnits WHERE branch_id = ? AND barcode IS NOT NULL '
+          'UNION SELECT barcode FROM $_commerceBarcodes WHERE branch_id = ?',
+          [branch, branch])) {
+        if ('${r['barcode']}'.isNotEmpty) out.add('code|${r['barcode']}');
       }
       return out;
     });

@@ -153,16 +153,18 @@ void main() {
     expect(map, {'name': 'الصنف', 'barcode': 'الباركود', 'sale_price': 'سعر البيع', 'cost_price': 'التكلفة', 'stock': 'الكمية'});
     final imp = importer();
     final p = await buildImportPreview(t, ImportTarget.products, map);
-    expect(p.ready, 2);
-    expect(p.issues.single.code, 'duplicate_in_file');
+    // Two products may share a name when their barcodes differ (sizes,
+    // colours); the same barcode twice would be refused.
+    expect(p.ready, 3);
+    expect(p.issues, isEmpty);
     final batch = await imp.apply(p, fileSha: sha, fileName: 'p.csv');
     final list = await inventory.listProducts();
-    expect(list.length, 2);
-    final pen = list.firstWhere((e) => e['name'] == 'قلم أزرق');
+    expect(list.length, 3);
+    final pen = list.firstWhere((e) => e['barcode'] == '111');
     expect(pen['barcode'], '111');
     expect(double.parse('${pen['stock']}'), 100);
     expect(double.parse('${pen['price']}'), 2.5);
-    expect(await imp.undo(batch), 2);
+    expect(await imp.undo(batch), 3);
     expect(await inventory.listProducts(), isEmpty);
 
     // Again (another file name, same content = same batch: refused).

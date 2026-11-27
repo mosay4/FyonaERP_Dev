@@ -102,6 +102,9 @@ class BusinessImporter {
   /// A picture named in the file → its `media:` reference (null: none).
   final Future<String?> Function(String name)? picture;
 
+  /// Rows FYONA's own rules refused during the last [apply] (row → why).
+  final skippedRows = <int, String>{};
+
   static const _ns = '6a4d3f1e-9b2c-4f7a-8e5d-1c0b9a8f7e6d';
   static const _uuid = Uuid();
 
@@ -157,10 +160,27 @@ class BusinessImporter {
     final total = preview.ready;
     var done = 0;
     final g = _grant;
+    skippedRows.clear();
+    // A row FYONA's own rules still refuse (the review checks the same
+    // rules first, so this is the last safety net) is left out and listed;
+    // it never stops the rows after it. Anything else stops the batch
+    // (resumable: same command ids).
+    Future<T?> row<T>(int no, Future<T> Function() write) async {
+      try {
+        return await write();
+      } on DirectoryValidation catch (e) {
+        skippedRows[no] = 'directory:${e.problem.name}';
+      } on BusinessLedgerError catch (e) {
+        skippedRows[no] = 'ledger:${e.problem.name}';
+      } on FormatException {
+        skippedRows[no] = 'format';
+      }
+      return null;
+    }
     if (preview.target == ImportTarget.parties) {
       for (final r in preview.parties) {
         final cmd = _rowCommand(id, r.row, 'party');
-        final res = await store.withLedger(g, () => access, (l) => l.addPartyWithOpeningDebt(
+        final res = await row(r.row, () => store.withLedger(g, () => access, (l) => l.addPartyWithOpeningDebt(
               g,
               r.kind == 'supplier' ? DirectoryPartyKind.supplier : DirectoryPartyKind.customer,
               commandId: cmd,
@@ -168,8 +188,8 @@ class BusinessImporter {
               phone: r.phone,
               amountMinor: r.amountMinor,
               currency: r.currency,
-            ));
-        await db.insert('import_items', {
+            )));
+        if (res != null) await db.insert('import_items', {
           'batch_id': id, 'kind': 'party', 'entity_id': '${res['party_id']}', 'party_kind': r.kind,
           'opening_id': res['invoice_id'], 'row_no': r.row,
         }, conflictAlgorithm: ConflictAlgorithm.ignore);
@@ -181,7 +201,7 @@ class BusinessImporter {
     } else if (preview.target == ImportTarget.accounts) {
       for (final r in preview.accounts) {
         final cmd = _rowCommand(id, r.row, 'account');
-        final res = await store.withLedger(g, () => access, (l) => l.createAccount(
+        final res = await row(r.row, () => store.withLedger(g, () => access, (l) => l.createAccount(
               g,
               commandId: cmd,
               bankName: r.bank,
@@ -190,8 +210,8 @@ class BusinessImporter {
               iban: r.iban,
               currency: r.currency,
               openingMinor: r.amountMinor,
-            ));
-        await db.insert('import_items', {
+            )));
+        if (res != null) await db.insert('import_items', {
           'batch_id': id, 'kind': 'account', 'entity_id': '${res['id']}', 'opening_id': cmd, 'row_no': r.row,
         }, conflictAlgorithm: ConflictAlgorithm.ignore);
         if (++done % 200 == 0 || done == total) {
@@ -214,7 +234,7 @@ class BusinessImporter {
           category = catIds[k] ??= '${(await createCategory!(r.category!))['id']}';
         }
         final image = r.image == null || picture == null ? null : await picture!(r.image!);
-        final created = await createProduct({
+        final created = await row(r.row, () => createProduct({
           'command_id': cmd,
           'name': r.name,
           if (r.unit != null) 'unit': r.unit,
@@ -227,23 +247,31 @@ class BusinessImporter {
           if (image != null) 'image': image,
           if (r.minStock != null) 'min_stock': r.minStock,
           if (r.description != null) 'description': r.description,
-        });
+          if (r.expiry != null) 'expiry_date': r.expiry,
+          if (r.notes != null) 'notes': r.notes,
+          if (r.cost != null) 'cost_currency': preview.currency,
+          if (r.prices.isNotEmpty) 'prices': r.prices,
+        }));
+        if (created == null) {
+          if (++done % 200 == 0 || done == total) onProgress?.call(done, total);
+          continue;
+        }
         final pid = '${created['id']}';
         // Its other units (factor, own prices and barcode) and extra codes.
         for (var u = 0; u < r.units.length && createUnit != null; u++) {
           final unit = r.units[u];
-          await createUnit!(pid, {
+          await row(r.row, () => createUnit!(pid, {
             'command_id': _uuid.v5(_ns, '$cmd|unit|$u'),
             'name': unit.name,
             'factor': unit.factor,
             if (unit.barcode != null) 'barcode': unit.barcode,
             if (unit.sale != null) 'sale_price': unit.sale,
             if (unit.cost != null) 'purchase_price': unit.cost,
-          });
+          }));
         }
         for (var b = 0; b < r.barcodes.length && addBarcode != null; b++) {
           if (r.barcodes[b] == r.barcode) continue;
-          await addBarcode!(pid, {'command_id': _uuid.v5(_ns, '$cmd|barcode|$b'), 'barcode': r.barcodes[b]});
+          await row(r.row, () => addBarcode!(pid, {'command_id': _uuid.v5(_ns, '$cmd|barcode|$b'), 'barcode': r.barcodes[b]}));
         }
         await db.insert('import_items', {
           'batch_id': id, 'kind': 'product', 'entity_id': '${created['id']}', 'row_no': r.row,

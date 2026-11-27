@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/import/import_plan.dart';
+import 'package:fyona_flutter/core/import/import_schema.dart';
 import 'package:fyona_flutter/core/localization/app_localizations.dart';
 import 'package:fyona_flutter/core/import/import_source.dart';
 import 'package:fyona_flutter/core/import/presentation/smart_import_page.dart';
@@ -25,6 +26,14 @@ DirectoryAccess _scope({bool member = false}) => DirectoryAccess(
       member: member,
     );
 
+/// The window's Sara button keeps glowing: wait a fixed time instead of
+/// "until nothing moves".
+Future<void> _settle(WidgetTester t) async {
+  for (var i = 0; i < 6; i++) {
+    await t.pump(const Duration(milliseconds: 150));
+  }
+}
+
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
@@ -38,31 +47,59 @@ void main() {
     }
   });
 
-  testWidgets('tables get a destination; a column dragged onto a field (swap with the old one)', (tester) async {
+  testWidgets('every place in FYONA is offered; columns dragged onto a field (swap with the old one)', (tester) async {
     final dir = Directory.systemTemp.createTempSync('fyona-si-ui-');
     addTearDown(() => dir.deleteSync(recursive: true));
     final f = File('${dir.path}/stock.csv')..writeAsStringSync('الصنف,السعر,الكمية,لون\nقلم,2.5,100,أزرق\n');
-    // A tall window: the whole columns step is on screen.
     tester.view.physicalSize = const Size(1000, 2600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    // The file is read with real I/O: let it finish outside the fake clock.
+    var saraAsked = 0;
     await tester.runAsync(() async {
+      await AppLocalizations.preload('ar');
       await tester.pumpWidget(ProviderScope(
-        overrides: [businessLocalLedgerScopeProvider.overrideWithValue(_scope())],
-        child: MaterialApp(home: SmartImportPage(initialFile: f)),
+        overrides: [
+          businessLocalLedgerScopeProvider.overrideWithValue(_scope()),
+          smartImportSaraProvider.overrideWithValue(SmartImportSara(
+            schema: (t) async {
+              saraAsked++;
+              return const [];
+            },
+            agent: (m, s, h) async => null,
+          )),
+        ],
+        child: MaterialApp(
+          locale: const Locale('ar'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          home: SmartImportPage(initialFile: f),
+        ),
       ));
-      for (var i = 0; i < 50 && find.byKey(const Key('si-dest-0')).evaluate().isEmpty; i++) {
+      for (var i = 0; i < 80 && find.byKey(const Key('si-review')).evaluate().isEmpty; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 100));
         await tester.pump();
       }
     });
     await tester.pump();
-    expect(find.byKey(const Key('si-dest-0')), findsOneWidget);
-    expect(suggestDestination((await tester.runAsync(() => readImportFile(f)))!.single), ImportDestination.products);
-    // "لون" (colour) has no place: listed as not saved.
+    final dest = find.byWidgetPredicate((w) => w.key is ValueKey<String> && '${(w.key as ValueKey<String>).value}'.startsWith('si-dest-'));
+    expect(dest, findsOneWidget);
+    expect(find.text('المنتجات'), findsWidgets); // recognised as products
+    // The destination list offers EVERY place a table can go.
+    await tester.tap(dest);
+    await _settle(tester);
+    for (final r in TableRole.values.where((r) => r != TableRole.unknown)) {
+      await tester.scrollUntilVisible(find.byKey(Key('si-role-${r.name}')), 80,
+          scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first);
+      expect(find.byKey(Key('si-role-${r.name}')), findsOneWidget, reason: r.name);
+    }
+    await tester.tapAt(const Offset(10, 10));
+    await _settle(tester);
+    // Columns: "لون" (colour) has no place and is listed as not saved.
+    final cols = find.byWidgetPredicate((w) => w.key is ValueKey<String> && '${(w.key as ValueKey<String>).value}'.startsWith('si-columns-'));
+    await tester.tap(cols);
+    await _settle(tester);
     expect(find.byKey(const Key('si-col-لون')), findsOneWidget);
-    // Sara/auto put السعر on the sale price; drag الكمية onto it instead.
+    // Drag الكمية onto the sale price: السعر goes to the quantity field.
     final from = tester.getCenter(find.byKey(const Key('si-col-الكمية')));
     final to = tester.getCenter(find.byKey(const Key('si-field-sale_price')));
     final g = await tester.startGesture(from);
@@ -71,10 +108,12 @@ void main() {
     await tester.pump();
     await g.up();
     await tester.pump();
-    final field = find.byKey(const Key('si-field-sale_price'));
-    expect(find.descendant(of: field, matching: find.text('الكمية')), findsOneWidget);
-    // The swap: السعر went to the quantity field.
+    expect(find.descendant(of: find.byKey(const Key('si-field-sale_price')), matching: find.text('الكمية')), findsOneWidget);
     expect(find.descendant(of: find.byKey(const Key('si-field-stock')), matching: find.text('السعر')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('si-columns-done')));
+    await _settle(tester);
+    // Sara sits at the top of the window.
+    expect(find.byKey(const Key('si-sara')), findsOneWidget);
   });
 
   testWidgets('review of 5 000 rows: two parts, red refused rows with the reason, edit and bulk choices', (tester) async {

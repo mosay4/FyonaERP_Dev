@@ -354,6 +354,58 @@ void main() {
       expect(await BackupKeys.unwrapForAccount(Map<String, dynamic>.from(kj['account'] as Map), accountA), isNotNull);
     });
 
+    test('automatic backup on: the newest file in the FYONA folder follows the data; off: it does not', () async {
+      final folder = Directory('${dir.path}/Download/FYONA ERP');
+      DeviceBackupFolder.folderOverride = () async => folder;
+      addTearDown(() => DeviceBackupFolder.folderOverride = null);
+      final s = await spaceWith(accountA);
+      final c = BackupCoordinator(root: () async => Directory('${dir.path}/auto'), deviceEvery: Duration.zero);
+      await c.ensureEnabled(s);
+      await c.configure(s.id, cloud: false);
+      await write(s.dbPath, "INSERT INTO t VALUES (20, 'v', 1)");
+      await c.runNow(s);
+      expect(await c.refreshDeviceFile(s), isNotNull); // first file
+      final first = (await c.deviceFiles(s)).single;
+      // Nothing new: no new file.
+      await c.runNow(s);
+      expect(await c.refreshDeviceFile(s), isNull);
+      // The user enters data: the next schedule tick writes a fresh file
+      // holding it (bigger, newer).
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      for (var i = 0; i < 300; i++) {
+        await write(s.dbPath, "INSERT INTO t VALUES (${100 + i}, '${'x' * 200}', $i)");
+      }
+      await c.runNow(s);
+      final fresh = await c.refreshDeviceFile(s);
+      expect(fresh, isNotNull);
+      expect(fresh!.name, isNot(first.name));
+      expect(fresh.size, greaterThan(first.size));
+      // Automatic backup off: changes do not touch the folder.
+      await c.configure(s.id, enabled: false);
+      await write(s.dbPath, "INSERT INTO t VALUES (999, 'z', 1)");
+      await c.runNow(s);
+      expect(await c.refreshDeviceFile(s), isNull);
+    });
+
+    test('a cloud backup deleted by the user is gone; the next run starts a complete new one', () async {
+      final s = await spaceWith(accountA);
+      final c = BackupCoordinator(remoteFor: (_) => cloud, root: () async => Directory('${dir.path}/del'));
+      await c.ensureEnabled(s);
+      await write(s.dbPath, "INSERT INTO t VALUES (40, 'v', 1)");
+      await c.runNow(s);
+      final set = (await c.listSets(s)).firstWhere((x) => x.cloud);
+      await c.deleteCloudSet(s, set.id);
+      expect(cloud.objects.keys.where((k) => k.contains(set.id)), isEmpty);
+      await write(s.dbPath, "INSERT INTO t VALUES (41, 'v', 2)");
+      await c.runNow(s);
+      final again = (await c.listSets(s)).where((x) => x.cloud).toList();
+      expect(again.single.id, isNot(set.id)); // a new, complete set
+      final copy = await c.rebuild(s, again.single);
+      final db = await openLedgerFile(copy.path, '');
+      expect((await db.rawQuery('SELECT COUNT(*) AS n FROM t WHERE id >= 40')).single['n'], 2);
+      await db.close();
+    });
+
     test('backup kept in the FYONA folder; listed, numbered and restored there', () async {
       final folder = Directory('${dir.path}/Download/FYONA ERP');
       DeviceBackupFolder.folderOverride = () async => folder;

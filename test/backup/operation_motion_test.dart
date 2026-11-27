@@ -72,9 +72,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
     expect(find.text('المساحة غير كافية'), findsOneWidget);
     expect(find.text(AppLocalizations.t('motionDone')), findsNothing);
-    await tester.tap(find.byKey(const Key('motion-mute')));
-    await tester.pump();
-    expect((await SharedPreferences.getInstance()).getBool('operation_motion_muted'), isTrue);
+    expect(find.byKey(const Key('motion-mute')), findsNothing); // sound is always on
     await tester.tap(find.byKey(const Key('motion-close')));
     await tester.pumpAndSettle();
     await run;

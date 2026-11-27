@@ -102,6 +102,7 @@ class BackupCoordinator {
     FlutterSecureStorage? vault,
     Future<Directory> Function()? root,
     this.interval = const Duration(minutes: 2),
+    this.deviceEvery = const Duration(minutes: 5),
     this.spaceCheckEvery = const Duration(seconds: 2),
   })  : _vault = vault ??
             const FlutterSecureStorage(
@@ -112,6 +113,9 @@ class BackupCoordinator {
   final FlutterSecureStorage _vault;
   final Future<Directory> Function() _root;
   final Duration interval;
+
+  /// Shortest gap between two automatic files in the FYONA folder.
+  final Duration deviceEvery;
 
   /// How often free space is watched during a rebuild.
   final Duration spaceCheckEvery;
@@ -225,6 +229,9 @@ class BackupCoordinator {
           extras: space.extras == null ? null : await space.extras!(),
         ));
         m['state'] = r.state;
+        // New data since the file in the FYONA folder was written: the
+        // schedule refreshes that file too (see [start]).
+        if (r.error == null && (r.changes > 0 || r.newSet)) m['device_dirty'] = true;
         if (r.error == null) {
           m['last_ok'] = DateTime.now().millisecondsSinceEpoch;
           m.remove('last_error');
@@ -275,7 +282,8 @@ class BackupCoordinator {
     Future<void> tick() async {
       try {
         for (final s in await spaces()) {
-          await runNow(s);
+          final st = await runNow(s);
+          if (st.enabled) await refreshDeviceFile(s);
         }
       } catch (_) {}
     }
@@ -447,6 +455,23 @@ class BackupCoordinator {
       'FYONA-${space.section == MediaSection.business ? 'Business' : 'Personal'}-'
       '${space.id.codeUnits.fold<int>(7, (a, b) => (a * 31 + b) & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
 
+  /// With automatic backup on, the newest file in the FYONA folder follows
+  /// the data: once something changed and [deviceEvery] passed since the
+  /// last file, a fresh file replaces the oldest (3 are kept). Off: only
+  /// "Back up now" writes a file.
+  Future<DeviceBackupFile?> refreshDeviceFile(BackupSpace space, {DateTime? now}) async {
+    final m = await _load(space.id);
+    if (m['enabled'] != true || m['device_dirty'] != true || m['last_error'] != null) return null;
+    final last = (m['device_at'] as num?)?.toInt() ?? 0;
+    final t = (now ?? DateTime.now()).millisecondsSinceEpoch;
+    if (t - last < deviceEvery.inMilliseconds) return null;
+    try {
+      return await saveToDevice(space);
+    } catch (_) {
+      return null; // no space / folder unavailable: tried again next tick
+    }
+  }
+
   /// Keeps the newest local set as one file in the FYONA folder (it
   /// survives reinstalling the app); the 3 newest files are kept.
   Future<DeviceBackupFile?> saveToDevice(BackupSpace space, {BackupProgress? onProgress}) async {
@@ -464,6 +489,12 @@ class BackupCoordinator {
     } finally {
       if (await tmp.exists()) await tmp.delete();
     }
+    await _lock(space.id).synchronized(() async {
+      final m = await _load(space.id);
+      m['device_at'] = DateTime.now().millisecondsSinceEpoch;
+      m.remove('device_dirty');
+      await _save(space.id, m);
+    });
     final mine = await deviceFiles(space);
     for (final old in mine.skip(3)) {
       try {
@@ -472,6 +503,21 @@ class BackupCoordinator {
     }
     return mine.firstOrNull;
   }
+
+  /// Deletes the backup [id] from FYONA cloud. The set the schedule is
+  /// still writing starts over as a new set on the next run, so the cloud
+  /// never keeps half a set.
+  Future<void> deleteCloudSet(BackupSpace space, String id) => _lock(space.id).synchronized(() async {
+        final remote = remoteFor?.call(space.section);
+        if (remote == null) throw const BackupRestoreFailure('cloud_unavailable');
+        await remote.delete(id);
+        final m = await _load(space.id);
+        final sent = Map<String, dynamic>.from((m['sent'] as Map?) ?? const {})..remove(id);
+        m['sent'] = sent;
+        final state = m['state'];
+        if (state is Map && state['id'] == id) state.remove('id');
+        await _save(space.id, m);
+      });
 
   /// This space's backup files in the FYONA folder, newest first.
   Future<List<DeviceBackupFile>> deviceFiles(BackupSpace space) async => [

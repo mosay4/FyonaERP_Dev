@@ -535,7 +535,19 @@ class _BackupPageState extends ConsumerState<BackupPage> {
         title: l10n.translate(device ? 'bkhFromDevice' : 'bkhFromFyonaServer'),
         icon: device ? Icons.phone_android_rounded : Icons.cloud_rounded,
         items: items,
-        empty: empty);
+        empty: empty,
+        onDelete: (picked) async {
+          final gone = <BackupListItem>[];
+          for (final it in picked) {
+            try {
+              final ok = device
+                  ? await BackupService.deleteBackup((it.payload as BackupFileInfo).uri)
+                  : (await bs.deleteServerBackup('${(it.payload as Map)['id']}')).success;
+              if (ok) gone.add(it);
+            } catch (_) {}
+          }
+          return gone;
+        });
     if (pick == null || !mounted) return;
     if (device) {
       final file = pick.payload as BackupFileInfo;

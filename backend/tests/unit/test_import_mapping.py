@@ -75,3 +75,58 @@ def test_customer_tables_use_the_party_fields():
     got = im.validate_schema({"tables": [{"name": "T_CL", "role": "customers",
                                           "mapping": {"name": "ClName", "phone": "Tel", "balance": "Due"}}]}, tables)
     assert got[0]["mapping"] == {"name": "ClName", "phone": "Tel", "balance": "Due"}
+
+
+def test_new_roles_keep_their_own_fields():
+    tables = [im.TableIn(name="customer_receivables", columns=["customer_id", "amount_due", "paid", "cur"]),
+              im.TableIn(name="product_prices", columns=["product_id", "price_type", "price", "currency"])]
+    got = im.validate_schema({"tables": [
+        {"name": "customer_receivables", "role": "balances", "mapping": {"amount": "amount_due", "paid": "paid"},
+         "link": "customer_id"},
+        {"name": "product_prices", "role": "prices", "mapping": {"price": "price", "kind": "price_type", "bogus": "x"},
+         "link": "product_id"},
+    ]}, tables)
+    assert got[0] == {"name": "customer_receivables", "role": "balances",
+                      "mapping": {"amount": "amount_due", "paid": "paid"}, "link": "customer_id"}
+    assert got[1]["mapping"] == {"price": "price", "kind": "price_type"}
+
+
+def test_agent_ops_are_checked_against_the_file():
+    tables = [im.AgentTableIn(name="products", role="products", columns=["name", "price"]),
+              im.AgentTableIn(name="tbl_x", role="unknown", columns=["a", "b"])]
+    raw = {"reply": "تم", "ops": [
+        {"op": "set_role", "table": "tbl_x", "role": "customers"},
+        {"op": "set_role", "table": "ghost", "role": "customers"},
+        {"op": "set_role", "table": "tbl_x", "role": "made-up"},
+        {"op": "map", "table": "products", "field": "sale_price", "column": "price"},
+        {"op": "map", "table": "products", "field": "sale_price", "column": "nope"},
+        {"op": "set_currency", "currency": "usd"},
+        {"op": "set_currency", "currency": "dollars"},
+        {"op": "set_field", "target": "products", "field": "sale_price", "value": 10, "only_empty": True},
+        {"op": "set_field", "target": "products", "field": "password", "value": "x"},
+        {"op": "adjust", "field": "sale_price", "percent": 10},
+        {"op": "adjust", "field": "sale_price", "percent": 99999},
+        {"op": "reject", "target": "products", "where": {"field": "sale_price", "op": "empty"}},
+        {"op": "reject", "target": "products", "where": {"field": "x", "op": "drop table"}},
+        {"op": "delete_everything"},
+    ]}
+    assert im.validate_ops(raw, tables) == [
+        {"op": "set_role", "table": "tbl_x", "role": "customers"},
+        {"op": "map", "table": "products", "field": "sale_price", "column": "price"},
+        {"op": "set_currency", "currency": "USD"},
+        {"op": "set_field", "target": "products", "field": "sale_price", "value": "10", "only_empty": True},
+        {"op": "adjust", "field": "sale_price", "percent": 10.0},
+        {"op": "reject", "target": "products", "where": {"field": "sale_price", "op": "empty", "value": None}},
+    ]
+
+
+def test_agent_unavailable_is_a_clear_503(monkeypatch):
+    from app.domain.services import ai_router
+
+    class R:
+        api_key = None
+        model = "x"
+
+    monkeypatch.setattr(ai_router, "route", lambda *a, **k: R())
+    r = _client().post("/api/v1/ai/import-agent", json={"message": "زد الأسعار 10%", "tables": []})
+    assert r.status_code == 503

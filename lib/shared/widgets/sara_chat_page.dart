@@ -3483,14 +3483,8 @@ class _SaraChatPageState extends ConsumerState<SaraChatPage> with TickerProvider
           Text('$mins:$secs',
             style: TextStyle(fontFamily: 'Cairo', fontSize: 14, fontWeight: FontWeight.w600, color: _saraText(context))),
           const SizedBox(width: 10),
-          // Recognized words stream here while the user speaks.
-          Expanded(child: (_speech?.partial.value ?? '').isNotEmpty
-              ? Text(_speech!.partial.value,
-                  key: const ValueKey('sara_speech_partial'),
-                  maxLines: 1, overflow: TextOverflow.ellipsis,
-                  textDirection: _isEn() ? ui.TextDirection.ltr : ui.TextDirection.rtl,
-                  style: TextStyle(fontFamily: 'Cairo', fontSize: 13, color: _saraText(context)))
-              : _buildLiveWaveform()),
+          // Only the live waveform: the words heard are never shown.
+          Expanded(child: _buildLiveWaveform()),
           const SizedBox(width: 8),
           GestureDetector(
             onTap: _stopRecording,
@@ -4143,11 +4137,8 @@ class _AudioBubbleState extends State<_AudioBubble> {
                 ],
               ),
             ),
-            if (widget.text.isNotEmpty && widget.text != AppLocalizations.of(context).translate('saraVoiceMessage'))
-              Padding(
-                padding: const EdgeInsets.only(top: 4, right: 4),
-                child: Text(widget.text, style: TextStyle(fontFamily: 'Cairo', fontSize: 12, color: _saraSub(context))),
-              ),
+            // The voice note shows no transcript: Sara understands the voice
+            // and acts on it; what was heard stays internal (history only).
           ],
         ),
       ),

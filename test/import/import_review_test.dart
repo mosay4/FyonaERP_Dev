@@ -29,14 +29,14 @@ void main() {
   });
 
   test('leave out rows, put them back; only accepted rows are imported', () async {
-    final t = await csv('name,balance\nA,1\nB,2\nC,3\n');
+    final t = await csv('name,balance\nAa,1\nBb,2\nCc,3\n');
     final r = await ImportReview.load(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns));
     r.setRejected(r.rows.take(2), true);
     expect(r.acceptedCount, 1);
     expect(r.refusedByReason, {'rejected_by_user': 2});
-    expect(r.toPreview().parties.single.name, 'C');
+    expect(r.toPreview().parties.single.name, 'Cc');
     r.setRejected([r.rows.first], false);
-    expect(r.toPreview().parties.map((e) => e.name), ['A', 'C']);
+    expect(r.toPreview().parties.map((e) => e.name), ['Aa', 'Cc']);
   });
 
   test('a whole column given to another field (Sara was wrong) changes every row', () async {
@@ -52,23 +52,24 @@ void main() {
     for (var i = 0; i < 100000; i++) {
       b.write('منتج رقم $i,62${'$i'.padLeft(10, '0')},${i % 50}.25,${i % 50 + 3}.5,${i % 999},حبة,قسم ${i % 40}\n');
     }
-    b.write('منتج رقم 5,999,1,1,1,حبة,x\n'); // duplicate name
+    b.write('منتج رقم 5,999,1,1,1,حبة,x\n'); // same name, its own barcode: a second product (noted)
     b.write(',1,1,1,1,حبة,x\n'); // no name
     final t = await csv(b.toString());
     final sw = Stopwatch()..start();
     final rss = ProcessInfo.currentRss;
     final r = await ImportReview.load(t, ImportTarget.products, autoMapColumns(ImportTarget.products, t.columns));
     final load = sw.elapsedMilliseconds;
-    expect(r.acceptedCount, 100000);
-    expect(r.refusedByReason, {'duplicate_in_file': 1, 'missing_name': 1});
+    expect(r.acceptedCount, 100001);
+    expect(r.refusedByReason, {'missing_name': 1});
+    expect(r.rows[100000].warnings, contains('same_name'));
     sw.reset();
     r.edit(r.rows.last, 'name', 'منتج جديد');
     final recheck = sw.elapsedMilliseconds;
-    expect(r.acceptedCount, 100001);
+    expect(r.acceptedCount, 100002);
     // ignore: avoid_print
     print('REVIEW_BENCH 100002 rows: load ${load}ms, re-check after an edit ${recheck}ms, '
         'RSS +${((ProcessInfo.currentRss - rss) / 1048576).toStringAsFixed(1)} MB');
     expect(recheck, lessThan(3000));
-    expect(jsonEncode(r.toPreview().products.length), '100001');
+    expect(jsonEncode(r.toPreview().products.length), '100002');
   }, timeout: const Timeout(Duration(minutes: 5)));
 }
