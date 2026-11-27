@@ -31,11 +31,25 @@ class FlakyDestination extends LocalBackupDestination {
 void main() {
   sqfliteFfiInit();
   late Directory dir;
+  final opened = <Database>[];
+  // Every database is closed before its folder is removed (Windows keeps
+  // open files locked).
+  Future<Database> openDb(String path) async {
+    final d = await databaseFactoryFfi.openDatabase(path);
+    opened.add(d);
+    return d;
+  }
   setUp(() async => dir = await Directory.systemTemp.createTemp('fyona-bks-'));
-  tearDown(() => dir.delete(recursive: true));
+  tearDown(() async {
+    for (final d in opened) {
+      if (d.isOpen) await d.close();
+    }
+    opened.clear();
+    await dir.delete(recursive: true);
+  });
 
   Future<Database> seeded(String name) async {
-    final db = await databaseFactoryFfi.openDatabase('${dir.path}/$name');
+    final db = await openDb('${dir.path}/$name');
     await db.execute('CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT, balance_minor INTEGER, image TEXT)');
     for (var i = 1; i <= 200; i++) {
       await db.insert('accounts', {'id': i, 'name': 'حساب $i', 'balance_minor': i * 1000});
@@ -69,7 +83,7 @@ void main() {
     await db.insert('accounts', {'id': 999, 'name': 'جديد', 'balance_minor': 5});
     await svc.run(db, again);
 
-    final target = await databaseFactoryFfi.openDatabase('${dir.path}/restored.db');
+    final target = await openDb('${dir.path}/restored.db');
     final problems = await BackupRestorer(engine: engine).restore(local, again.backupId!, key, target);
     expect(problems, isEmpty);
     expect(await dump(target), await dump(db));
@@ -96,7 +110,7 @@ void main() {
     await db.rawUpdate('UPDATE accounts SET balance_minor = 2 WHERE id = 2');
     final r2 = await svc.run(db, state);
     expect(r2.destinations, ['local', 'r2']);
-    final target = await databaseFactoryFfi.openDatabase('${dir.path}/from-cloud.db');
+    final target = await openDb('${dir.path}/from-cloud.db');
     expect(await BackupRestorer(engine: engine).restore(cloud, state.backupId!, key, target), isEmpty);
     expect(await dump(target), await dump(db));
   });
@@ -124,7 +138,7 @@ void main() {
     final delta = File('${dir.path}/local/${state.backupId}/${state.deltas.single['name']}');
     final bytes = delta.readAsBytesSync()..[40] ^= 1;
     delta.writeAsBytesSync(bytes);
-    final target = await databaseFactoryFfi.openDatabase('${dir.path}/t.db');
+    final target = await openDb('${dir.path}/t.db');
     await expectLater(BackupRestorer(engine: engine).restore(local, state.backupId!, key, target),
         throwsA(isA<BackupTampered>()));
     expect((await target.rawQuery("SELECT COUNT(*) AS n FROM sqlite_schema WHERE type='table'")).first['n'], 0);
@@ -147,7 +161,7 @@ void main() {
     await BackupService(engine: engine, key: key, wrappedKey: const {}, destinations: [local], scope: 's', media: store)
         .run(db, state);
     final newDevice = MediaStore(Directory('${dir.path}/media2'));
-    final target = await databaseFactoryFfi.openDatabase('${dir.path}/e.db');
+    final target = await openDb('${dir.path}/e.db');
     expect(await BackupRestorer(engine: engine).restore(local, state.backupId!, key, target, mediaStore: newDevice), isEmpty);
     expect(newDevice.readSync(ref), img);
   });

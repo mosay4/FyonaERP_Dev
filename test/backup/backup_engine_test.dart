@@ -70,10 +70,23 @@ void main() {
   sqfliteFfiInit();
   final factory = databaseFactoryFfi;
   late Directory dir;
+  final opened = <Database>[];
   setUp(() async => dir = await Directory.systemTemp.createTemp('fyona-bk-'));
-  tearDown(() => dir.delete(recursive: true));
+  // Every database is closed before its folder is removed (Windows keeps
+  // open files locked).
+  tearDown(() async {
+    for (final d in opened) {
+      if (d.isOpen) await d.close();
+    }
+    opened.clear();
+    await dir.delete(recursive: true);
+  });
 
-  Future<Database> open(String name) => factory.openDatabase('${dir.path}/$name');
+  Future<Database> open(String name) async {
+    final d = await factory.openDatabase('${dir.path}/$name');
+    opened.add(d);
+    return d;
+  }
 
   /// Full cycle: snapshot (+ live writes during it), deltas, seal, open, restore.
   Future<({List<String> problems, String live, String restored, int bytes, int ms})> cycle(
@@ -152,7 +165,7 @@ void main() {
   test('every saved operation is captured in the same transaction (crash-safe)', () async {
     final engine = BackupEngine();
     final path = '${dir.path}/crash.db';
-    var db = await factory.openDatabase(path);
+    var db = await open(path.split('/').last);
     await seed(db, products: 10);
     await engine.install(db);
     final before = await engine.lastSeq(db);
@@ -168,7 +181,7 @@ void main() {
       });
     } catch (_) {}
     await db.close(); // "kill" — reopen as after a restart
-    db = await factory.openDatabase(path);
+    db = await open(path.split('/').last);
     await engine.install(db);
     final d = await engine.delta(db, before);
     final ops = d.lines.map((l) => jsonDecode(l) as Map).toList();
@@ -236,7 +249,7 @@ void main() {
     print('CAPTURE_COST per_sale_off=${(off / 1000).round()}us per_sale_on=${(on / 1000).round()}us '
         'overhead=${((on - off) / off * 100).toStringAsFixed(0)}%');
     expect(on / 1000, lessThan(20000), reason: 'a sale must stay well under 20 ms');
-  });
+  }, timeout: const Timeout(Duration(minutes: 5))); // 2000 durable commits (slow CI disks)
 
   test('media references are found for the backup', () async {
     final lines = ['{"row":{"image":"media:${'a' * 64}"}}', '{"x":"media:${'b' * 64} and media:${'a' * 64}"}'];
