@@ -248,7 +248,9 @@ void main() {
     // ignore: avoid_print
     print('CAPTURE_COST per_sale_off=${(off / 1000).round()}us per_sale_on=${(on / 1000).round()}us '
         'overhead=${((on - off) / off * 100).toStringAsFixed(0)}%');
-    expect(on / 1000, lessThan(20000), reason: 'a sale must stay well under 20 ms');
+    // What capture adds, measured on the same disk (a CI disk can need
+    // 40 ms per durable commit with or without capture).
+    expect(on, lessThan(off * 1.5), reason: 'live capture must add less than half to a sale');
   }, timeout: const Timeout(Duration(minutes: 5))); // 2000 durable commits (slow CI disks)
 
   test('media references are found for the backup', () async {
