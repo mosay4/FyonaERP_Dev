@@ -257,11 +257,17 @@ void main() {
     expect((await led.inv.categories()).length, 25);
     expect(led.pictures.length, e.images);
     final rep = await led.report('SAR');
-    expect((rep['customers'] as Map)['total'], _money(e.customerTotalMinor));
-    expect((rep['suppliers'] as Map)['total'], _money(e.supplierTotalMinor));
+    // One customer also owes in USD (imported as its own opening debt): the
+    // report never converts without a rate, so SAR is read per currency.
+    String? sar(Object? m) => (m as Map)['total'] as String? ??
+        [for (final x in m['per_currency'] as List) if ((x as Map)['currency'] == 'SAR') '${x['total']}'].firstOrNull;
+    expect(sar(rep['customers']), _money(e.customerTotalMinor));
+    expect(sar(rep['suppliers']), _money(e.supplierTotalMinor));
     final g = led.grant;
     final accounts = await led.store.withLedger(g, () => led.scope, (l) => l.accounts(g));
-    expect(accounts.length, e.accountsOk);
+    // The 3 cash boxes are one «كاش» account (their balances deposited).
+    expect(accounts.length, e.accountsOk - 3 + 1);
+    expect(accounts.where((x) => x['bank_name'] == 'كاش').length, 1);
     expect(accounts.where((x) => x['currency'] == 'SAR').fold<int>(0, (a, x) => a + (x['balance_minor'] as int)), e.accountTotalMinor);
     final gs = BusinessLedgerAccess(led.sibling, BusinessLedgerAction.values.toSet());
     expect(await led.store.withLedger(gs, () => led.sibling, (l) => l.accounts(gs)), isEmpty);

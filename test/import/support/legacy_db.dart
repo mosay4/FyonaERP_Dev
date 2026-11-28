@@ -108,8 +108,12 @@ Future<LegacyExpect> buildLegacyDb(String path, {int products = 5500, int seed =
     b.insert('tbl_suppliers', {'SuppID': s, 'SuppName': 'مورد $s', 'Phone': '01${'$s'.padLeft(8, '0')}', 'Balance': cents / 100});
   }
   for (var a = 1; a <= 5; a++) {
-    e.accounts++;
-    e.accountTotalMinor += a * 100000;
+    // FYONA keeps one account per bank and currency (as its banks screen):
+    // the first of each bank is imported, the others are refused.
+    if (a <= 2) {
+      e.accounts++;
+      e.accountTotalMinor += a * 100000;
+    }
     b.insert('tbl_bank_accounts', {'AccID': a, 'AccountName': 'حساب $a', 'BankName': 'بنك ${a % 2 == 0 ? 'الراجحي' : 'الأهلي'}',
         'AccountNumber': 'SA$a${'0' * 10}', 'Balance': a * 1000.0});
   }
