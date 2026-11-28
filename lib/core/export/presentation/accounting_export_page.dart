@@ -102,7 +102,8 @@ class _AccountingExportPageState extends ConsumerState<AccountingExportPage> {
     });
     try {
       final base = await getTemporaryDirectory();
-      final name = 'FYONA-${_t('axFile_${_kind.name}')}-${_day(_cutoff)}.zip';
+      // One Excel workbook: opens in any accounting program (not a ZIP).
+      final name = 'FYONA-${_t('axFile_${_kind.name}')}-${_day(_cutoff)}.xlsx';
       final r = await exportBusinessAccounting(
         store: ref.read(directoryPilotStoreProvider),
         access: scope,
@@ -117,10 +118,12 @@ class _AccountingExportPageState extends ConsumerState<AccountingExportPage> {
       );
       if (!mounted) return;
       setState(() {
-        _done = r.zip.path;
+        _done = r.file.path;
         _warnings = r.result.warnings.length;
       });
-      await Share.shareXFiles([XFile(r.zip.path, mimeType: 'application/zip')], text: name);
+      await Share.shareXFiles(
+          [XFile(r.file.path, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')],
+          text: name);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(

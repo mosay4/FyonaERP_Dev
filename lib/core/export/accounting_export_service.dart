@@ -6,12 +6,13 @@ import '../../features/core_business/data/local_directory/directory_scope.dart';
 import '../media/media_store.dart';
 import 'accounting_export_writer.dart';
 
-/// Result of an accounting export: the ZIP and what it proved.
-typedef AccountingExportFile = ({File zip, BusinessExportResult result});
+/// Result of an accounting export: the Excel workbook and what it proved.
+typedef AccountingExportFile = ({File file, BusinessExportResult result});
 
-/// Exports one Business branch's accounting at a cut-off day into a ZIP
-/// (Excel + CSV + photos + manifest). Read-only; owner only (the export
-/// holds every balance of the branch).
+/// Exports one Business branch's accounting at a cut-off day into ONE
+/// Excel workbook (.xlsx): a sheet per table, the product pictures inside
+/// the stock sheet, and a «File details» sheet. Read-only; owner only (the
+/// export holds every balance of the branch).
 Future<AccountingExportFile> exportBusinessAccounting({
   required DirectoryPilotStore store,
   required DirectoryAccess access,
@@ -50,19 +51,26 @@ Future<AccountingExportFile> exportBusinessAccounting({
         (l) => l.exportAccounting(grant, cutoff: cutoff, emit: emit, imageName: name));
     final files = <String, File>{};
     var missing = 0;
+    var unsupported = 0;
     for (final e in result.images.entries) {
       final f = media?.fileOf(e.key);
       if (e.value.isEmpty || f == null) {
         if (images) missing++;
         continue;
       }
+      // Excel shows PNG, JPEG and GIF pictures only.
+      if (!const {'png', 'jpg', 'gif'}.contains(_ext(f))) {
+        unsupported++;
+        continue;
+      }
       files[e.value] = f;
     }
     if (missing > 0) result.warnings.add('images_not_on_device: $missing');
+    if (unsupported > 0) result.warnings.add('images_not_shown_in_excel: $unsupported');
     await into.parent.create(recursive: true);
     if (await into.exists()) await into.delete();
-    final zip = await writer.finish(into, {
-      'format': 'fyona.accounting-export.v1',
+    final file = await writer.finish(into, {
+      'format': 'fyona.accounting-export.v2 (xlsx)',
       'app_version': appVersion,
       'generated_at': DateTime.now().toUtc().toIso8601String(),
       'scope': {'organization': access.workspace.organizationId, 'branch': access.branchId},
@@ -77,7 +85,7 @@ Future<AccountingExportFile> exportBusinessAccounting({
         'warnings': 'documents edited, deleted or cancelled after the cut-off (today\'s figures kept)',
       },
     }, files: files);
-    return (zip: zip, result: result);
+    return (file: file, result: result);
   } finally {
     if (await work.exists()) await work.delete(recursive: true);
   }

@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
-import 'package:csv/csv.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fyona_flutter/core/backup/backup_worker.dart';
@@ -32,30 +31,75 @@ Map<String, dynamic> _entitlement() => {
 
 String _day(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-/// Reads an export ZIP: manifest, CSV tables (as maps by header key order),
-/// XLSX parts, other files.
+/// Reads an export workbook (.xlsx): every sheet's cells as text, the
+/// «File details» sheet as the manifest, the pictures and their places.
 class _Export {
-  _Export(File zip) {
-    final archive = ZipDecoder().decodeBytes(zip.readAsBytesSync());
+  _Export(this.file) {
+    final archive = ZipDecoder().decodeBytes(file.readAsBytesSync());
     for (final f in archive.files) {
       if (f.isFile) files[f.name] = Uint8List.fromList(f.content as List<int>);
     }
-    manifest = jsonDecode(utf8.decode(files['manifest.json']!)) as Map<String, dynamic>;
+    final wb = XmlDocument.parse(utf8.decode(files['xl/workbook.xml']!));
+    final count = wb.findAllElements('sheet').length;
+    for (var i = 1; i <= count; i++) {
+      _sheets.add(_cells(XmlDocument.parse(utf8.decode(files['xl/worksheets/sheet$i.xml']!))));
+    }
+    for (final r in _sheets.last) {
+      final v = r[1];
+      Object? parsed = v;
+      try {
+        parsed = jsonDecode(v);
+      } catch (_) {}
+      manifest[r[0]] = parsed;
+    }
   }
+  final File file;
   final files = <String, Uint8List>{};
-  late final Map<String, dynamic> manifest;
+  final _sheets = <List<List<String>>>[];
+  final manifest = <String, dynamic>{};
 
-  List<List<dynamic>> csv(String sheet) {
-    final b = files['csv/$sheet.csv']!;
-    expect(b.sublist(0, 3), [0xEF, 0xBB, 0xBF], reason: 'UTF-8 BOM');
-    return const CsvDecoder(skipEmptyLines: true).convert(utf8.decode(b.sublist(3)));
-  }
+  static List<List<String>> _cells(XmlDocument doc) => [
+        for (final row in doc.findAllElements('row'))
+          [
+            for (final c in row.findElements('c'))
+              c.getAttribute('t') == 'inlineStr'
+                  ? c.findAllElements('t').map((t) => t.innerText).join()
+                  : c.findElements('v').map((v) => v.innerText).join(),
+          ],
+      ];
+
+  /// The sheet of [key] with its header row.
+  List<List<String>> table(String key) => _sheets[(manifest['parts'] as List).indexOf(key)];
 
   /// Rows of [sheet] as {column key: value}.
   List<Map<String, String>> rows(String sheet) {
-    final t = csv(sheet);
     final keys = businessExportSheets[sheet]!;
-    return [for (final r in t.skip(1)) {for (var i = 0; i < keys.length; i++) keys[i]: '${r[i]}'}];
+    return [
+      for (final r in table(sheet).skip(1)) {for (var i = 0; i < keys.length; i++) keys[i]: i < r.length ? r[i] : ''},
+    ];
+  }
+
+  /// The pictures of [sheet]: (row, column) → the picture's bytes.
+  Map<(int, int), Uint8List> pictures(String sheet) {
+    final n = (manifest['parts'] as List).indexOf(sheet) + 1;
+    final rels = files['xl/worksheets/_rels/sheet$n.xml.rels'];
+    if (rels == null) return const {};
+    final target = XmlDocument.parse(utf8.decode(rels)).findAllElements('Relationship').single.getAttribute('Target')!;
+    final drawing = 'xl/drawings/${target.split('/').last}';
+    final media = {
+      for (final r in XmlDocument.parse(utf8.decode(files['xl/drawings/_rels/${drawing.split('/').last}.rels']!))
+          .findAllElements('Relationship'))
+        r.getAttribute('Id')!: files['xl/media/${r.getAttribute('Target')!.split('/').last}']!,
+    };
+    final out = <(int, int), Uint8List>{};
+    for (final a in XmlDocument.parse(utf8.decode(files[drawing]!)).findAllElements('xdr:oneCellAnchor')) {
+      final from = a.findElements('xdr:from').single;
+      final row = int.parse(from.findElements('xdr:row').single.innerText);
+      final col = int.parse(from.findElements('xdr:col').single.innerText);
+      final id = a.findAllElements('a:blip').single.getAttribute('r:embed')!;
+      out[(row, col)] = media[id]!;
+    }
+    return out;
   }
 }
 
@@ -174,9 +218,9 @@ void main() {
 
     Future<_Export> export(DateTime cutoff, {bool arabic = true}) async {
       final r = await exportBusinessAccounting(store: store, access: a, cutoff: cutoff, arabic: arabic,
-          work: Directory('${root.path}/work'), into: File('${root.path}/out-${_day(cutoff)}.zip'), media: media,
+          work: Directory('${root.path}/work'), into: File('${root.path}/out-${_day(cutoff)}.xlsx'), media: media,
           appVersion: 'test');
-      return _Export(r.zip);
+      return _Export(r.file);
     }
 
     // ---- Today: identical to what the app itself reports.
@@ -221,41 +265,45 @@ void main() {
     expect(past.manifest['controls']['receivable'], {'SAR': '180.00'});
     expect(past.manifest['controls']['bank'], {'SAR': '1020.00'});
 
-    // ---- Branch isolation, file integrity, safe cells, photo, both formats.
+    // ---- One Excel file: branch isolation, text never a formula, the
+    // picture inside its row, both languages, well-formed parts.
+    expect(past.file.path, endsWith('.xlsx'));
+    // FYONA_EXPORT_SAMPLE=path: keep a copy to open in other programs.
+    final keep = Platform.environment['FYONA_EXPORT_SAMPLE'];
+    if (keep != null) past.file.copySync(keep);
+    expect(past.files.keys.where((k) => k.startsWith('csv/') || k == 'manifest.json'), isEmpty);
     for (final f in past.files.keys) {
       expect(utf8.decode(past.files[f]!, allowMalformed: true).contains('فرع آخر'), isFalse, reason: f);
     }
-    for (final f in (past.manifest['files'] as List).cast<Map>()) {
-      expect(sha256.convert(past.files[f['path']]!).toString(), f['sha256'], reason: '${f['path']}');
-    }
     final names = today.rows('opening_parties').map((r) => r['name']).toList();
-    expect(names, contains('\'=HYPERLINK("http://x")'), reason: 'formula neutralised in CSV');
+    expect(names, contains('=HYPERLINK("http://x")'), reason: 'kept as text');
     expect(names, contains('عميل، "ب"'));
-    final img = past.rows('opening_stock').firstWhere((r) => r['name'] == 'منتج س')['image_file']!;
-    expect(img, endsWith('.jpg'));
-    expect(sha256.convert(past.files[img]!).toString(), MediaStore.shaOf(photo));
-    final xlsx = ZipDecoder().decodeBytes(past.files['accounting.xlsx']!);
-    final sheetXml = utf8.decode(xlsx.findFile('xl/worksheets/sheet2.xml')!.content as List<int>);
-    expect(sheetXml, contains('<t xml:space="preserve">=HYPERLINK(&quot;http://x&quot;)</t>'),
+    final partiesXml = utf8.decode(past.files['xl/worksheets/sheet${(past.manifest['parts'] as List).indexOf('opening_parties') + 1}.xml']!);
+    expect(partiesXml, contains('<t xml:space="preserve">=HYPERLINK(&quot;http://x&quot;)</t>'),
         reason: 'stored as TEXT (inline string), never as a formula');
-    expect(sheetXml, isNot(contains('<f>')));
-    expect(utf8.decode(xlsx.findFile('xl/workbook.xml')!.content as List<int>), contains('أرصدة العملاء والموردين'));
+    expect(partiesXml, isNot(contains('<f>')));
+    final stock = past.rows('opening_stock');
+    final row = stock.indexWhere((r) => r['name'] == 'منتج س') + 1; // after the header
+    final col = businessExportSheets['opening_stock']!.indexOf('image_file');
+    final pics = past.pictures('opening_stock');
+    expect(pics.keys, contains((row, col)), reason: 'the photo sits in its product row');
+    expect(sha256.convert(pics[(row, col)]!).toString(), MediaStore.shaOf(photo));
+    expect(utf8.decode(past.files['xl/workbook.xml']!), contains('أرصدة العملاء والموردين'));
+    expect(utf8.decode(past.files['xl/workbook.xml']!), contains('معلومات الملف'));
     final en = await export(d2, arabic: false);
-    expect(en.csv('opening_accounts').first.first, 'Account ID');
+    expect(en.table('opening_accounts').first.first, 'Account ID');
+    expect(utf8.decode(en.files['xl/workbook.xml']!), contains('File details'));
 
     // An employee cannot export the whole branch.
     await expectLater(exportBusinessAccounting(store: store, access: branch(a.branchId, member: true), cutoff: now,
-        arabic: true, work: Directory('${root.path}/w2'), into: File('${root.path}/no.zip')), throwsA(isA<DirectoryAccessDenied>()));
+        arabic: true, work: Directory('${root.path}/w2'), into: File('${root.path}/no.xlsx')), throwsA(isA<DirectoryAccessDenied>()));
     // Every part of the workbook is well-formed XML; every sheet has the
-    // header + exactly the rows of its CSV twin.
-    final sheetNames = {for (final f in xlsx.files) f.name};
-    for (final part in sheetNames.where((n) => n.endsWith('.xml') || n.endsWith('.rels'))) {
-      XmlDocument.parse(utf8.decode(xlsx.findFile(part)!.content as List<int>));
+    // header + exactly the rows the export counted.
+    for (final part in past.files.keys.where((n) => n.endsWith('.xml') || n.endsWith('.rels'))) {
+      XmlDocument.parse(utf8.decode(past.files[part]!));
     }
-    final order = businessExportSheets.keys.toList();
-    for (var i = 0; i < order.length; i++) {
-      final doc = XmlDocument.parse(utf8.decode(xlsx.findFile('xl/worksheets/sheet${i + 1}.xml')!.content as List<int>));
-      expect(doc.findAllElements('row').length, past.csv(order[i]).length, reason: order[i]);
+    for (final key in (past.manifest['parts'] as List).cast<String>()) {
+      expect(past.table(key).length, (past.manifest['sheets'] as Map)[key] + 1, reason: key);
     }
   });
 
@@ -313,16 +361,16 @@ void main() {
       if (ProcessInfo.currentRss > peak) peak = ProcessInfo.currentRss;
     });
     final r = await exportBusinessAccounting(store: store, access: a, cutoff: DateTime.now(), arabic: true,
-        work: Directory('${root.path}/work'), into: File('${root.path}/big.zip'), media: media);
+        work: Directory('${root.path}/work'), into: File('${root.path}/big.xlsx'), media: media);
     await timer.cancel();
     final ms = sw.elapsedMilliseconds;
     expect(r.result.rows['documents'], count);
     expect(r.result.controls['receivable']!['SAR'], BigInt.from(expected));
-    final e = _Export(r.zip);
+    final e = _Export(r.file);
     expect(e.manifest['sheets']['documents'], count);
     // ignore: avoid_print
     print('EXPORT_BENCH invoices=$count lines=${r.result.rows['document_lines']} payments=${r.result.rows['payments']} '
-        'ms=$ms zip=${(r.zip.lengthSync() / 1048576).toStringAsFixed(1)}MB rssPeak=+${((peak - base) / 1048576).toStringAsFixed(1)}MB');
+        'ms=$ms xlsx=${(r.file.lengthSync() / 1048576).toStringAsFixed(1)}MB rssPeak=+${((peak - base) / 1048576).toStringAsFixed(1)}MB');
   }, timeout: const Timeout(Duration(minutes: 20)));
 }
 
