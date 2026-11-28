@@ -144,7 +144,7 @@ const _nameHints = <TableRole, List<String>>{
   TableRole.images: ['image', 'photo', 'picture', 'صور', 'صوره'],
   TableRole.categories: ['categor', 'group', 'family', 'تصنيف', 'تصنيفات', 'فئ', 'مجموع'],
   TableRole.prices: ['price', 'pricing', 'tariff', 'سعر', 'اسعار', 'تسعير'],
-  TableRole.stock: ['stock', 'quant', 'inventory', 'on hand', 'warehouse stock', 'مخزون', 'كميات', 'ارصده المخزن', 'المستودع'],
+  TableRole.stock: ['stock', 'quant', 'inventory', 'on hand', 'warehouse stock', 'مخزون', 'كميات', 'ارصده المخزن', 'المستودع', 'مخازن'],
   TableRole.balances: ['receivable', 'payable', 'outstanding', 'opening balance', 'balances', 'aging', 'ذمم', 'مديوني', 'مستحقات', 'ارصده', 'ارصده افتتاحيه', 'ديون'],
   TableRole.branches: ['branch', 'فرع', 'فروع'],
   TableRole.currencies: ['currenc', 'عملات', 'العمله'],
@@ -624,9 +624,20 @@ Future<ProductParts> joinProductParts(List<TableAnalysis> all, ImportTable produ
     final idx = {for (final e in a.mapping.entries) e.key: a.table.columns.indexOf(e.value)};
     final keys = (await _values(products, link.parentColumn)).toSet();
     if (a.role == TableRole.stock) parts.hasStock = true;
-    final ownKey = a.role == TableRole.units
+    var ownKey = a.role == TableRole.units
         ? a.table.columns.indexWhere((c) => importIsKey(c) && _ownKey(c, a.table.name) && c != link.column)
         : -1;
+    if (a.role == TableRole.units && ownKey < 0) {
+      // "رقم الوحدة": the key column (not the product link) whose values
+      // are all different is the unit's own number.
+      for (final c in a.table.columns.where((c) => importIsKey(c) && c != link.column)) {
+        final v = await _values(a.table, c);
+        if (v.isNotEmpty && v.toSet().length == v.length) {
+          ownKey = a.table.columns.indexOf(c);
+          break;
+        }
+      }
+    }
     final ui = a.role == TableRole.barcodes || a.role == TableRole.prices ? await unitColumn(a, link.column) : -1;
     await for (final r in a.table.rows()) {
       final raw = fk < r.length ? r[fk]?.trim() : null;

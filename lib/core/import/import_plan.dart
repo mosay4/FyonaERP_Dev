@@ -41,7 +41,7 @@ const importFields = <ImportTarget, List<ImportField>>{
     ImportField('notes', ['ملاحظات', 'ملاحظة', 'notes', 'note', 'remarks']),
   ],
   ImportTarget.accounts: [
-    ImportField('name', ['اسم الحساب', 'الحساب', 'اسم الصندوق', 'الصندوق', 'صندوق', 'اسم الخزينة', 'account name', 'account', 'cash box', 'box', 'name'], required: true),
+    ImportField('name', ['اسم الحساب', 'الحساب', 'اسم الصندوق', 'الصندوق', 'صندوق', 'اسم الخزينة', 'الاسم', 'account name', 'account', 'cash box', 'box', 'name'], required: true),
     ImportField('bank', ['البنك', 'اسم البنك', 'bank', 'bank name']),
     ImportField('number', ['رقم الحساب', 'account number', 'account no', 'number', 'acc no']),
     ImportField('iban', ['الايبان', 'ايبان', 'iban']),

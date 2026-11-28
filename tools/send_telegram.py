@@ -18,8 +18,8 @@ def send(path: Path, caption: str) -> None:
     chat_id = str(credentials["chat_id"])
     if not re.fullmatch(r"\d+:[A-Za-z0-9_-]+", token) or not re.fullmatch(r"-?\d+", chat_id):
         raise ValueError("Invalid Telegram credentials format.")
-    if path.name.startswith(".") or path.suffix.lower() not in {".txt", ".apk"}:
-        raise ValueError("Only .txt reports and .apk builds are accepted.")
+    if path.name.startswith(".") or path.suffix.lower() not in {".txt", ".apk", ".db", ".zip"}:
+        raise ValueError("Only .txt reports, .apk builds and .db/.zip test files are accepted.")
     if path.stat().st_size > 50_000_000:
         raise ValueError("File exceeds the 50 MB Telegram Bot API upload limit.")
     filename = re.sub(r"[^a-zA-Z0-9_.-]", "_", path.name)
