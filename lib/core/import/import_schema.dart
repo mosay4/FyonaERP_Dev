@@ -431,6 +431,9 @@ Future<void> linkImportSchema(List<TableAnalysis> all, {ImportContext? context})
       }
     }
   }
+  for (final c in cats) {
+    if (c.link == null) c.reason = 'no_link';
+  }
   final ctx = context;
   if (ctx == null) return;
   // Branch names: a branches table (id → name) and every branch value.

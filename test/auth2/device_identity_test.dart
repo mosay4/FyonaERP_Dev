@@ -227,6 +227,40 @@ void main() {
       expect(await storage.getRefreshToken(), isNull);
     });
 
+    test('a password-login session (not bound to this key) is renewed, never signed out', () async {
+      var expired = 0;
+      SessionNotifier.onExpired = () => expired++;
+      final adapter = _Adapter((o) {
+        if (o.path == '/auth2/device/nonce') return _json(200, {'nonce': 'N-9'});
+        if (o.path == '/auth2/refresh') {
+          return _json(401, {'detail': {'code': 'device_not_trusted'}});
+        }
+        if (o.path == '/auth/refresh') return _json(200, {'access_token': 'renewed', 'refresh_token': 'refresh-3'});
+        if (o.headers['Authorization'] == 'Bearer renewed') return _json(200, {'ok': 2});
+        return _json(401, {'detail': 'expired'});
+      });
+      final r = await makeDio(adapter).get('/me');
+      expect(r.data, {'ok': 2});
+      expect(expired, 0);
+      expect(await storage.getRefreshToken(), 'refresh-3');
+    });
+
+    test('the owner ended the session: signed out (and requests waiting for it complete)', () async {
+      var expired = 0;
+      SessionNotifier.onExpired = () => expired++;
+      final adapter = _Adapter((o) {
+        if (o.path == '/auth2/device/nonce') return _json(200, {'nonce': 'N-10'});
+        if (o.path == '/auth2/refresh') return _json(401, {'detail': {'code': 'verification_expired'}});
+        return _json(401, {'detail': 'expired'});
+      });
+      final dio = makeDio(adapter);
+      final a = dio.get('/a'), b = dio.get('/b');
+      await expectLater(a, throwsA(isA<DioException>()));
+      await expectLater(b.timeout(const Duration(seconds: 5)), throwsA(isA<DioException>()));
+      expect(expired, 1);
+      expect(await storage.getRefreshToken(), isNull);
+    });
+
     test('an old server without auth2 falls back to /auth/refresh', () async {
       final adapter = _Adapter((o) {
         if (o.path == '/auth2/device/nonce') return _json(404, {'detail': 'Not Found'});

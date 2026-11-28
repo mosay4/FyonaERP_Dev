@@ -19,6 +19,7 @@ import '../../../features/inventory/presentation/providers/inventory_providers.d
 import '../../backup/presentation/operation_motion.dart';
 import '../../di/providers.dart';
 import '../../localization/app_localizations.dart';
+import '../../services/currency/business_currency_scope.dart';
 import '../../media/media_store.dart';
 import '../../theme/app_colors.dart';
 import '../business_import.dart';
@@ -30,6 +31,12 @@ import '../sara_mapping.dart';
 
 String _t(String key, [Map<String, dynamic>? p]) => AppLocalizations.t(key, p);
 const _font = 'Cairo';
+
+/// A currency's name when the app knows it (else just its code is shown).
+String _curName(String code) {
+  final n = _t('cur_$code');
+  return n == 'cur_$code' ? '' : n;
+}
 const _red = Color(0xFFD32F2F);
 const _yellow = Color(0xFFE09A00);
 const _green = Color(0xFF2E7D32);
@@ -146,6 +153,7 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
   List<Map<String, Object?>> _batches = const [];
   ImportRegistry? _registry;
   final _chat = <({bool me, String text, List<String> done})>[];
+  List<String> _enabled = const [];
 
   DirectoryAccess? get _scope {
     final s = ref.read(businessLocalLedgerScopeProvider);
@@ -254,13 +262,19 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
         try {
           existing = await _importer(await _reg()).existingNames();
         } catch (_) {}
+        // Amounts the file does not name a currency for: the business's own
+        // (home) currency by default; one tap changes it.
+        try {
+          _enabled = (await ref.read(bizEnabledCurrenciesProvider.future)).toList();
+        } catch (_) {}
+        final home = _enabled.where((c) => c != 'USD').firstOrNull ?? _enabled.firstOrNull ?? 'SAR';
         final saraOk = <bool>[true];
         Future<ImportSession> work(void Function(String s, double d) stage) async {
           stage(_t('si2StageRead'), .05);
           final tables = await readImportFile(f);
           final images = await readImportImages(f);
           stage(_t('si2StageUnderstand', {'n': '${tables.length}'}), .3);
-          final s = await ImportSession.analyze(tables, images: images, currentBranchName: BranchScope.branchName);
+          final s = await ImportSession.analyze(tables, images: images, currency: home, currentBranchName: BranchScope.branchName);
           s.existing = existing;
           stage(_t('si2StageLink'), .55);
           final unclear = s.forSara;
@@ -341,7 +355,7 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
       context: context,
       backgroundColor: AppColors.background,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
-      builder: (_) => _CurrencyPicker(current: s.currency),
+      builder: (_) => _CurrencyPicker(current: s.currency, enabled: _enabled),
     );
     if (code != null) setState(() => s.setCurrency(code));
   }
@@ -512,7 +526,9 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
       backgroundColor: AppColors.background,
       body: _scope == null
           ? const SizedBox.shrink()
-          : Column(children: [
+          : DefaultTextStyle.merge(
+              style: TextStyle(color: AppColors.textPrimary),
+              child: Column(children: [
               _Header(
                 step: _step,
                 onClose: () => Navigator.of(context).maybePop(),
@@ -542,7 +558,7 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
                   ),
                 ),
               ),
-            ]),
+            ])),
     );
   }
 
@@ -621,7 +637,7 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
                 key: const Key('si-currency'),
                 icon: Icons.payments_rounded,
                 label: _t('si2Currency'),
-                value: '${_t('cur_${s.currency}')} (${s.currency})',
+                value: _curName(s.currency).isEmpty ? s.currency : '${_curName(s.currency)} (${s.currency})',
                 onTap: _busy ? null : _pickCurrency,
               ),
             ),
@@ -1322,8 +1338,11 @@ class _RolePicker extends StatelessWidget {
 const importCurrencies = ['SAR', 'YER', 'USD', 'AED', 'KWD', 'QAR', 'OMR', 'BHD', 'EGP', 'JOD', 'IQD', 'EUR', 'TRY', 'GBP'];
 
 class _CurrencyPicker extends StatelessWidget {
-  const _CurrencyPicker({required this.current});
+  const _CurrencyPicker({required this.current, this.enabled = const []});
   final String current;
+
+  /// The business's own currencies (shown first).
+  final List<String> enabled;
   @override
   Widget build(BuildContext context) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1339,7 +1358,7 @@ class _CurrencyPicker extends StatelessWidget {
               crossAxisSpacing: 8,
               childAspectRatio: 1.7,
               children: [
-                for (final c in importCurrencies)
+                for (final c in {...enabled.where(RegExp(r'^[A-Z]{3}$').hasMatch), ...importCurrencies})
                   Material(
                     color: c == current ? AppColors.primary : AppColors.surface,
                     borderRadius: BorderRadius.circular(14),
@@ -1356,7 +1375,7 @@ class _CurrencyPicker extends StatelessWidget {
                           Text(c,
                               style: TextStyle(
                                   fontFamily: _font, fontSize: 15, fontWeight: FontWeight.w800, color: c == current ? Colors.white : null)),
-                          Text(_t('cur_$c'),
+                          Text(_curName(c),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(

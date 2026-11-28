@@ -376,7 +376,7 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
             Expanded(
               child: FeatureButton(
                 key: const Key('bkh-export'),
-                title: _t('axTitle'),
+                title: _t('bkhExportBtn'),
                 icon: Icons.ios_share_rounded,
                 colors: const [Color(0xFF0F766E), Color(0xFF14B8A6)],
                 onTap: _busy ? null : _openExport,

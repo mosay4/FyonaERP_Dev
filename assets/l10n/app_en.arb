@@ -6876,5 +6876,6 @@
   "siPoint1": "Recognises products, units, prices, pictures, customers, suppliers and balances automatically",
   "siPoint2": "Review and edit everything before saving, or ask Sara",
   "siPoint3": "Old invoices and unsupported data are never saved",
-  "siStart": "Start import"
+  "siStart": "Start import",
+  "bkhExportBtn": "Export data"
 }

@@ -254,6 +254,8 @@ jobs:
           backend/tests/unit/test_chat_cloud_media.py
           backend/tests/unit/test_import_mapping.py
           backend/tests/unit/test_backup_account_keys.py
+          backend/tests/unit/test_auth2_flows.py
+          backend/tests/unit/test_sessions.py
           backend/tests/unit/test_qa_business_ledger.py
           backend/tests/unit/test_qa_business_party_sharing.py
           backend/tests/unit/test_sara_tool_contract.py
