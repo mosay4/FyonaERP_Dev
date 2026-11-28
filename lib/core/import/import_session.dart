@@ -38,9 +38,13 @@ class ImportSession {
     final s = ImportSession(a, ctx, currency: currency, images: images);
     // The file's branch named like the FYONA branch is chosen first.
     final choices = s.branchChoices;
-    if (currentBranchName != null && choices.length > 1) {
-      final want = importFold(currentBranchName);
-      s.sourceBranch = choices.keys.where((b) => importFold(b) == want).firstOrNull;
+    if (choices.length > 1) {
+      // The file's branch named like this FYONA branch, else its main
+      // branch (one FYONA branch gets one branch's stock and cards; the
+      // user can pick another, or all).
+      final want = currentBranchName == null ? null : importFold(currentBranchName);
+      s.sourceBranch = choices.keys.where((b) => want != null && importFold(b) == want).firstOrNull ??
+          (choices.containsKey(ctx.mainBranch) ? ctx.mainBranch : null);
     }
     return s;
   }
@@ -97,9 +101,11 @@ class ImportSession {
     for (final a in importable) {
       if (reviews.containsKey(a)) continue;
       final target = a.role.target!;
-      final parts = a.role == TableRole.products ? await joinProductParts(analysis, a.table, branchKeys: keys) : null;
+      final parts = a.role == TableRole.products
+          ? await joinProductParts(analysis, a.table, branchKeys: keys, currency: currency, currencyCodes: context.currencyCodes)
+          : null;
       final party = target == ImportTarget.parties && analysis.any((x) => x.role.partyPart && x.link?.parent == a.table)
-          ? await joinPartyParts(analysis, a.table, currencyCodes: context.currencyCodes)
+          ? await joinPartyParts(analysis, a.table, currencyCodes: context.currencyCodes, branchKeys: keys)
           : null;
       reviews[a] = await ImportReview.load(a.table, target, a.mapping,
           defaultKind: a.role == TableRole.suppliers ? 'supplier' : 'customer',

@@ -123,6 +123,7 @@ const partFields = <TableRole, List<ImportField>>{
     ImportField('amount', ['المبلغ المستحق', 'المستحق', 'المتبقي', 'الرصيد', 'المبلغ', 'amount due', 'balance due', 'outstanding', 'remaining', 'open balance', 'balance', 'due', 'amount'], required: true),
     ImportField('paid', ['المدفوع', 'paid', 'paid amount', 'amount paid']),
     ImportField('currency', ['العملة', 'عملة', 'currency', 'cur']),
+    ImportField('branch', ['الفرع', 'فرع', 'branch']),
   ],
   TableRole.branches: [
     ImportField('name', ['اسم الفرع', 'الفرع', 'الاسم', 'branch name', 'name ar', 'name', 'title'], required: true),
@@ -150,7 +151,7 @@ const _nameHints = <TableRole, List<String>>{
   TableRole.products: ['product', 'item', 'stock', 'inventory', 'goods', 'article', 'منتج', 'منتجات', 'صنف', 'اصناف', 'مواد', 'مخزون', 'بضاع'],
   TableRole.accounts: ['account', 'bank', 'cash', 'wallet', 'treasury', 'حساب', 'حسابات', 'بنك', 'بنوك', 'صندوق', 'صناديق', 'خزين', 'خزنه'],
   TableRole.history: ['invoice', 'sale', 'purchase', 'order', 'payment', 'receipt', 'voucher', 'transaction', 'journal', 'return',
-      'movement', 'entry', 'entries', 'ledger', 'فاتور', 'فواتير', 'مبيع', 'مشتري', 'سند', 'سندات', 'دفع', 'مدفوع', 'قبض', 'حرك', 'مرتجع', 'قيود'],
+      'movement', 'entry', 'entries', 'ledger', 'expense', 'income', 'مصروف', 'مصاريف', 'ايراد', 'فاتور', 'فواتير', 'مبيع', 'مشتري', 'سند', 'سندات', 'دفع', 'مدفوع', 'قبض', 'حرك', 'مرتجع', 'قيود'],
   TableRole.unsupported: ['employee', 'staff', 'salary', 'payroll', 'attendance', 'leave', 'asset', 'user', 'role', 'permission',
       'setting', 'config', 'log', 'session', 'task', 'project', 'contract', 'warranty', 'subscription', 'plan', 'maintenance',
       'work order', 'equipment', 'vehicle', 'ticket', 'appointment', 'booking', 'reservation', 'audit', 'notification', 'message',
@@ -165,6 +166,11 @@ const _unsupportedColumns = ['salary', 'hire', 'national id', 'iqama', 'password
 const _productKeys = ['product_id', 'item_id', 'productid', 'itemid', 'product', 'item', 'منتج', 'الصنف', 'رقم الصنف', 'رقم المنتج', 'كود الصنف', 'code', 'sku', 'barcode', 'id'];
 const _partyKeys = ['customer', 'client', 'supplier', 'vendor', 'party', 'partner', 'account', 'debtor', 'creditor', 'code', 'id',
     'عميل', 'العميل', 'مورد', 'المورد', 'رقم', 'كود'];
+
+const _stockHistory = {'movement', 'movements', 'lot', 'lots', 'batch', 'batches', 'transaction', 'transactions', 'log', 'logs',
+    'history', 'حركه', 'حركات', 'دفعات', 'تشغيلات'};
+
+Set<String> _words(String name) => importWords(name).split(' ').where((w) => w.isNotEmpty).toSet();
 
 bool _hint(String folded, List<String> words) => words.any((w) => folded.contains(importFold(w)));
 
@@ -203,6 +209,9 @@ class ImportContext {
 
   /// Currency id → ISO code (from a currencies table).
   final currencyCodes = <String, String>{};
+
+  /// The file's main branch (display name), when it says which one it is.
+  String? mainBranch;
 }
 
 /// Analyses every table of the file.
@@ -263,13 +272,31 @@ Future<TableAnalysis> _classify(ImportTable t) async {
   ]) {
     if (!roleByName.contains(role)) continue;
     if (role == TableRole.stock && products.containsKey('name') && t.columns.length > 6) continue;
+    // Movements, lots and batches are history of the stock, not today's
+    // quantity (counting them too would add the stock twice).
+    if (role == TableRole.stock && _words(t.name).any(_stockHistory.contains)) continue;
     if (role == TableRole.prices && products.containsKey('name') && products.containsKey('barcode')) continue;
     if (role != TableRole.categories && linkish == 0) continue;
     final map = _mapPart(role, t.columns);
+    if (role == TableRole.balances) {
+      // "remaining" is what is still owed: it wins over the invoice amount.
+      final rest = t.columns.where((c) => _hint(importWords(c), const ['remaining', 'outstanding', 'balance due', 'المتبقي', 'الباقي'])).firstOrNull;
+      if (rest != null) {
+        map
+          ..removeWhere((_, v) => v == rest)
+          ..['amount'] = rest
+          ..remove('paid');
+      }
+      map['branch'] ??= t.columns.where((c) => _hint(importWords(c), const ['branch', 'فرع'])).firstOrNull ?? '';
+      map.removeWhere((_, v) => v.isEmpty);
+    }
     if (_requiredMapped(role, map)) return TableAnalysis(t, role, map, confidence: .9);
   }
   // Old documents/movements: their effect is already in today's balances
   // and stock; entering them again would double debts and stock.
+  if (_words(t.name).any(_stockHistory.contains) && (roleByName.contains(TableRole.stock) || roleByName.contains(TableRole.products))) {
+    return TableAnalysis(t, TableRole.history, const {}, reason: 'history');
+  }
   final historyCols = cols.where((c) => _hint(c, _historyColumns)).length;
   final ownPlace = roleByName.any((r) => r.importable);
   if (roleByName.contains(TableRole.history) && (historyCols >= 1 || !ownPlace) ||
@@ -385,6 +412,27 @@ Future<void> linkImportSchema(List<TableAnalysis> all, {ImportContext? context})
         ..reason = 'no_link';
     }
   }
+  // One source of today's quantities: a second stock table would add the
+  // stock twice (the first linked one is used, the others are listed).
+  final stocks = all.where((a) => a.role == TableRole.stock && a.link != null).toList();
+  for (final extra in stocks.skip(1)) {
+    extra
+      ..role = TableRole.unknown
+      ..reason = 'stock_twice'
+      ..link = null;
+  }
+  // Pictures stored in the database itself win over a file-name column.
+  for (final im in all.where((a) => a.role == TableRole.images)) {
+    final cur = im.mapping['image'];
+    final curVals = cur == null ? const <String>[] : await _values(im.table, cur, limit: 5);
+    if (curVals.any(ImportImages.isBlob)) continue;
+    for (final c in im.table.columns) {
+      if ((await _values(im.table, c, limit: 5)).any(ImportImages.isBlob)) {
+        im.mapping['image'] = c;
+        break;
+      }
+    }
+  }
   for (final part in all.where((a) => a.role.partyPart)) {
     // Ids of customers and suppliers often overlap (both 1, 2, 3…): the
     // side the table and its column name decide.
@@ -438,13 +486,18 @@ Future<void> linkImportSchema(List<TableAnalysis> all, {ImportContext? context})
   if (ctx == null) return;
   // Branch names: a branches table (id → name) and every branch value.
   ctx.branches.clear();
+  ctx.mainBranch = null;
   for (final b in all.where((a) => a.role == TableRole.branches)) {
     final key = b.table.columns.where(importIsKey).firstOrNull, name = b.mapping['name'];
     if (name == null) continue;
     final ki = key == null ? -1 : b.table.columns.indexOf(key), ni = b.table.columns.indexOf(name);
+    final mi = b.table.columns.indexWhere((c) => _hint(importWords(c), const ['main', 'default', 'head', 'primary', 'رئيسي']));
     await for (final r in b.table.rows()) {
       final n = ni < r.length ? r[ni]?.trim() : null;
       if (n == null || n.isEmpty) continue;
+      final flag = mi < 0 || mi >= r.length ? null : r[mi]?.trim().toLowerCase();
+      if (flag == '1' || flag == 'true' || flag == 'yes') ctx.mainBranch ??= n;
+      if (_hint(importFold(n), const ['رئيسي', 'main', 'head office'])) ctx.mainBranch ??= n;
       ctx.branches[n] = n;
       final k = ki < 0 || ki >= r.length ? null : r[ki]?.trim();
       if (k != null && k.isNotEmpty) ctx.branches[_canon(k)] = n;
@@ -527,10 +580,32 @@ class ProductParts {
 }
 
 /// [branchKeys]: the file's branch to import (null: all branches).
-Future<ProductParts> joinProductParts(List<TableAnalysis> all, ImportTable products, {Set<String>? branchKeys}) async {
+Future<ProductParts> joinProductParts(List<TableAnalysis> all, ImportTable products,
+    {Set<String>? branchKeys, String? currency, Map<String, String> currencyCodes = const {}}) async {
   final parts = ProductParts();
   final stockSum = <String, BigInt>{}; // product → quantity × 1000
-  for (final a in all) {
+  // Units first: a barcode or a price may belong to one unit (unit_id).
+  final unitById = <String, Map<String, String?>>{};
+  final ordered = [...all.where((a) => a.role == TableRole.units), ...all.where((a) => a.role != TableRole.units)];
+  Future<int> unitColumn(TableAnalysis a, String linkColumn) async {
+    if (unitById.isEmpty) return -1;
+    for (final c in a.table.columns) {
+      if (c == linkColumn || !importIsKey(c) || _ownKey(c, a.table.name) || a.mapping.containsValue(c)) continue;
+      // Named after the unit (unit_id, uom_id, رقم الوحدة): ids of other
+      // things (a currency id 1, 2…) can look like unit ids too.
+      if (!_hint(importWords(c), const ['unit', 'uom', 'وحده', 'الوحده'])) continue;
+      final vals = await _values(a.table, c, limit: 4000);
+      if (vals.isNotEmpty && vals.where(unitById.containsKey).length / vals.length >= .95) return a.table.columns.indexOf(c);
+    }
+    return -1;
+  }
+
+  bool isBase(Map<String, String?> u) {
+    final f = importDecimal(u['factor'] ?? '1');
+    return f == null || double.tryParse(f) == 1;
+  }
+
+  for (final a in ordered) {
     final link = a.link;
     if (a.role == TableRole.categories && link != null && link.parent == products) {
       final idCol = link.column, nameCol = a.mapping['name'];
@@ -549,6 +624,10 @@ Future<ProductParts> joinProductParts(List<TableAnalysis> all, ImportTable produ
     final idx = {for (final e in a.mapping.entries) e.key: a.table.columns.indexOf(e.value)};
     final keys = (await _values(products, link.parentColumn)).toSet();
     if (a.role == TableRole.stock) parts.hasStock = true;
+    final ownKey = a.role == TableRole.units
+        ? a.table.columns.indexWhere((c) => importIsKey(c) && _ownKey(c, a.table.name) && c != link.column)
+        : -1;
+    final ui = a.role == TableRole.barcodes || a.role == TableRole.prices ? await unitColumn(a, link.column) : -1;
     await for (final r in a.table.rows()) {
       final raw = fk < r.length ? r[fk]?.trim() : null;
       final key = raw == null ? null : _canon(raw);
@@ -564,17 +643,37 @@ Future<ProductParts> joinProductParts(List<TableAnalysis> all, ImportTable produ
 
       switch (a.role) {
         case TableRole.units:
-          (parts.units[key] ??= []).add({
+          final u = <String, String?>{
             'name': at('name'), 'factor': at('factor'), 'barcode': at('barcode'),
             'sale_price': at('sale_price'), 'cost_price': at('cost_price'),
-          });
+          };
+          (parts.units[key] ??= []).add(u);
+          final id = ownKey < 0 || ownKey >= r.length ? null : r[ownKey]?.trim();
+          if (id != null && id.isNotEmpty) unitById[_canon(id)] = u;
         case TableRole.barcodes:
           final b = at('barcode');
-          if (b != null) (parts.barcodes[key] ??= []).add(_canon(b));
+          if (b == null) continue;
+          final unit = ui < 0 || ui >= r.length || r[ui] == null ? null : unitById[_canon(r[ui]!.trim())];
+          if (unit != null && !isBase(unit)) {
+            unit['barcode'] ??= _canon(b); // the carton's own barcode
+            continue;
+          }
+          (parts.barcodes[key] ??= []).add(_canon(b));
         case TableRole.images:
           final im = at('image');
           if (im != null) parts.images.putIfAbsent(key, () => im);
         case TableRole.prices:
+          final unit = ui < 0 || ui >= r.length || r[ui] == null ? null : unitById[_canon(r[ui]!.trim())];
+          if (unit != null && !isBase(unit)) {
+            // A price of another unit (carton…): that unit's price, in the
+            // chosen currency only.
+            final cur = importCurrency(at('currency'), currency ?? '', currencyCodes);
+            if (currency != null && (cur == currency || cur == '')) {
+              unit['sale_price'] ??= at('price');
+              unit['cost_price'] ??= at('cost');
+            }
+            continue;
+          }
           (parts.prices[key] ??= []).add({'price': at('price'), 'kind': at('kind'), 'cost': at('cost'), 'currency': at('currency')});
         case TableRole.stock:
           final b = at('branch');
@@ -610,7 +709,8 @@ class PartyParts {
   int badRows = 0;
 }
 
-Future<PartyParts> joinPartyParts(List<TableAnalysis> all, ImportTable parties, {Map<String, String>? currencyCodes}) async {
+Future<PartyParts> joinPartyParts(List<TableAnalysis> all, ImportTable parties,
+    {Map<String, String>? currencyCodes, Set<String>? branchKeys}) async {
   final out = PartyParts();
   for (final a in all.where((a) => a.role.partyPart && a.link?.parent == parties)) {
     final link = a.link!;
@@ -620,6 +720,7 @@ Future<PartyParts> joinPartyParts(List<TableAnalysis> all, ImportTable parties, 
     final ai = a.table.columns.indexOf(a.mapping['amount'] ?? '');
     final pi = a.table.columns.indexOf(a.mapping['paid'] ?? '');
     final ci = a.table.columns.indexOf(a.mapping['currency'] ?? '');
+    final bi = a.table.columns.indexOf(a.mapping['branch'] ?? '');
     final keys = (await _values(parties, link.parentColumn)).toSet();
     await for (final r in a.table.rows()) {
       final raw = fk < r.length ? r[fk]?.trim() : null;
@@ -629,6 +730,8 @@ Future<PartyParts> joinPartyParts(List<TableAnalysis> all, ImportTable parties, 
         continue;
       }
       String? at(int i) => i < 0 || i >= r.length ? null : r[i]?.trim();
+      // Another branch's balance is not this branch's.
+      if (branchKeys != null && bi >= 0 && !branchKeys.contains(_canon(at(bi) ?? ''))) continue;
       int? minor(String? v) => v == null || v.isEmpty ? 0 : importMinor(importRound(importDecimal(v), 2)?.value);
       final amount = minor(at(ai)), paid = minor(at(pi));
       if (amount == null || paid == null) {
