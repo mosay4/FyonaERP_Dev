@@ -489,8 +489,10 @@ class BranchApi {
     );
   }
 
-  Future<Map<String, dynamic>> resetAllBusiness() async {
-    final r = await _client.post('/branches/reset-all');
+  /// [replicaId]: this device's Business database (it empties itself; the
+  /// server tells every other device of the account to empty its copy).
+  Future<Map<String, dynamic>> resetAllBusiness({String? replicaId}) async {
+    final r = await _client.post('/branches/reset-all', data: {if (replicaId != null) 'replica_id': replicaId});
     return Map<String, dynamic>.from(_data(r) as Map? ?? {});
   }
 

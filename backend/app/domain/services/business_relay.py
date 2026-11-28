@@ -22,7 +22,7 @@ import base64
 from datetime import datetime, timedelta, timezone
 import json
 from typing import Iterable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import (BigInteger, Boolean, Column, Index, LargeBinary,
                         MetaData, String, Table, Uuid, delete, func, insert,
@@ -37,7 +37,7 @@ MAX_PAYLOAD = 16 * 1024 * 1024
 MAX_SNAPSHOT = 48 * 1024 * 1024
 MAX_BATCH = 200
 OP_KINDS = frozenset({"ops"})
-CONTROL_KINDS = frozenset({"snapshot_request", "snapshot"})
+CONTROL_KINDS = frozenset({"snapshot_request", "snapshot", "reset"})
 
 replicas = Table(
     "business_relay_replicas", metadata,
@@ -464,6 +464,41 @@ async def _retire(conn: AsyncConnection, org: UUID, rid: UUID) -> None:
         if not left:
             seq = await conn.scalar(select(ops.c.seq).where(ops.c.id == op_id))
             await _forget(conn, org, op_id, seq)
+
+
+async def reset_organization(conn: AsyncConnection, *, org: UUID, user: UUID,
+                             replica_id: UUID | None,
+                             now: datetime | None = None) -> int:
+    """The owner reset the whole Business account. Every operation still on
+    its way is dropped (it would bring the old data back), and every other
+    device of the organization — the owner's other phones and every
+    employee's copy of this workspace — receives one «reset» message telling
+    it to empty its copy. Personal data is never part of this relay.
+
+    The relay keeps nothing of the account: the message carries only the
+    time of the reset. Returns how many devices were told."""
+    waiting = select(ops.c.id).where(ops.c.organization_id == org)
+    await conn.execute(delete(inbox).where(inbox.c.op_id.in_(waiting)))
+    await conn.execute(delete(ops).where(ops.c.organization_id == org))
+    targets = (await conn.execute(select(replicas.c.id).where(
+        replicas.c.organization_id == org,
+        replicas.c.retired.is_(False),
+        *([replicas.c.id != replica_id] if replica_id is not None else []),
+    ))).scalars().all()
+    if not targets:
+        return 0
+    at = _now_us(now)
+    message = uuid4()
+    await conn.execute(insert(ops).values(
+        id=message, organization_id=org, branch_id=None, seq=None, kind="reset",
+        replica_id=replica_id or message, actor_user_id=user,
+        payload=json.dumps({"reset_us": at}).encode(), created_us=at,
+    ))
+    await conn.execute(insert(inbox), [{"op_id": message, "replica_id": rid} for rid in targets])
+    # They start again from nothing: no copy to ask for.
+    await conn.execute(update(replicas).where(replicas.c.id.in_(targets))
+                       .values(resync_required=False))
+    return len(targets)
 
 
 async def purge_expired(conn: AsyncConnection, *, now: datetime | None = None,

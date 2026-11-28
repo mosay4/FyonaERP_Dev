@@ -7083,5 +7083,7 @@
   "si4UnitsN": "{n} وحدات",
   "si4Exclude": "استبعاد",
   "si4Include": "إرجاع للإضافة",
-  "siIssue_already_imported": "مستورد من هذا الملف من قبل"
+  "siIssue_already_imported": "مستورد من هذا الملف من قبل",
+  "profileResetOffline": "ما فيه اتصال بالإنترنت. التصفير يحتاج اتصال عشان يوصل لكل أجهزتك وأجهزة موظفيك.",
+  "profileResetServer": "الخادم ما رد الحين. حاول مرة ثانية بعد شوي."
 }

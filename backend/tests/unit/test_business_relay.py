@@ -167,3 +167,30 @@ async def test_a_retired_device_that_returns_rejoins_with_a_full_copy(engine):
         again = await relay.register(conn, org=org, user=owner, session=None, replica_id=back)
         assert again["resync_required"] is True
         assert (await relay.pull(conn, org=org, user=owner, replica_id=back))["resync_required"]
+
+
+@pytest.mark.asyncio
+async def test_a_reset_account_drops_what_is_on_its_way_and_tells_every_other_device(engine):
+    org, owner, branch, _ = await _seed(engine, f"relay-reset-{uuid4().hex[:14]}@example.test")
+    await _ready(engine)
+    a, b, c = uuid4(), uuid4(), uuid4()
+    async with engine.begin() as conn:
+        for rid in (a, b, c):
+            await relay.register(conn, org=org, user=owner, session=None, replica_id=rid)
+        await relay.push(conn, org=org, user=owner, replica_id=b, items=[_op(branch, "old")])
+        assert await _org_ops(conn, org) == 1
+        # Device a resets the account.
+        told = await relay.reset_organization(conn, org=org, user=owner, replica_id=a)
+        assert told == 2
+        for rid in (b, c):
+            got = await relay.pull(conn, org=org, user=owner, replica_id=rid)
+            # Only the reset reaches them; the old operation is gone.
+            assert [i["kind"] for i in got["items"]] == ["reset"]
+            assert got["resync_required"] is False
+        mine = await relay.pull(conn, org=org, user=owner, replica_id=a)
+        assert mine["items"] == []
+        # Each device acknowledges it; then nothing of it is kept.
+        for rid in (b, c):
+            got = await relay.pull(conn, org=org, user=owner, replica_id=rid)
+            await relay.ack(conn, org=org, user=owner, replica_id=rid, op_ids=[UUID(got["items"][0]["id"])])
+        assert await _org_ops(conn, org) == 0 and await _org_inbox(conn, org) == 0

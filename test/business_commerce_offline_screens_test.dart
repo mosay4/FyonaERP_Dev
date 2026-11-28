@@ -972,7 +972,8 @@ void main() {
           expect(lab.attempted, isEmpty);
 
           // A purchase movement opens a tidy sheet: the invoice number on its
-          // own line, short (PUR-XXXXXXXX), never inside the notes; «عرض
+          // own line, short (PUR-1 in order once the branch's documents were
+          // read, else PUR-XXXXXXXX), never inside the notes; «عرض
           // الفاتورة» opens the Business invoice screen, not the old one.
           await tap(find.descendant(
             of: stats,
@@ -981,7 +982,7 @@ void main() {
           final docNo = find.byKey(const ValueKey('movement-doc-number'));
           await until(docNo);
           final shown = tester.widget<Text>(docNo).data!;
-          expect(shown, matches(RegExp(r'^PUR-[0-9A-F]{8}$')));
+          expect(shown, matches(RegExp(r'^PUR-([0-9]+|[0-9A-F]{8})$')));
           expect(
             find.descendant(
               of: find.byType(BottomSheet),

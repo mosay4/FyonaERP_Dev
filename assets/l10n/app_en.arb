@@ -6980,5 +6980,7 @@
   "si4UnitsN": "{n} units",
   "si4Exclude": "Leave out",
   "si4Include": "Add back",
-  "siIssue_already_imported": "Imported from this file before"
+  "siIssue_already_imported": "Imported from this file before",
+  "profileResetOffline": "No internet connection. A reset needs it to reach all your devices and your employees' devices.",
+  "profileResetServer": "The server did not answer. Please try again shortly."
 }

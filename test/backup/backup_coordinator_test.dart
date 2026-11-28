@@ -385,8 +385,19 @@ void main() {
       expect((await c.deviceFiles(s)).map((f) => f.name), [fresh.name]);
       // "Back up now" adds a copy of its own.
       await Future<void>.delayed(const Duration(milliseconds: 1100));
-      await c.saveToDevice(s);
+      final manual = await c.saveToDevice(s);
       expect(await c.deviceFiles(s), hasLength(2));
+      // A copy made by hand (or kept before a reset) is never replaced: the
+      // next automatic file is a new one, and then that one follows the data.
+      for (var round = 0; round < 2; round++) {
+        await Future<void>.delayed(const Duration(milliseconds: 1100));
+        await write(s.dbPath, "INSERT INTO t VALUES (${700 + round}, 'n', 1)");
+        await c.runNow(s);
+        expect(await c.refreshDeviceFile(s), isNotNull);
+        final names = (await c.deviceFiles(s)).map((f) => f.name).toList();
+        expect(names, contains(manual!.name));
+        expect(names, hasLength(3));
+      }
       // Automatic backup off: changes do not touch the folder.
       await c.configure(s.id, enabled: false);
       await write(s.dbPath, "INSERT INTO t VALUES (999, 'z', 1)");

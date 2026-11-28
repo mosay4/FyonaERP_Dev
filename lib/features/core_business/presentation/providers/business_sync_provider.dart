@@ -8,7 +8,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/config/directory_pilot_build.dart';
 import '../../../../core/di/providers.dart' show secureStorageProvider;
 import '../../../../core/services/connectivity_service.dart';
+import '../../../../core/utils/document_number.dart';
 import '../../../../shared/providers/current_user_provider.dart';
+import '../../../ai/domain/agent/chat_persistence.dart';
 import '../../../branches/data/branch_scope.dart';
 import '../../data/local_directory/directory_database.dart';
 import '../../data/local_directory/directory_pilot.dart';
@@ -320,6 +322,17 @@ final _businessSyncRuntimeProvider = Provider.autoDispose<void>((ref) {
             'payload': snapshot,
           });
           ack.add(item['id'] as String);
+        case 'reset':
+          // The owner reset the whole account (another device): this copy
+          // of the workspace is emptied, with its Sara conversation.
+          await local((db) => db.syncWipe());
+          try {
+            final user = ref.read(currentUserProvider)?.id;
+            if (user != null) ChatPersistence.instance.clearMessages('${user}_business');
+          } catch (_) {}
+          DocumentSerials.put(const {});
+          ack.add(item['id'] as String);
+          stored = true;
         case 'snapshot':
           await local(
             (db) => db.syncApplySnapshot(Map<String, Object?>.from(payload as Map)),

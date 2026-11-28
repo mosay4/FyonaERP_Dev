@@ -490,7 +490,11 @@ class BackupCoordinator {
   /// Keeps the newest local set as one file in the FYONA folder (it
   /// survives reinstalling the app); the 3 newest files are kept.
   Future<DeviceBackupFile?> saveToDevice(BackupSpace space, {BackupProgress? onProgress, bool replaceNewest = false}) async {
-    final before = replaceNewest ? (await deviceFiles(space)).firstOrNull : null;
+    // Only a file the automatic refresh wrote itself is replaced: a copy
+    // made with "Back up now" (or kept before a reset) is never overwritten.
+    final auto = (await _load(space.id))['device_auto_name'];
+    final newest = replaceNewest ? (await deviceFiles(space)).firstOrNull : null;
+    final before = newest != null && newest.name == auto ? newest : null;
     final sets = (await listSets(space)).where((s) => s.local).toList();
     if (sets.isEmpty) return null;
     final set = sets.first;
@@ -509,6 +513,11 @@ class BackupCoordinator {
       final m = await _load(space.id);
       m['device_at'] = DateTime.now().millisecondsSinceEpoch;
       m.remove('device_dirty');
+      if (replaceNewest) {
+        m['device_auto_name'] = name;
+      } else {
+        m.remove('device_auto_name');
+      }
       await _save(space.id, m);
     });
     if (before != null && before.name != name) {
@@ -524,6 +533,15 @@ class BackupCoordinator {
     }
     return mine.firstOrNull;
   }
+
+  /// The next run starts a new backup set (after a reset of the account:
+  /// the copies from before stay as they are).
+  Future<void> startNewSet(String id) => _lock(id).synchronized(() async {
+        final m = await _load(id);
+        (m['state'] as Map?)?.remove('id');
+        m.remove('device_auto_name');
+        await _save(id, m);
+      });
 
   /// Deletes the backup [id] from FYONA cloud. The set the schedule is
   /// still writing starts over as a new set on the next run, so the cloud

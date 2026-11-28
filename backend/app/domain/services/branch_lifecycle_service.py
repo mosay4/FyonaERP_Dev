@@ -219,3 +219,38 @@ async def reset_whole_business(db: AsyncSession, org_id: UUID,
     db.add(fresh)
     await db.flush()
     return fresh
+
+
+async def reset_business_around_device_ledgers(db: AsyncSession, org_id: UUID,
+                                               keep: set[UUID]) -> Branch:
+    """Factory reset of a Business account whose branches [keep] live on the
+    devices (their records are emptied on every device through the relay;
+    the server holds none of them). Those branches stay — they are the
+    device store's identity, and their employees stay linked to them.
+    Every other branch is emptied: extra ones deleted, the MAIN branch
+    kept empty. Invitations and invoice designs go too. The organization,
+    owner, subscription and settings remain."""
+    from app.domain.entities.invoice_entities import OrgInvoiceDesign
+
+    branches = list((await db.execute(select(Branch).where(
+        Branch.organization_id == org_id).order_by(
+            Branch.is_default.asc()))).scalars().all())
+    main = None
+    for branch in branches:
+        if branch.id in keep:
+            continue
+        await _purge(db, org_id, branch, keep_memberships=False)
+        if branch.is_default:
+            main = branch
+        else:
+            await db.execute(delete(Branch).where(Branch.id == branch.id))
+    await db.execute(delete(BranchInvitation).where(
+        BranchInvitation.organization_id == org_id))
+    await db.execute(delete(OrgInvoiceDesign).where(
+        OrgInvoiceDesign.organization_id == org_id))
+    await db.flush()
+    if main is None:
+        main = next((b for b in branches if b.id in keep), None)
+    if main is None:
+        raise ValueError("لا يوجد فرع")
+    return main

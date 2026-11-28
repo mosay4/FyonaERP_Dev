@@ -328,6 +328,24 @@ extension BusinessSyncEngine on DirectoryDatabase {
     return id;
   });
 
+  /// The owner reset the whole Business account: this copy is emptied —
+  /// every record of every branch, what was waiting to leave and the sync
+  /// history. The device stays itself (its replica id and author) and starts
+  /// again from nothing. Personal data is in another database: untouched.
+  Future<void> syncWipe() => _transactionRaw((txn) async {
+        await txn.execute('PRAGMA defer_foreign_keys = ON');
+        final tables = [
+          for (final r in await txn.rawQuery(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'android_%'"))
+            r['name'] as String,
+        ];
+        for (final t in tables) {
+          if (t == _syncState) continue;
+          await txn.delete(t);
+        }
+        await txn.delete(_syncState, where: "key NOT IN ('replica_id', 'author_user', 'author_name')");
+      });
+
   /// Who appears as the author of the operations made on this device.
   Future<void> syncSetAuthor({required String userId, required String name}) =>
       _transactionRaw((txn) async {

@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.deps import (get_branch_context, get_branch_scope, get_current_org_id_optional,
@@ -305,15 +305,41 @@ async def select_branch(
                 "branch": svc.branch_dict(branch), **subscription})
 
 
+class ResetAllIn(BaseModel):
+    """The device that asked (it empties itself; every other device of the
+    account is told to)."""
+    replica_id: Optional[UUID] = None
+
+
 @router.post("/reset-all", summary="تصفير حساب الأعمال بالكامل")
 async def reset_all_business(
+    body: Optional[ResetAllIn] = None,
     org_id: str = Depends(get_current_org_id),
     user_id: UUID = Depends(get_current_user_uuid),
     db: AsyncSession = Depends(get_db),
 ):
     actor = await _require_owner(db, user_id, org_id)
     if await qa_business_ledger.contains_registered_ledger(db, UUID(org_id)):
-        raise HTTPException(409, detail="حساب الأعمال فيه فرع يعمل من دفتر الجهاز")
+        # The data lives on the devices: drop what is still on its way and
+        # tell every other device of the account (the owner's other phones,
+        # each employee's copy of this workspace) to empty its copy. The
+        # server's own branches are emptied around the device branches.
+        from app.domain.services import business_relay as relay
+        keep = set((await db.execute(text(
+            f"SELECT branch_id FROM {qa_business_ledger.SCOPE_TABLE} WHERE organization_id = :o"
+        ), {"o": UUID(org_id)})).scalars().all())
+        conn = await db.connection()
+        await relay.install(conn)
+        told = await relay.reset_organization(
+            conn, org=UUID(org_id), user=user_id,
+            replica_id=body.replica_id if body else None)
+        try:
+            branch = await lifecycle.reset_business_around_device_ledgers(db, UUID(org_id), keep)
+        except ValueError as e:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail=str(e))
+        await db.commit()
+        return ok({**svc.branch_dict(branch), "devices_told": told}, "تم تصفير حساب الأعمال بالكامل")
     org = (await db.execute(select(Organization).where(
         Organization.id == UUID(org_id)))).scalar_one_or_none()
     try:

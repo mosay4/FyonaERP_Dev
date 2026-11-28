@@ -29,6 +29,7 @@ import '../../../../shared/providers/theme_provider.dart'
 import '../../../../shared/providers/locale_provider.dart';
 import '../../../../shared/widgets/language_transition_overlay.dart';
 import '../../../../shared/providers/current_user_provider.dart';
+import '../../../core_business/presentation/providers/business_account_reset.dart';
 import '../../../core_business/presentation/providers/biz_payment_pref.dart';
 import '../../../../core/services/currency/business_currency_scope.dart'
     show bizEnabledCurrenciesProvider;
@@ -3689,9 +3690,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
     final userId = ref.read(authProvider).user?.id ?? '';
     try {
-      // Server first: delete EVERY branch + all its operations/staff links,
-      // then recreate a fresh main branch. Subscription/account stay intact.
-      await ref.read(branchApiProvider).resetAllBusiness();
+      // Everything Business, everywhere (owner, 28-11): a last backup copy is
+      // kept on the phone, the server tells every other device of the
+      // account (other phones, each employee's copy of this workspace) to
+      // empty its copy, and this phone empties its own. Subscription,
+      // account and Personal data stay intact.
+      await resetBusinessAccount(ref.read);
       // Business-only local state (Personal is never touched).
       try {
         ChatPersistence.instance.clearMessages('${userId}_business');
@@ -3723,12 +3727,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     } catch (e) {
       if (!mounted) return;
       Navigator.of(context, rootNavigator: true).pop();
-      _snack(
-        AppLocalizations.of(
-          context,
-        ).translate('profileResetFailed', params: {'error': e}),
-        bg: AppColors.danger,
-      );
+      // A clear reason, never the raw technical error.
+      final l10n = AppLocalizations.of(context);
+      final reason = e is DioException
+          ? (e.response == null
+              ? l10n.translate('profileResetOffline')
+              : (e.response?.data is Map && (e.response!.data as Map)['detail'] is String
+                  ? (e.response!.data as Map)['detail'] as String
+                  : l10n.translate('profileResetServer')))
+          : l10n.translate('profileResetServer');
+      _snack(l10n.translate('profileResetFailed', params: {'error': reason}), bg: AppColors.danger);
     }
   }
 
