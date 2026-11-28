@@ -17,7 +17,7 @@ void main() {
 
   test('edit a cell, the row is checked again; duplicates follow the edits', () async {
     final t = await csv('الاسم,الرصيد,ملاحظة داخلية\nأحمد,abc,x\nسالم,10,y\nسالم,20,z\n');
-    final r = await ImportReview.load(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns));
+    final r = await ImportReview.load(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns), defaultCurrency: 'SAR');
     expect(r.unusedColumns, ['ملاحظة داخلية']); // never saved
     expect([for (final x in r.rows) x.reasons], [['bad_number'], <String>[], ['duplicate_in_file']]);
     r.edit(r.rows[0], 'balance', '١٥٠٫٥');
@@ -30,7 +30,7 @@ void main() {
 
   test('leave out rows, put them back; only accepted rows are imported', () async {
     final t = await csv('name,balance\nAa,1\nBb,2\nCc,3\n');
-    final r = await ImportReview.load(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns));
+    final r = await ImportReview.load(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns), defaultCurrency: 'SAR');
     r.setRejected(r.rows.take(2), true);
     expect(r.acceptedCount, 1);
     expect(r.refusedByReason, {'rejected_by_user': 2});
@@ -41,9 +41,9 @@ void main() {
 
   test('a whole column given to another field (Sara was wrong) changes every row', () async {
     final t = await csv('المنتج,السعر,الكمية\nقلم,2.5,100\nدفتر,7,3\n');
-    final wrong = await ImportReview.load(t, ImportTarget.products, {'name': 'المنتج', 'stock': 'السعر', 'sale_price': 'الكمية'});
+    final wrong = await ImportReview.load(t, ImportTarget.products, {'name': 'المنتج', 'stock': 'السعر', 'sale_price': 'الكمية'}, defaultCurrency: 'SAR');
     expect(wrong.toPreview().products.first.stock, '2.5');
-    final right = await ImportReview.load(t, ImportTarget.products, {'name': 'المنتج', 'stock': 'الكمية', 'sale_price': 'السعر'});
+    final right = await ImportReview.load(t, ImportTarget.products, {'name': 'المنتج', 'stock': 'الكمية', 'sale_price': 'السعر'}, defaultCurrency: 'SAR');
     expect(right.toPreview().products.map((p) => (p.sale, p.stock)), [('2.5', '100'), ('7', '3')]);
   });
 
@@ -57,7 +57,7 @@ void main() {
     final t = await csv(b.toString());
     final sw = Stopwatch()..start();
     final rss = ProcessInfo.currentRss;
-    final r = await ImportReview.load(t, ImportTarget.products, autoMapColumns(ImportTarget.products, t.columns));
+    final r = await ImportReview.load(t, ImportTarget.products, autoMapColumns(ImportTarget.products, t.columns), defaultCurrency: 'SAR');
     final load = sw.elapsedMilliseconds;
     expect(r.acceptedCount, 100001);
     expect(r.refusedByReason, {'missing_name': 1});

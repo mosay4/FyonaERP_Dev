@@ -10,16 +10,23 @@ import 'import_source.dart';
 /// the app's own rules; every row is checked again afterwards and nothing
 /// is saved until the user confirms the review.
 class ImportSession {
-  ImportSession(this.analysis, this.context, {this.currency = 'SAR', ImportImages? images}) : images = images ?? ImportImages.none;
+  ImportSession(this.analysis, this.context, {this.currency, this.enabled = const {}, ImportImages? images})
+      : images = images ?? ImportImages.none;
 
   final List<TableAnalysis> analysis;
   final ImportContext context;
   final ImportImages images;
 
-  /// Currency of amounts the file does not name (and of cost prices).
-  String currency;
+  /// Currency of amounts the file does not name. Null until the user
+  /// chooses one: no currency is ever assumed.
+  String? currency;
 
-  /// The file's branch to import (display name); null: all branches.
+  /// The business's own currencies (records are saved only in these).
+  final Set<String> enabled;
+
+  /// The file's branch whose rows are taken (display name). A file with
+  /// several branches needs one chosen: their balances and quantities are
+  /// never added together.
   String? sourceBranch;
 
   /// Names / codes already in the FYONA branch (the "exists" check).
@@ -32,10 +39,10 @@ class ImportSession {
   final _valueOps = <Map<String, dynamic>>[];
 
   static Future<ImportSession> analyze(List<ImportTable> tables,
-      {String currency = 'SAR', ImportImages? images, String? currentBranchName}) async {
+      {String? currency, Set<String> enabled = const {}, ImportImages? images, String? currentBranchName}) async {
     final ctx = ImportContext();
     final a = await analyzeImportSchema(tables, context: ctx);
-    final s = ImportSession(a, ctx, currency: currency, images: images);
+    final s = ImportSession(a, ctx, currency: currency, enabled: enabled, images: images);
     // The file's branch named like the FYONA branch is chosen first.
     final choices = s.branchChoices;
     if (choices.length > 1) {
@@ -44,7 +51,7 @@ class ImportSession {
       // user can pick another, or all).
       final want = currentBranchName == null ? null : importFold(currentBranchName);
       s.sourceBranch = choices.keys.where((b) => want != null && importFold(b) == want).firstOrNull ??
-          (choices.containsKey(ctx.mainBranch) ? ctx.mainBranch : null);
+          (choices.containsKey(ctx.mainBranch) ? ctx.mainBranch : choices.keys.first);
     }
     return s;
   }
@@ -83,14 +90,14 @@ class ImportSession {
     reviews.clear();
   }
 
-  void setCurrency(String code) {
+  void setCurrency(String? code) {
     if (code == currency) return;
     currency = code;
     reviews.clear();
   }
 
   void setSourceBranch(String? name) {
-    if (name == sourceBranch) return;
+    if (name == sourceBranch || (name == null && branchChoices.length > 1)) return;
     sourceBranch = name;
     reviews.clear();
   }
@@ -110,6 +117,7 @@ class ImportSession {
       reviews[a] = await ImportReview.load(a.table, target, a.mapping,
           defaultKind: a.role == TableRole.suppliers ? 'supplier' : 'customer',
           defaultCurrency: currency,
+          enabledCurrencies: enabled,
           existing: existing,
           branches: keys ?? const {},
           images: images.names,
@@ -156,14 +164,14 @@ class ImportSession {
           if (a.role.part) await linkImportSchema(analysis, context: context);
           done.add('map:${a.table.name}:$field');
         case 'set_currency':
-          final code = '${o['currency']}'.toUpperCase();
-          if (!RegExp(r'^[A-Z]{3}$').hasMatch(code)) continue;
+          final code = importCurrency('${o['currency']}', null, null, enabled);
+          if (!importIsCurrencyCode(code)) continue;
           setCurrency(code);
           done.add('currency:$code');
         case 'set_field':
-        case 'adjust':
         case 'reject':
         case 'accept':
+          if (o['op'] == 'set_field' && !_namedFields.contains('${o['field']}')) continue;
           await buildReviews();
           _valueOps.add(o);
           done.add('${o['op']}:${_applyValue(o, reviews)}');
@@ -181,28 +189,23 @@ class ImportSession {
     var n = 0;
     switch (o['op']) {
       case 'set_field':
-        final field = '${o['field']}', value = '${o['value']}';
+        // Only a currency, a unit, a category or a bank: amounts, prices,
+        // quantities and phones come from the file alone.
+        final field = '${o['field']}';
+        if (!_namedFields.contains(field)) break;
+        var value = '${o['value']}'.trim();
+        if (field == 'currency') {
+          final code = importCurrency(value, null, null, enabled);
+          if (!importIsCurrencyCode(code)) break;
+          value = code!;
+        }
         final onlyEmpty = o['only_empty'] == true;
+        final where = o['where'] as Map?;
         for (final r in of('${o['target']}')) {
           for (final row in r.rows) {
             if (onlyEmpty && row[field] != null) continue;
+            if (where != null && !_matches(row['${where['field']}'], '${where['op']}', where['value']?.toString())) continue;
             row.values[field] = value;
-            n++;
-          }
-          r.revalidate();
-        }
-      case 'adjust':
-        final field = '${o['field']}';
-        final pct = (o['percent'] as num?)?.toDouble();
-        final add = (o['add'] as num?)?.toDouble();
-        for (final r in of('products')) {
-          for (final row in r.rows) {
-            final d = importDecimal(row[field]);
-            if (d == null) continue;
-            final v = double.parse(d);
-            final next = pct != null ? v * (1 + pct / 100) : v + (add ?? 0);
-            if (next < 0) continue;
-            row.values[field] = importRound(next.toStringAsFixed(6), 2)!.value;
             n++;
           }
           r.revalidate();
@@ -221,6 +224,8 @@ class ImportSession {
     }
     return n;
   }
+
+  static const _namedFields = {'currency', 'unit', 'category', 'bank'};
 
   static bool _matches(String? v, String op, String? want) {
     switch (op) {

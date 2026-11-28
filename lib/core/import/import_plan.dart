@@ -27,7 +27,6 @@ const importFields = <ImportTarget, List<ImportField>>{
   ImportTarget.products: [
     ImportField('name', ['اسم المنتج', 'اسم الصنف', 'الاسم العربي', 'المنتج', 'الصنف', 'الاسم', 'اسم', 'name ar', 'arabic name', 'product name', 'item name', 'product', 'item', 'name', 'title'], required: true),
     ImportField('barcode', ['الباركود', 'باركود', 'barcode', 'ean', 'upc']),
-    ImportField('sku', ['رمز المنتج', 'الرمز', 'الكود', 'كود', 'sku', 'code', 'item code']),
     ImportField('unit', ['الوحدة', 'وحدة', 'unit', 'uom']),
     ImportField('sale_price', ['سعر البيع', 'سعر التجزئة', 'السعر', 'سعر', 'price', 'sale price', 'selling price', 'sell price', 'retail price', 'unit price', 'retail']),
     ImportField('cost_price', ['سعر الشراء', 'سعر التكلفة', 'التكلفة', 'تكلفة', 'cost', 'cost price', 'purchase price', 'buy price', 'average cost', 'avg cost', 'buy']),
@@ -36,9 +35,8 @@ const importFields = <ImportTarget, List<ImportField>>{
     ImportField('image', ['الصورة', 'صورة', 'image', 'img', 'picture', 'photo']),
     ImportField('branch', ['الفرع', 'فرع', 'branch', 'store', 'location', 'warehouse', 'المستودع', 'المخزن']),
     ImportField('min_stock', ['الحد الادنى', 'حد الطلب', 'min stock', 'min qty', 'min quantity', 'reorder', 'reorder level', 'minimum']),
-    ImportField('description', ['الوصف', 'وصف', 'description', 'details']),
     ImportField('expiry', ['تاريخ الانتهاء', 'الانتهاء', 'الصلاحية', 'expiry', 'expiry date', 'expiration', 'expire', 'best before']),
-    ImportField('notes', ['ملاحظات', 'ملاحظة', 'notes', 'note', 'remarks']),
+    ImportField('currency', ['العملة', 'عملة', 'عملة السعر', 'currency', 'cur', 'price currency']),
   ],
   ImportTarget.accounts: [
     ImportField('name', ['اسم الحساب', 'الحساب', 'اسم الصندوق', 'الصندوق', 'صندوق', 'اسم الخزينة', 'الاسم', 'account name', 'account', 'cash box', 'box', 'name'], required: true),
@@ -201,6 +199,8 @@ int? importMinor(String? decimal) {
 const _currencyNames = {
   'ريال سعودي': 'SAR', 'ر س': 'SAR', 'ريال': 'SAR', 'رس': 'SAR', 'sr': 'SAR', 'sar': 'SAR', '﷼': 'SAR', 'saudi riyal': 'SAR',
   'ريال يمني': 'YER', 'ر ي': 'YER', 'yr': 'YER', 'يمني': 'YER',
+  'ريال يمني جديد': 'YER_NEW', 'يمني جديد': 'YER_NEW', 'ريال جديد': 'YER_NEW', 'yer new': 'YER_NEW', 'yer_new': 'YER_NEW',
+  'ريال يمني قديم': 'YER_OLD', 'يمني قديم': 'YER_OLD', 'ريال قديم': 'YER_OLD', 'yer old': 'YER_OLD', 'yer_old': 'YER_OLD',
   'دولار': 'USD', 'دولار امريكي': 'USD', r'$': 'USD', r'us$': 'USD', 'us dollar': 'USD', 'dollar': 'USD',
   'درهم': 'AED', 'درهم اماراتي': 'AED', 'د ا': 'AED', 'dhs': 'AED', 'dirham': 'AED',
   'دينار كويتي': 'KWD', 'د ك': 'KWD', 'ريال قطري': 'QAR', 'ر ق': 'QAR', 'ريال عماني': 'OMR', 'ر ع': 'OMR',
@@ -210,17 +210,39 @@ const _currencyNames = {
 
 /// A currency code from what the file says (code, Arabic/English name or
 /// symbol, or an id of the file's currencies table in [codes]). Empty →
-/// [fallback]; anything not recognised → null (never guessed).
-String? importCurrency(String? raw, String fallback, [Map<String, String>? codes]) {
+/// [fallback] (null: none chosen yet — never assumed); anything not
+/// recognised → null (never guessed). With the business's [enabled]
+/// currencies, an ISO code becomes FYONA's own one when that is certain
+/// (YER → YER_NEW when only the new rial is enabled).
+String? importCurrency(String? raw, String? fallback, [Map<String, String>? codes, Set<String> enabled = const {}]) {
   final t = (raw ?? '').trim();
   if (t.isEmpty) return fallback;
-  final viaTable = codes?[t];
-  if (viaTable != null) return viaTable;
-  final named = _currencyNames[importFold(t)];
-  if (named != null) return named;
-  final code = t.toUpperCase();
-  return RegExp(r'^[A-Z]{3}$').hasMatch(code) ? code : null;
+  var code = codes?[t] ?? _currencyNames[importFold(t)];
+  if (code == null) {
+    final u = t.toUpperCase().replaceAll(' ', '_');
+    if (RegExp(r'^[A-Z]{3}(_[A-Z]{3})?$').hasMatch(u)) code = u;
+  }
+  if (code == null) return null;
+  code = code.toUpperCase();
+  if (enabled.isEmpty || enabled.contains(code)) return code;
+  final variants = [for (final c in enabled) if (c.startsWith('${code}_')) c];
+  return variants.length == 1 ? variants.single : code;
 }
+
+/// FYONA's own currency code rule (SAR, USD, YER_NEW…).
+bool importIsCurrencyCode(String? code) => code != null && RegExp(r'^[A-Z]{3}(_[A-Z]{3})?$').hasMatch(code);
+
+/// A bank / cash row is the business's CASH (a box, a till, «نقدي»): FYONA
+/// keeps one «كاش» account per currency, so its balance goes there.
+bool importIsCash(String name, String? bank) {
+  final f = ' ${importFold('$name ${bank ?? ''}')} ';
+  const words = ['صندوق', 'الصندوق', 'نقدي', 'نقديه', 'النقديه', 'نقد', 'كاش', 'الكاش', 'خزينه', 'الخزينه', 'خزنه', 'الخزنه',
+      'cash', 'box', 'till', 'petty', 'drawer'];
+  return words.any((w) => f.contains(' $w ') || f.contains(' $w'));
+}
+
+/// FYONA's limits the import keeps to (same as the screens).
+const importNameMax = 200, importCategoryMax = 120;
 
 /// A date as YYYY-MM-DD from the usual ways files write it (2026-03-01,
 /// 2026/3/1, 01/03/2026, an ISO time); null when it is not a date.
@@ -286,13 +308,18 @@ class ImportIssue {
 }
 
 class PartyImportRow {
-  PartyImportRow(this.row, this.kind, this.name, this.phone, this.amountMinor, this.currency);
+  PartyImportRow(this.row, this.kind, this.name, this.phone, this.amountMinor, this.currency, {this.more = const []});
   final int row;
   final String kind; // customer | supplier
   final String name;
   final String? phone;
   final int amountMinor;
+
+  /// Null only when the card has no balance at all.
   final String currency;
+
+  /// Its balances in other currencies (FYONA: an opening debt each).
+  final List<(String currency, int minor)> more;
 }
 
 class UnitImport {
@@ -303,35 +330,42 @@ class UnitImport {
 }
 
 class AccountImportRow {
-  AccountImportRow(this.row, this.name, this.bank, this.number, this.iban, this.amountMinor, this.currency);
+  AccountImportRow(this.row, this.name, this.bank, this.number, this.iban, this.amountMinor, this.currency, {this.cash = false});
   final int row;
   final String name, bank, number;
   final String? iban;
   final int amountMinor;
   final String currency;
+
+  /// The business's cash: its balance is deposited into FYONA's «كاش»
+  /// account of that currency (never a second cash account).
+  final bool cash;
 }
 
 class ProductImportRow {
-  ProductImportRow(this.row, this.name, this.barcode, this.sku, this.unit, this.sale, this.cost, this.stock,
+  ProductImportRow(this.row, this.name, this.barcode, this.unit, this.sale, this.cost, this.stock,
       {this.category,
       this.image,
       this.units = const [],
       this.barcodes = const [],
       this.minStock,
-      this.description,
       this.expiry,
-      this.notes,
+      this.currency,
       this.prices = const []});
 
-  /// Prices in other currencies: {currency, price, buy_price}.
+  /// Every price, as the product form saves them: the main currency first
+  /// ({currency, price, buy_price}).
   final List<Map<String, String?>> prices;
-  final String? expiry, notes;
+
+  /// The main currency (= the first price's; null: the product has no price).
+  final String? currency;
+  final String? expiry;
   final List<UnitImport> units;
   final List<String> barcodes;
-  final String? minStock, description;
+  final String? minStock;
   final int row;
   final String name;
-  final String? barcode, sku, unit;
+  final String? barcode, unit;
   final String? sale, cost, stock;
   final String? category;
 
@@ -342,10 +376,10 @@ class ProductImportRow {
 /// What the import WILL do: only the approved rows that have a place in
 /// FYONA. Built from an [ImportReview].
 class ImportPreview {
-  ImportPreview(this.target, this.mapping, {this.currency = 'SAR'});
+  ImportPreview(this.target, this.mapping, {this.currency});
 
-  /// The currency of amounts the file does not name (cost prices too).
-  final String currency;
+  /// The currency of amounts the file does not name (null: none chosen).
+  final String? currency;
   final ImportTarget target;
   final Map<String, String> mapping;
   int rows = 0;
@@ -371,7 +405,7 @@ Future<ImportPreview> buildImportPreview(
   ImportTarget target,
   Map<String, String> mapping, {
   String defaultKind = 'customer',
-  String defaultCurrency = 'SAR',
+  String? defaultCurrency,
   Set<String> existing = const {},
   Set<String> branches = const {},
   Set<String> images = const {},
@@ -407,12 +441,18 @@ class ReviewRow {
   /// Unit / extra barcodes left out (already used elsewhere).
   Set<String> droppedCodes = const {};
 
+  /// Prices in a currency the file names but nobody knows (left out).
+  int droppedPrices = 0;
+
   /// The phone is left out (used by another card / too long).
   bool dropPhone = false;
 
-  /// A problem found while joining the linked tables (e.g. one customer
-  /// with balances in two currencies).
+  /// A problem found while joining the linked tables.
   String? joinProblem;
+
+  /// A customer's / supplier's balances in other currencies (currency as
+  /// the file names it — null: the chosen one — and minor units).
+  List<(String?, int)> more = const [];
   bool get accepted => reasons.isEmpty && !rejectedByUser;
   String? operator [](String field) => values[field];
 }
@@ -422,13 +462,19 @@ class ReviewRow {
 /// Columns that map to no field are listed and never saved.
 class ImportReview {
   ImportReview._(this.table, this.target, this.mapping, this.defaultKind, this.defaultCurrency, this.existing,
-      this.branches, this.images);
+      this.branches, this.images, this.enabled);
 
   final ImportTable table;
   final ImportTarget target;
   final Map<String, String> mapping;
   final String defaultKind;
-  final String defaultCurrency;
+
+  /// The currency of amounts the file does not name; null until the user
+  /// chooses one (never assumed).
+  final String? defaultCurrency;
+
+  /// The business's currencies (a record in another one is not saved).
+  final Set<String> enabled;
   final Set<String> existing;
 
   /// Folded names / ids of the branch being imported into.
@@ -446,7 +492,8 @@ class ImportReview {
     ImportTarget target,
     Map<String, String> mapping, {
     String defaultKind = 'customer',
-    String defaultCurrency = 'SAR',
+    String? defaultCurrency,
+    Set<String> enabledCurrencies = const {},
     Set<String> existing = const {},
     Set<String> branches = const {},
     Set<String> images = const {},
@@ -457,7 +504,7 @@ class ImportReview {
     void Function(int rows)? onRows,
   }) async {
     final r = ImportReview._(table, target, Map.of(mapping), defaultKind, defaultCurrency, existing,
-        {for (final b in branches) importFold(b)}, {for (final i in images) i.toLowerCase()})
+        {for (final b in branches) importFold(b)}, {for (final i in images) i.toLowerCase()}, enabledCurrencies)
       ..blobImages = blobImages
       ..currencyCodes = currencyCodes;
     final idx = {for (final e in r.mapping.entries) e.key: table.columns.indexOf(e.value)}..removeWhere((_, v) => v < 0);
@@ -503,14 +550,14 @@ class ImportReview {
           ..remove('debit')
           ..remove('credit');
         final b = key == null ? null : partyParts!.balances[key];
-        if (b == null || b.isEmpty) {
+        // One balance per currency (FYONA keeps an opening debt for each).
+        final entries = [for (final e in (b ?? const <String?, int>{}).entries) if (e.value != 0) e];
+        if (entries.isEmpty) {
           values['balance'] = '0';
-        } else if (b.length > 1) {
-          row.joinProblem = 'multi_currency';
         } else {
-          final e = b.entries.single;
-          values['balance'] = _decimalOf(e.value);
-          if (e.key != null) values['currency'] = e.key;
+          values['balance'] = _decimalOf(entries.first.value);
+          if (entries.first.key != null) values['currency'] = entries.first.key;
+          row.more = [for (final e in entries.skip(1)) (e.key, e.value)];
         }
       }
       r.rows.add(row);
@@ -527,19 +574,36 @@ class ImportReview {
   static const _saleKinds = ['retail', 'sale', 'sell', 'selling', 'default', 'standard', 'normal', 'list', 'base', 'بيع', 'تجزئه', 'قطاعي', 'عادي', 'افتراضي', 'اساسي'];
   static const _costKinds = ['cost', 'purchase', 'buy', 'buying', 'شراء', 'تكلفه'];
 
-  /// Rows of a prices table → the product's sale / cost price (in the
-  /// chosen currency) and its prices in other currencies. Other lists
-  /// (wholesale…) have no place in a FYONA product and are left out.
+  /// Rows of a prices table → the product's sale / cost price in its main
+  /// currency and its prices in other currencies (each currency as the file
+  /// names it; never converted). Other lists (wholesale…) have no place in
+  /// a FYONA product and are left out.
   void _applyPrices(ReviewRow row, List<Map<String, String?>> prices) {
     if (prices.isEmpty) return;
+    String? named(Map<String, String?> p) {
+      final raw = p['currency']?.trim();
+      return raw == null || raw.isEmpty ? null : importCurrency(raw, null, currencyCodes, enabled);
+    }
+
+    // The product's main currency: its own column, else the chosen one,
+    // else the first currency its prices name (what the file says).
+    var main = importCurrency(row.values['currency'], defaultCurrency, currencyCodes, enabled);
+    if (main == null) {
+      main = prices.map(named).whereType<String>().firstOrNull;
+      if (main != null) row.values['currency'] = main;
+    }
     final other = <String, Map<String, String?>>{};
     for (final p in prices) {
       final kind = importFold(p['kind'] ?? '');
       final isCost = kind.isNotEmpty && _costKinds.any((w) => kind.contains(importFold(w)));
       final isSale = kind.isEmpty || _saleKinds.any((w) => kind.contains(importFold(w)));
-      final cur = importCurrency(p['currency'], defaultCurrency, currencyCodes);
-      if (cur == null) continue;
-      if (cur == defaultCurrency) {
+      final raw = p['currency']?.trim();
+      final cur = raw == null || raw.isEmpty ? main : named(p);
+      if (raw != null && raw.isNotEmpty && cur == null) {
+        row.droppedPrices++;
+        continue;
+      }
+      if (cur == main) {
         if (isCost) {
           row.values['cost_price'] ??= p['price'];
         } else if (isSale) {
@@ -547,7 +611,7 @@ class ImportReview {
           if (p['cost'] != null) row.values['cost_price'] ??= p['cost'];
         }
       } else if (isSale || isCost) {
-        final o = other[cur] ??= {'currency': cur};
+        final o = other[cur!] ??= {'currency': cur};
         if (isCost) {
           o['buy_price'] ??= p['price'];
         } else {
@@ -616,13 +680,22 @@ class ImportReview {
         } else if (m < 0) {
           reasons.add('credit_balance');
         }
-        if (importCurrency(r['currency'], defaultCurrency, currencyCodes) == null) reasons.add('bad_currency');
+        // An account always has a currency in FYONA.
+        final cur = _currencyCheck(r['currency'], reasons, needed: true);
         if (name != null) {
-          final key = 'account|${importFold(name)}|${importFold(r['bank'] ?? '')}';
-          if (existing.contains(key)) {
-            reasons.add('exists');
-          } else if (reasons.isEmpty && !r.rejectedByUser && !seen.add(key)) {
-            reasons.add('duplicate_in_file');
+          if (importIsCash(name, r['bank'])) {
+            // Its balance is added to the «كاش» account of the currency.
+            warnings.add('to_cash');
+          } else {
+            // FYONA keeps one account per bank, currency and type.
+            final bank = (r['bank'] ?? name).trim();
+            if (bank.runes.length < 2) reasons.add('name_too_short');
+            final key = 'bank|${importFold(bank)}|$cur';
+            if (existing.contains(key)) {
+              reasons.add('exists');
+            } else if (reasons.isEmpty && !r.rejectedByUser && !seen.add(key)) {
+              reasons.add('duplicate_in_file');
+            }
           }
         }
       } else if (target == ImportTarget.parties) {
@@ -634,7 +707,14 @@ class ImportReview {
         } else if (amount < 0) {
           reasons.add('credit_balance');
         }
-        if (importCurrency(r['currency'], defaultCurrency, currencyCodes) == null) reasons.add('bad_currency');
+        // A balance needs its currency; a card without one does not.
+        final main = _currencyCheck(r['currency'], reasons, needed: (amount ?? 0) != 0);
+        for (final (c, minor) in r.more) {
+          if (minor < 0) reasons.add('credit_balance');
+          final other = _currencyCheck(c, reasons, needed: true);
+          if (other != null && other == main && !warnings.contains('merged_currency')) warnings.add('merged_currency');
+        }
+        if (r.more.isNotEmpty) warnings.add('multi_currency');
         if (name != null && name.trim().runes.length < 2) reasons.add('name_too_short');
         if (name != null && kind != null) {
           // FYONA keeps one card per name (and per phone) for each kind.
@@ -655,6 +735,15 @@ class ImportReview {
           }
         }
       } else {
+        if (name != null && name.trim().runes.length > importNameMax) reasons.add('name_too_long');
+        final hasPrice = r['sale_price'] != null || r['cost_price'] != null || r.prices.isNotEmpty;
+        _currencyCheck(r['currency'], reasons, needed: hasPrice);
+        if (r.droppedPrices > 0) warnings.add('price_skipped');
+        for (final x in r.prices) {
+          _currencyCheck(x['currency'], reasons, needed: true);
+        }
+        final cat = r['category']?.trim();
+        if (cat != null && cat.runes.length > importCategoryMax) warnings.add('category_cut');
         for (final f in ['sale_price', 'cost_price', 'min_stock']) {
           final raw = r[f];
           if (raw == null) continue;
@@ -692,16 +781,17 @@ class ImportReview {
         if (name != null) {
           // A product is the same one when its barcode or code says so; two
           // products may share a name (sizes, colours) when their codes differ.
-          final barcode = r['barcode'], sku = r['sku'];
+          final barcode = r['barcode'];
           final byName = 'product|${importFold(name)}';
-          if ((barcode != null && existing.contains('product|$barcode')) ||
-              (sku != null && existing.contains('sku|$sku')) ||
-              (barcode == null && sku == null && existing.contains(byName))) {
+          if (barcode != null && (existing.contains('product|$barcode') || existing.contains('code|$barcode'))) {
+            // A barcode means one thing in a FYONA branch: never changed here.
+            reasons.add('barcode_exists');
+          } else if (barcode == null && existing.contains(byName)) {
             reasons.add('exists');
           } else if (reasons.isEmpty && !r.rejectedByUser) {
-            final dupCode = (barcode != null && !seen.add('barcode|$barcode')) || (sku != null && !seen.add('sku|$sku'));
+            final dupCode = barcode != null && !seen.add('barcode|$barcode');
             final dupName = !seen.add(byName);
-            if (dupCode || (dupName && barcode == null && sku == null)) {
+            if (dupCode || (dupName && barcode == null)) {
               reasons.add('duplicate_in_file');
             } else if (dupName) {
               warnings.add('same_name');
@@ -741,6 +831,66 @@ class ImportReview {
       }
       if (r.droppedCodes.isNotEmpty) r.warnings = [...r.warnings, 'code_skipped'];
     }
+  }
+
+  /// The currency a record is saved in: what its row says, else the one
+  /// chosen for the file. Adds the reason when it cannot be saved.
+  String? _currencyCheck(String? raw, List<String> reasons, {required bool needed}) {
+    final named = raw != null && raw.trim().isNotEmpty;
+    final cur = importCurrency(raw, defaultCurrency, currencyCodes, enabled);
+    void add(String why) {
+      if (!reasons.contains(why)) reasons.add(why);
+    }
+
+    if (named && cur == null) {
+      add('bad_currency');
+    } else if (cur == null) {
+      if (needed) add('needs_currency');
+    } else if (enabled.isNotEmpty && !enabled.contains(cur)) {
+      add('currency_not_enabled');
+    }
+    return cur;
+  }
+
+  /// The rows whose name is already a card / product in this branch get a
+  /// new name «name (1)», «name (2)»… — only when the user asks; nothing is
+  /// merged. Returns how many were renamed.
+  int renameExisting(Iterable<ReviewRow> which) {
+    final taken = <String>{
+      ...existing,
+      for (final r in rows)
+        if (r['name'] != null) '${_nameKeyPrefix(r)}${importFold(r['name']!)}',
+    };
+    var n = 0;
+    for (final r in which) {
+      final name = r['name'];
+      if (name == null || !r.reasons.contains('exists')) continue;
+      final prefix = _nameKeyPrefix(r);
+      for (var i = 1; i < 1000; i++) {
+        final next = '$name ($i)';
+        if (taken.add('$prefix${importFold(next)}')) {
+          r.values['name'] = next;
+          n++;
+          break;
+        }
+      }
+    }
+    if (n > 0) revalidate();
+    return n;
+  }
+
+  String _nameKeyPrefix(ReviewRow r) => switch (target) {
+        ImportTarget.products => 'product|',
+        ImportTarget.parties => '${_kindOf(r) ?? defaultKind}|',
+        ImportTarget.accounts => 'account|',
+      };
+
+  /// Sets the currency of [which] rows (one, some, or all shown).
+  void setCurrency(Iterable<ReviewRow> which, String code) {
+    for (final r in which) {
+      r.values['currency'] = code;
+    }
+    revalidate();
   }
 
   /// Money in minor units; a real third decimal is rounded and reported.
@@ -783,9 +933,11 @@ class ImportReview {
     return b + (kind == 'customer' ? d - c : c - d);
   }
 
-  /// The accepted rows, as the import will write them.
+  /// The accepted rows, as the import will write them (the same fields
+  /// and rules as FYONA's own screens).
   ImportPreview toPreview() {
     final p = ImportPreview(target, Map.of(mapping), currency: defaultCurrency)..rows = rows.length;
+    String? cur(String? raw) => importCurrency(raw, defaultCurrency, currencyCodes, enabled);
     for (final r in rows) {
       if (!r.accepted) {
         p.issueCount++;
@@ -794,17 +946,33 @@ class ImportReview {
         }
         continue;
       }
-      final name = r['name']!;
-      final clean = name.length > 120 ? name.substring(0, 120) : name;
+      final name = r['name']!.trim();
       if (target == ImportTarget.accounts) {
-        p.accounts.add(AccountImportRow(r.row, clean, r['bank'] ?? clean, r['number'] ?? '-', r['iban'],
-            _money(r['balance'], [])!, importCurrency(r['currency'], defaultCurrency, currencyCodes)!));
+        final cash = importIsCash(name, r['bank']);
+        final clean = name.length > importNameMax ? name.substring(0, importNameMax) : name;
+        p.accounts.add(AccountImportRow(r.row, cash ? 'حساب الكاش' : clean, cash ? 'كاش' : (r['bank'] ?? clean).trim(),
+            cash ? 'CASH' : (r['number'] ?? ''), cash ? null : r['iban'], _money(r['balance'], [])!, cur(r['currency'])!,
+            cash: cash));
       } else if (target == ImportTarget.parties) {
         final kind = _kindOf(r)!;
         final amount = _amountOf(r, kind)!;
-        final cur = importCurrency(r['currency'], defaultCurrency, currencyCodes)!;
-        p.parties.add(PartyImportRow(r.row, kind, clean, r.dropPhone ? null : r['phone']?.trim(), amount, cur));
-        (p.totals[kind] ??= {})[cur] = (p.totals[kind]![cur] ?? 0) + amount;
+        // Balances per currency (the same currency twice is added up).
+        final byCur = <String, int>{};
+        final main = cur(r['currency']);
+        if (amount != 0) byCur[main!] = amount;
+        for (final (c, minor) in r.more) {
+          final code = cur(c)!;
+          byCur[code] = (byCur[code] ?? 0) + minor;
+        }
+        final list = [for (final e in byCur.entries) if (e.value != 0) (e.key, e.value)];
+        final first = list.firstOrNull;
+        final clean = name.length > importNameMax ? name.substring(0, importNameMax) : name;
+        p.parties.add(PartyImportRow(r.row, kind, clean, r.dropPhone ? null : r['phone']?.trim(), first?.$2 ?? 0,
+            first?.$1 ?? main ?? enabled.firstOrNull ?? 'SAR',
+            more: list.skip(1).toList()));
+        for (final (c, minor) in list) {
+          (p.totals[kind] ??= {})[c] = (p.totals[kind]![c] ?? 0) + minor;
+        }
       } else {
         String? num(String f, [int places = 2]) => r[f] == null ? null : importRound(importDecimal(r[f]), places)?.value;
         String? stock() {
@@ -814,9 +982,27 @@ class ImportReview {
 
         final img = r['image'];
         final codes = <String>{if (r['barcode'] != null) r['barcode']!};
-        p.products.add(ProductImportRow(r.row, clean, r['barcode'], r['sku'], r['unit'], num('sale_price'),
-            num('cost_price'), stock(),
-            category: r['category'],
+        final sale = num('sale_price'), cost = num('cost_price');
+        // As the product form saves it: the main currency's price first,
+        // then every other currency (never converted).
+        final main = cur(r['currency']);
+        final prices = <Map<String, String?>>[
+          if (main != null && (sale != null || cost != null)) {'currency': main, 'price': sale ?? '0', 'buy_price': cost},
+          for (final x in r.prices)
+            if (x['currency'] != main)
+              if (importRound(importDecimal(x['price']), 2) case final pr?)
+                {
+                  'currency': x['currency'],
+                  'price': pr.value,
+                  'buy_price': importRound(importDecimal(x['buy_price']), 2)?.value,
+                },
+        ];
+        var category = r['category']?.trim();
+        if (category != null && category.runes.length > importCategoryMax) {
+          category = String.fromCharCodes(category.runes.take(importCategoryMax)).trim();
+        }
+        p.products.add(ProductImportRow(r.row, name, r['barcode'], r['unit'], sale, cost, stock(),
+            category: category == null || category.isEmpty ? null : category,
             image: img != null && !r.warnings.contains('image_missing')
                 ? (ImportImages.isBlob(img) ? img : img.split('/').last.split('\\').last)
                 : null,
@@ -827,18 +1013,9 @@ class ImportReview {
             ],
             barcodes: [for (final b in r.barcodes) if (!r.droppedCodes.contains(b) && codes.add(b)) b],
             minStock: num('min_stock', 4),
-            description: r['description'],
             expiry: importDate(r['expiry']),
-            notes: r['notes'],
-            prices: [
-              for (final x in r.prices)
-                if (importRound(importDecimal(x['price']), 2) case final pr?)
-                  {
-                    'currency': x['currency'],
-                    'price': pr.value,
-                    if (importRound(importDecimal(x['buy_price']), 2) case final bp?) 'buy_price': bp.value,
-                  },
-            ]));
+            currency: prices.isEmpty ? null : prices.first['currency'],
+            prices: prices));
       }
     }
     return p;

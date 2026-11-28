@@ -102,7 +102,13 @@ def test_agent_ops_are_checked_against_the_file():
         {"op": "map", "table": "products", "field": "sale_price", "column": "nope"},
         {"op": "set_currency", "currency": "usd"},
         {"op": "set_currency", "currency": "dollars"},
+        {"op": "set_currency", "currency": "yer_new"},
+        # Sara never writes prices, balances or quantities.
         {"op": "set_field", "target": "products", "field": "sale_price", "value": 10, "only_empty": True},
+        {"op": "set_field", "target": "customers", "field": "balance", "value": 10},
+        {"op": "set_field", "target": "products", "field": "currency", "value": "usd",
+         "where": {"field": "name", "op": "contains", "value": "قلم"}},
+        {"op": "set_field", "target": "products", "field": "currency", "value": "dollar"},
         {"op": "set_field", "target": "products", "field": "password", "value": "x"},
         {"op": "adjust", "field": "sale_price", "percent": 10},
         {"op": "adjust", "field": "sale_price", "percent": 99999},
@@ -114,8 +120,9 @@ def test_agent_ops_are_checked_against_the_file():
         {"op": "set_role", "table": "tbl_x", "role": "customers"},
         {"op": "map", "table": "products", "field": "sale_price", "column": "price"},
         {"op": "set_currency", "currency": "USD"},
-        {"op": "set_field", "target": "products", "field": "sale_price", "value": "10", "only_empty": True},
-        {"op": "adjust", "field": "sale_price", "percent": 10.0},
+        {"op": "set_currency", "currency": "YER_NEW"},
+        {"op": "set_field", "target": "products", "field": "currency", "value": "USD", "only_empty": False,
+         "where": {"field": "name", "op": "contains", "value": "قلم"}},
         {"op": "reject", "target": "products", "where": {"field": "sale_price", "op": "empty", "value": None}},
     ]
 
@@ -130,3 +137,10 @@ def test_agent_unavailable_is_a_clear_503(monkeypatch):
     monkeypatch.setattr(ai_router, "route", lambda *a, **k: R())
     r = _client().post("/api/v1/ai/import-agent", json={"message": "زد الأسعار 10%", "tables": []})
     assert r.status_code == 503
+
+
+def test_agent_accepts_fyona_currency_codes():
+    """The phone sends FYONA's own codes (YER_NEW): that once failed with 422
+    and showed «Sara unavailable»."""
+    assert im.AgentIn(message="افحص الملف", currency="YER_NEW", tables=[]).currency == "YER_NEW"
+    assert im.AgentIn(message="افحص الملف", tables=[]).currency is None

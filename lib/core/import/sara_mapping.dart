@@ -79,9 +79,8 @@ class SaraAgentAnswer {
 Future<SaraAgentAnswer?> saraImportAgent(
   ApiClient api, {
   required String message,
-  required String currency,
+  required String? currency,
   required List<TableAnalysis> tables,
-  List<Map<String, String>> history = const [],
 }) async {
   try {
     final outline = [
@@ -99,9 +98,9 @@ Future<SaraAgentAnswer?> saraImportAgent(
     ];
     final r = await api.post<Map<String, dynamic>>('/ai/import-agent', data: {
       'message': message.length > 800 ? message.substring(0, 800) : message,
-      'currency': currency,
+      // FYONA's own code (YER_NEW…); none until the user chooses one.
+      if (currency != null) 'currency': currency,
       'tables': outline,
-      'history': history.length > 8 ? history.sublist(history.length - 8) : history,
     }, options: _saraOptions);
     final d = r.data?['data'];
     if (d is! Map) return null;

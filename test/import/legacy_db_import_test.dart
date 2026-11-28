@@ -67,7 +67,7 @@ void main() {
     final parts = await joinProductParts(a, items.table);
     expect(parts.orphans, {'tbl_item_units': 1});
     final review = await ImportReview.load(items.table, ImportTarget.products, items.mapping,
-        blobImages: true, parts: parts);
+        blobImages: true, parts: parts, defaultCurrency: 'SAR');
     expect(review.acceptedCount, e.productsOk);
     final p = review.toPreview();
     expect(p.products.fold<int>(0, (s, x) => s + x.units.length), e.unitsOk);
@@ -127,7 +127,7 @@ void main() {
       final parts = t.role == TableRole.products ? await joinProductParts(a, t.table) : null;
       final r = await ImportReview.load(t.table, t.role.target!, t.mapping,
           defaultKind: t.role == TableRole.suppliers ? 'supplier' : 'customer',
-          existing: existing, blobImages: true, parts: parts);
+          existing: existing, blobImages: true, parts: parts, defaultCurrency: 'SAR');
       reviewMs += s0.elapsedMilliseconds;
       s0.reset();
       batches.add(await imp.apply(r.toPreview(), fileSha: '$sha|${t.table.name}', fileName: 'old.db'));
@@ -170,7 +170,7 @@ void main() {
     // The same file again: refused, nothing doubled.
     final again = a.firstWhere((x) => x.role == TableRole.products);
     final r2 = await ImportReview.load(again.table, ImportTarget.products, again.mapping,
-        existing: await imp.existingNames(), blobImages: true, parts: await joinProductParts(a, again.table));
+        existing: await imp.existingNames(), blobImages: true, parts: await joinProductParts(a, again.table), defaultCurrency: 'SAR');
     expect(r2.acceptedCount, 0); // every product now "exists"
     await expectLater(imp.apply(r2.toPreview(), fileSha: '$sha|tbl_items', fileName: 'old.db'),
         throwsA(isA<ImportRefused>()));

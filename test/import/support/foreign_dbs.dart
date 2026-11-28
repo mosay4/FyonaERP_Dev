@@ -182,7 +182,7 @@ Future<ShopExpect> buildShopDb(String path, {int products = 5500, int customers 
         'email': 'c$c@example.test', 'branch_id': branch, 'credit_limit': 5000, 'created_at': '2024-02-02'});
     // Receivables: 0–3 open invoices; some paid; one customer in two
     // currencies; one overpaid (credit).
-    var total = 0;
+    var total = 0, sar = 0;
     final rows = c % 4;
     var usd = false;
     for (var x = 0; x < rows; x++) {
@@ -192,6 +192,7 @@ Future<ShopExpect> buildShopDb(String path, {int products = 5500, int customers 
       b.insert('customer_receivables', {'customer_id': c, 'invoice_id': c * 10 + x, 'amount_due': due / 100,
           'paid_amount': paid / 100, 'due_date': '2025-03-0${x + 1}', 'currency_id': cur});
       total += due - paid;
+      if (cur == 1) sar += due - paid;
     }
     if (c % 211 == 0) {
       b.insert('customer_receivables', {'customer_id': c, 'invoice_id': c * 10 + 9, 'amount_due': 0, 'paid_amount': (total + 700) / 100,
@@ -208,7 +209,10 @@ Future<ShopExpect> buildShopDb(String path, {int products = 5500, int customers 
       continue;
     }
     if (usd && rows > 1) {
+      // Imported: one opening debt per currency (FYONA's recordOpeningDebt).
       e.multiCurrency++;
+      e.customersOk++;
+      e.customerTotalMinor += sar;
       continue;
     }
     if (total < 0) {
@@ -236,6 +240,9 @@ Future<ShopExpect> buildShopDb(String path, {int products = 5500, int customers 
   for (var a = 1; a <= 4; a++) {
     b.insert('bank_accounts', {'id': a, 'bank_name': 'بنك ${a % 2 == 0 ? 'الكريمي' : 'التضامن'}', 'account_name': 'حساب $a',
         'account_no': '000$a', 'iban': null, 'balance': a * 1000.0, 'currency_id': a == 4 ? 2 : 1});
+    // FYONA keeps one account per bank and currency: the second «بنك
+    // التضامن» in SAR is refused (the banks screen refuses it too).
+    if (a == 3) continue;
     e.accountsOk++;
     if (a != 4) e.accountTotalMinor += a * 100000; // the USD one is counted apart
   }

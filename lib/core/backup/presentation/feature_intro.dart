@@ -11,9 +11,12 @@ const _font = 'Cairo';
 /// One scene of an explainer: icons that come in, one after the other,
 /// joined by a moving arrow, and a caption.
 class IntroScene {
-  const IntroScene(this.icons, this.caption);
+  const IntroScene(this.icons, this.caption, {this.saraAt});
   final List<IconData> icons;
   final String caption;
+
+  /// Which icon is Sara (her own picture is shown there).
+  final int? saraAt;
 }
 
 /// A short explainer that plays like a video: scenes advance by themselves
@@ -90,8 +93,8 @@ class _IntroPlayerState extends State<IntroPlayer> with TickerProviderStateMixin
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
-            gradient: LinearGradient(colors: widget.colors, begin: Alignment.topRight, end: Alignment.bottomLeft),
-            boxShadow: [BoxShadow(color: widget.colors.first.withValues(alpha: .3), blurRadius: 20, offset: const Offset(0, 8))],
+            gradient: LinearGradient(colors: widget.colors, begin: AlignmentDirectional.topStart, end: AlignmentDirectional.bottomEnd),
+            boxShadow: [BoxShadow(color: widget.colors.first.withValues(alpha: .18), blurRadius: 14, offset: const Offset(0, 6))],
           ),
           child: Stack(children: [
             // Scene bars.
@@ -128,16 +131,16 @@ class _IntroPlayerState extends State<IntroPlayer> with TickerProviderStateMixin
                   final n = scene.icons.length;
                   return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                     for (var k = 0; k < n; k++) ...[
-                      _pop(k / (n + 1), scene.icons[k], big: k == n - 1),
+                      _pop(k / (n + 1), scene.icons[k], big: k == n - 1, sara: scene.saraAt == k),
                       if (k < n - 1) _arrow(k / (n + 1)),
                     ],
                   ]);
                 },
               ),
             ),
-            Positioned(
-              left: 14,
-              right: 56,
+            PositionedDirectional(
+              start: 14,
+              end: 56,
               bottom: 12,
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 300),
@@ -147,8 +150,8 @@ class _IntroPlayerState extends State<IntroPlayer> with TickerProviderStateMixin
                     style: const TextStyle(fontFamily: _font, fontSize: 14.5, fontWeight: FontWeight.w800, color: Colors.white, height: 1.4)),
               ),
             ),
-            Positioned(
-              right: 8,
+            PositionedDirectional(
+              end: 8,
               bottom: 6,
               child: IconButton(
                 key: const Key('intro-play'),
@@ -167,7 +170,7 @@ class _IntroPlayerState extends State<IntroPlayer> with TickerProviderStateMixin
   }
 
   /// An icon that pops in at [at] of the scene.
-  Widget _pop(double at, IconData icon, {bool big = false}) {
+  Widget _pop(double at, IconData icon, {bool big = false, bool sara = false}) {
     final v = ((_scene.value - at) / .18).clamp(0.0, 1.0);
     final e = Curves.easeOutBack.transform(v);
     final float = math.sin(_loop.value * 2 * math.pi + at * 6) * 3;
@@ -185,7 +188,10 @@ class _IntroPlayerState extends State<IntroPlayer> with TickerProviderStateMixin
               shape: BoxShape.circle,
               boxShadow: big ? [BoxShadow(color: Colors.white.withValues(alpha: .35), blurRadius: 18)] : null,
             ),
-            child: Icon(icon, color: big ? widget.colors.first : Colors.white, size: big ? 36 : 28),
+            padding: EdgeInsets.all(sara ? 3 : 0),
+            child: sara
+                ? ClipOval(child: Image.asset('assets/images/sara_avatar.jpg', fit: BoxFit.cover, cacheWidth: 220))
+                : Icon(icon, color: big ? widget.colors.first : Colors.white, size: big ? 36 : 28),
           ),
         ),
       ),
@@ -200,9 +206,9 @@ class _IntroPlayerState extends State<IntroPlayer> with TickerProviderStateMixin
         width: 34,
         child: Transform.translate(
           offset: Offset((_loop.value - .5) * 8 * (Directionality.of(context) == TextDirection.rtl ? -1 : 1), 0),
-          child: Icon(
-              Directionality.of(context) == TextDirection.rtl ? Icons.arrow_back_rounded : Icons.arrow_forward_rounded,
-              color: Colors.white70),
+          // Mirrored by Flutter in Arabic: the flow reads right → left there
+          // and left → right in English.
+          child: const Icon(Icons.arrow_forward_rounded, color: Colors.white70),
         ),
       ),
     );
@@ -284,7 +290,7 @@ Future<void> showFeatureIntro(
                       Navigator.pop(ctx);
                       onStart();
                     },
-                    icon: const Icon(Icons.arrow_circle_left_rounded),
+                    icon: const Icon(Icons.arrow_forward_rounded),
                     label: Text(start, style: const TextStyle(fontFamily: _font, fontSize: 16, fontWeight: FontWeight.w800)),
                   ),
                 ),

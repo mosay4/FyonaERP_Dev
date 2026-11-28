@@ -93,7 +93,7 @@ void main() {
     final mapping = autoMapColumns(ImportTarget.parties, t.columns);
     expect(mapping, {'name': 'الاسم', 'kind': 'النوع', 'phone': 'الجوال', 'debit': 'مدين', 'credit': 'دائن', 'currency': 'العملة'});
     final imp = importer();
-    final p = await buildImportPreview(t, ImportTarget.parties, mapping, existing: await imp.existingNames());
+    final p = await buildImportPreview(t, ImportTarget.parties, mapping, existing: await imp.existingNames(), defaultCurrency: 'SAR');
     expect(p.rows, 7);
     expect(p.ready, 3);
     expect({for (final i in p.issues) i.row: i.code},
@@ -130,7 +130,7 @@ void main() {
   test('undo is refused once something happened to what the batch created', () async {
     final (t, sha) = await file('c.csv', 'name,balance\nعميل أ,100\nعميل ب,200\n');
     final imp = importer();
-    final p = await buildImportPreview(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns));
+    final p = await buildImportPreview(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns), defaultCurrency: 'SAR');
     final batch = await imp.apply(p, fileSha: sha, fileName: 'c.csv');
     final party = (await store.search(scope, DirectoryPartyKind.customer, 'عميل ب')).single;
     await store.withLedger(grant, () => scope, (l) => l.recordOpeningDebt(grant,
@@ -142,7 +142,7 @@ void main() {
     // Another file naming a customer the branch already has: skipped, listed.
     final (t2, _) = await file('c2.csv', 'name,balance\nعميل  أ,5\nعميل ج,7\n');
     final p2 = await buildImportPreview(t2, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t2.columns),
-        existing: await imp.existingNames());
+        existing: await imp.existingNames(), defaultCurrency: 'SAR');
     expect(p2.ready, 1);
     expect(p2.issues.single.code, 'exists');
   });
@@ -152,7 +152,7 @@ void main() {
     final map = autoMapColumns(ImportTarget.products, t.columns);
     expect(map, {'name': 'الصنف', 'barcode': 'الباركود', 'sale_price': 'سعر البيع', 'cost_price': 'التكلفة', 'stock': 'الكمية'});
     final imp = importer();
-    final p = await buildImportPreview(t, ImportTarget.products, map);
+    final p = await buildImportPreview(t, ImportTarget.products, map, defaultCurrency: 'SAR');
     // Two products may share a name when their barcodes differ (sizes,
     // colours); the same barcode twice would be refused.
     expect(p.ready, 3);
@@ -170,7 +170,7 @@ void main() {
     // Again (another file name, same content = same batch: refused).
     await expectLater(imp.apply(p, fileSha: sha, fileName: 'copy.csv'), throwsA(isA<ImportRefused>()));
     final (t2, sha2) = await file('p2.csv', 'الصنف,سعر البيع,الكمية\nممحاة,1,10\n');
-    final p2 = await buildImportPreview(t2, ImportTarget.products, autoMapColumns(ImportTarget.products, t2.columns));
+    final p2 = await buildImportPreview(t2, ImportTarget.products, autoMapColumns(ImportTarget.products, t2.columns), defaultCurrency: 'SAR');
     final b2 = await imp.apply(p2, fileSha: sha2, fileName: 'p2.csv');
     final eraser = (await inventory.listProducts()).single;
     final buyer = await store.withLedger(grant, () => scope, (l) => l.addPartyWithOpeningDebt(grant,
@@ -193,7 +193,7 @@ void main() {
     final images = await readImportImages(f);
     expect(images.names, {'pen.png'});
     final review = await ImportReview.load(t, ImportTarget.products, autoMapColumns(ImportTarget.products, t.columns),
-        branches: {scope.branchId}, images: images.names);
+        branches: {scope.branchId}, images: images.names, defaultCurrency: 'SAR');
     expect(review.rows[1].warnings, ['image_missing']);
     expect(review.rows[2].reasons, ['other_branch']);
     final media = <String>[];
@@ -237,7 +237,7 @@ void main() {
     var peak = rss;
     final sw = Stopwatch()..start();
     final imp = importer();
-    final p = await buildImportPreview(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns));
+    final p = await buildImportPreview(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns), defaultCurrency: 'SAR');
     final previewMs = sw.elapsedMilliseconds;
     expect(p.ready, n);
     expect(p.totals['customer']!['SAR'], total);
@@ -254,4 +254,112 @@ void main() {
     _log('IMPORT_BENCH $n customers: preview ${previewMs}ms, import ${applyMs}ms '
         '(${(applyMs / n).toStringAsFixed(2)} ms/row), undo ${sw.elapsedMilliseconds}ms, RSS +${((peak - rss) / 1048576).toStringAsFixed(1)} MB');
   }, timeout: const Timeout(Duration(hours: 2)));
+
+  test('bank and cash balances: banks as the banks screen makes them, cash into the one «كاش»', () async {
+    final (t, sha) = await file('accounts.csv', 'الحساب,البنك,الرصيد,العملة\n'
+        'الصندوق الرئيسي,,1500,SAR\n'
+        'صندوق المعرض,,500.25,SAR\n'
+        'حساب الراجحي,مصرف الراجحي,85000,SAR\n'
+        'حساب ثان,مصرف الراجحي,10,SAR\n' // same bank and currency: FYONA keeps one
+        'حساب دولار,مصرف الراجحي,400,USD\n');
+    // The branch already has its cash account (created as the app does).
+    await store.withLedger(grant, () => scope, (l) => l.createAccount(grant,
+        commandId: const Uuid().v5(Uuid.NAMESPACE_URL, 'fyona-cash:${scope.branchId}:SAR'),
+        bankName: 'كاش', accountName: 'حساب الكاش', accountNumber: 'CASH', currency: 'SAR', openingMinor: 1000, managed: true));
+    final imp = importer();
+    final review = await ImportReview.load(t, ImportTarget.accounts, autoMapColumns(ImportTarget.accounts, t.columns),
+        existing: await imp.existingNames(), enabledCurrencies: {'SAR', 'USD'});
+    expect(review.refusedByReason, {'duplicate_in_file': 1});
+    expect(review.rows.where((r) => r.warnings.contains('to_cash')).length, 2);
+    final id = await imp.apply(review.toPreview(), fileSha: sha, fileName: 'accounts.csv');
+    final rows = await store.withLedger(grant, () => scope, (l) => l.managedBankAccounts(grant, includeBalances: true));
+    final cash = rows.where((a) => a['bank_name'] == 'كاش').toList();
+    expect(cash.length, 1, reason: 'never a second cash account');
+    expect(cash.single['balance_minor'], 1000 + 150000 + 50025);
+    final banks = rows.where((a) => a['bank_name'] == 'مصرف الراجحي').toList();
+    expect(banks.map((a) => a['currency']).toSet(), {'SAR', 'USD'});
+    expect(banks.firstWhere((a) => a['currency'] == 'SAR')['balance_minor'], 8500000);
+    // The same bank again is refused by FYONA's own rule (managed account).
+    expect(
+        () => store.withLedger(grant, () => scope, (l) => l.createAccount(grant,
+            commandId: _id(), bankName: 'مصرف الراجحي', accountName: 'x', accountNumber: '1', currency: 'SAR', managed: true)),
+        throwsA(isA<BusinessLedgerError>()));
+    // Undo: the deposits leave «كاش», the banks are closed.
+    await imp.undo(id);
+    final after = await store.withLedger(grant, () => scope, (l) => l.managedBankAccounts(grant, includeBalances: true));
+    expect(after.where((a) => a['bank_name'] == 'كاش').single['balance_minor'], 1000);
+    expect(after.where((a) => a['bank_name'] == 'مصرف الراجحي'), isEmpty);
+  });
+
+  test('a customer owing in two currencies; products saved exactly as the product form saves them', () async {
+    final imp = BusinessImporter(
+        store: store, access: scope, registry: registry,
+        createProduct: inventory.createProduct, deleteProduct: inventory.deleteProduct,
+        categories: inventory.categories, createCategory: inventory.createCategory);
+    final parties = ImportPreview(ImportTarget.parties, const {}, currency: 'SAR')
+      ..parties.add(PartyImportRow(1, 'customer', 'عميل بعملتين', '0555000111', 125050, 'SAR', more: [('USD', 4000)]));
+    await imp.apply(parties, fileSha: 'two-currencies', fileName: 'c.csv');
+    final docs = await debts(DirectoryPartyKind.customer, 'عميل بعملتين');
+    expect({for (final d in docs) '${d['currency']}': d['amount_minor'] ?? d['total_minor']}.keys.toSet(), {'SAR', 'USD'});
+
+    // A product priced in USD (and SAR): main currency first, as the form.
+    final (t, sha) = await file('p.csv', 'الاسم,سعر البيع,سعر الشراء,الكمية,العملة,التصنيف,الرمز\n'
+        'قلم أزرق,2.5,1.5,10,USD,${'ت' * 130},SKU-1\n');
+    final review = await ImportReview.load(t, ImportTarget.products, autoMapColumns(ImportTarget.products, t.columns),
+        enabledCurrencies: {'SAR', 'USD'});
+    expect(review.rows.single.warnings, contains('category_cut'));
+    final p = review.toPreview();
+    expect(p.products.single.currency, 'USD');
+    expect(p.products.single.prices.first, {'currency': 'USD', 'price': '2.5', 'buy_price': '1.5'});
+    expect(p.products.single.category!.runes.length, importCategoryMax);
+    await imp.apply(p, fileSha: sha, fileName: 'p.csv');
+    final id = await registry.batches(scope.branchId).then((b) => b.first['id']);
+    final items = await (await databaseFactoryFfi.openDatabase('${dir.path}/imports.sqlite')).query('import_items',
+        where: 'batch_id = ? AND kind = ?', whereArgs: [id, 'product']);
+    final full = await inventory.getProduct('${items.single['entity_id']}');
+    expect(full['cost_currency'], 'USD');
+    expect(full['sku'], isNull, reason: 'the form has no SKU field');
+    expect(full['description'], isNull);
+  });
+
+  test('a backup from before the import was restored: the same file may be imported again', () async {
+    final (t, sha) = await file('again.csv', 'الاسم,الرصيد,العملة\nعميل مستعاد,50,SAR\n');
+    final p = await buildImportPreview(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns), defaultCurrency: 'SAR');
+    await importer().apply(p, fileSha: sha, fileName: 'again.csv');
+    await expectLater(importer().apply(p, fileSha: sha, fileName: 'again.csv'), throwsA(isA<ImportRefused>()));
+    // The ledger goes back to before the import (the registry stays).
+    await store.close();
+    await Directory('${dir.path}/ledger').delete(recursive: true);
+    store = DirectoryPilotStore(root: () async => Directory('${dir.path}/ledger'), keys: FixtureDirectoryKeys());
+    await store.remember(scope, _entitlement());
+    await importer().apply(p, fileSha: sha, fileName: 'again.csv');
+    expect(await store.search(scope, DirectoryPartyKind.customer, 'عميل مستعاد'), hasLength(1));
+  });
+
+  // FYONA_IMPORT_PRODUCTS_BENCH=10000: products with prices in two
+  // currencies, stock and a category, written through the product form's
+  // own operation (opt-in: a long run).
+  final pbench = int.tryParse(Platform.environment['FYONA_IMPORT_PRODUCTS_BENCH'] ?? '');
+  test('large file: ${pbench ?? 0} products into the ledger', () async {
+    final n = pbench!;
+    final b = StringBuffer('الاسم,الباركود,سعر الشراء,سعر البيع,الكمية,العملة,التصنيف\n');
+    for (var i = 0; i < n; i++) {
+      b.write('منتج $i,62${'$i'.padLeft(10, '0')},${i % 50}.25,${i % 50 + 3}.5,${i % 999},${i % 3 == 0 ? 'USD' : ''},قسم ${i % 40}\n');
+    }
+    final (t, sha) = await file('big-products.csv', b.toString());
+    final imp = BusinessImporter(
+        store: store, access: scope, registry: registry,
+        createProduct: inventory.createProduct, deleteProduct: inventory.deleteProduct,
+        categories: inventory.categories, createCategory: inventory.createCategory);
+    final sw = Stopwatch()..start();
+    final review = await ImportReview.load(t, ImportTarget.products, autoMapColumns(ImportTarget.products, t.columns),
+        defaultCurrency: 'SAR', enabledCurrencies: {'SAR', 'USD'});
+    expect(review.acceptedCount, n);
+    final checked = sw.elapsedMilliseconds;
+    sw.reset();
+    await imp.apply(review.toPreview(), fileSha: sha, fileName: 'big-products.csv');
+    final written = sw.elapsedMilliseconds;
+    expect(imp.skippedRows, isEmpty);
+    _log('PRODUCTS_BENCH $n: review ${checked}ms, import ${written}ms (${(written / n).toStringAsFixed(1)} ms/product)');
+  }, skip: pbench == null ? 'set FYONA_IMPORT_PRODUCTS_BENCH' : null, timeout: const Timeout(Duration(hours: 1)));
 }

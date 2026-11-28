@@ -1,0 +1,114 @@
+{
+ "recorded": "2026-11-28, DeepSeek through FYONA import endpoints",
+ "schema": [
+  {
+   "name": "tblMstItm",
+   "role": "products",
+   "mapping": {
+    "name": "ItmDescE",
+    "barcode": "EAN13",
+    "sale_price": "SellPx",
+    "cost_price": "LastBuyPx",
+    "stock": "QOH",
+    "category": "Grp",
+    "currency": "Curr"
+   },
+   "link": null
+  },
+  {
+   "name": "tbl_cust_master",
+   "role": "customers",
+   "mapping": {
+    "name": "CustNm",
+    "phone": "Mob",
+    "balance": "OutstandingAmt",
+    "currency": "Cur"
+   },
+   "link": null
+  },
+  {
+   "name": "VendorsList",
+   "role": "suppliers",
+   "mapping": {
+    "name": "VendorTitle",
+    "phone": "ContactNo",
+    "balance": "AmtPayable"
+   },
+   "link": null
+  },
+  {
+   "name": "CashAndBank",
+   "role": "accounts",
+   "mapping": {
+    "name": "AcctTitle",
+    "bank": "BankNm",
+    "number": "AcctNo",
+    "balance": "ClosingBal",
+    "currency": "CurrCode"
+   },
+   "link": null
+  },
+  {
+   "name": "SalesInvHdr",
+   "role": "history",
+   "mapping": {},
+   "link": null
+  },
+  {
+   "name": "HR_Staff",
+   "role": "unsupported",
+   "mapping": {},
+   "link": null
+  },
+  {
+   "name": "Branch_Master",
+   "role": "branches",
+   "mapping": {
+    "name": "BrName"
+   },
+   "link": null
+  }
+ ],
+ "agent": {
+  "أسعار المنتجات اللي ما لها عملة بالدولار": {
+   "reply": "تم ضبط عملة الأصناف اللي خانة العملة فيها فاضية على الدولار (USD)، وما لمست أي صنف له عملة مذكورة أصلاً.",
+   "ops": [
+    {
+     "op": "set_field",
+     "target": "products",
+     "field": "currency",
+     "value": "USD",
+     "only_empty": true,
+     "where": {
+      "field": "currency",
+      "op": "empty",
+      "value": null
+     }
+    }
+   ],
+   "source": "sara"
+  },
+  "خذ اسم الصنف العربي بدل الإنجليزي": {
+   "reply": "تم، خليت اسم الصنف ياخذ العمود العربي ItmDescA بدل الإنجليزي.",
+   "ops": [
+    {
+     "op": "map",
+     "table": "tblMstItm",
+     "field": "name",
+     "column": "ItmDescA"
+    }
+   ],
+   "source": "sara"
+  },
+  "زد الأسعار 10%": {
+   "reply": "ما أقدر أعدّل الأسعار أو أزيدها ١٠٪ — الأسعار تُنقل من الملف كما هي بدون أي تغيير. أقدر أرتب الأدوار والربط أو أستبعد صفوف، تحب أسوي شي من هذا؟",
+   "ops": [],
+   "source": "sara"
+  },
+  "استورد الفروع كمان": {
+   "reply": "معلش، الفروع مش من ضمن اللي FYONA بيستورده — بيستورد بس الأرصدة النهائية للبنوك والصناديق، الأصناف ومخزونها، والعملاء والموردين (الاسم والهاتف والمستحق). جدول Branch_Master هيفضل غير مستورد، فمش هعمل أي تعديل عليه.",
+   "ops": [],
+   "source": "sara"
+  }
+ }
+}

@@ -678,8 +678,8 @@ Future<ProductParts> joinProductParts(List<TableAnalysis> all, ImportTable produ
           if (unit != null && !isBase(unit)) {
             // A price of another unit (carton…): that unit's price, in the
             // chosen currency only.
-            final cur = importCurrency(at('currency'), currency ?? '', currencyCodes);
-            if (currency != null && (cur == currency || cur == '')) {
+            final cur = importCurrency(at('currency'), '', currencyCodes);
+            if (cur == '' || cur == currency) {
               unit['sale_price'] ??= at('price');
               unit['cost_price'] ??= at('cost');
             }

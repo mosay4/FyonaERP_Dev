@@ -1,15 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../features/auth/presentation/widgets/app_pin_sheet.dart';
+import '../../../features/branches/data/branch_api.dart';
+import '../../../features/branches/data/branch_epoch.dart';
 import '../../../features/branches/data/branch_scope.dart';
 import '../../../features/core_business/data/local_commerce/local_commerce_api.dart';
 import '../../../features/core_business/data/local_directory/directory_pilot.dart';
@@ -19,6 +21,8 @@ import '../../../features/inventory/presentation/providers/inventory_providers.d
 import '../../backup/presentation/operation_motion.dart';
 import '../../di/providers.dart';
 import '../../localization/app_localizations.dart';
+import '../../router/route_names.dart';
+import '../../services/connectivity_service.dart';
 import '../../services/currency/business_currency_scope.dart';
 import '../../media/media_store.dart';
 import '../../theme/app_colors.dart';
@@ -37,11 +41,15 @@ String _curName(String code) {
   final n = _t('cur_$code');
   return n == 'cur_$code' ? '' : n;
 }
-const _red = Color(0xFFD32F2F);
-const _yellow = Color(0xFFE09A00);
+
+String _curLabel(String code) => _curName(code).isEmpty ? code : '${_curName(code)} ($code)';
+
+// FYONA's own colours: the brand red for actions, green / red only to say
+// "will be added" / "will not be added".
+const _red = Color(0xFFC62828);
+const _yellow = Color(0xFFB7791F);
 const _green = Color(0xFF2E7D32);
-const _blue = Color(0xFF1565C0);
-const _sara1 = Color(0xFF7B2FF7), _sara2 = Color(0xFFE0457B);
+const _blue = Color(0xFF37474F);
 
 /// Final confirmation before an import or an undo (fingerprint or the
 /// app's PIN). Replaceable in tests.
@@ -51,26 +59,56 @@ final smartImportConfirmProvider = Provider<ImportConfirm>(
       verifySensitiveAction(context, widgetRef, reason: reason, existingCredentialsOnly: true),
 );
 
-/// Sara's two calls in the window (replaceable in tests).
+/// Sara's two calls in the window (replaceable in tests): she checks the
+/// whole file, or does one thing the user asks. Null: she could not be
+/// reached (the window says so and offers to try again).
 class SmartImportSara {
   const SmartImportSara({required this.schema, required this.agent});
   final Future<List<Map<String, dynamic>>?> Function(List<TableAnalysis> tables) schema;
-  final Future<SaraAgentAnswer?> Function(String message, ImportSession s, List<Map<String, String>> history) agent;
+  final Future<SaraAgentAnswer?> Function(String message, ImportSession s) agent;
 }
 
 final smartImportSaraProvider = Provider<SmartImportSara>((ref) {
   final api = ref.read(apiClientProvider);
   return SmartImportSara(
     schema: (tables) => saraImportSchema(api, tables),
-    agent: (message, s, history) =>
-        saraImportAgent(api, message: message, currency: s.currency, tables: s.analysis, history: history),
+    agent: (message, s) => saraImportAgent(api, message: message, currency: s.currency, tables: s.analysis),
   );
 });
 
-/// Every place a table of the file can go in FYONA (the user can choose
-/// any of them), grouped as the picker shows them.
+/// The owner's FYONA branches the import can go to (tests replace it).
+final smartImportBranchesProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final rows = await ref.read(branchApiProvider).list();
+  return [
+    for (final b in rows)
+      if (b['id'] != null && b['is_archived'] != true && b['is_active'] != false) b,
+  ];
+});
+
+/// Sara's official picture (never a generic icon).
+class SaraAvatar extends StatelessWidget {
+  const SaraAvatar({super.key, this.size = 40, this.ring = false});
+  final double size;
+  final bool ring;
+  @override
+  Widget build(BuildContext context) => Container(
+        width: size,
+        height: size,
+        padding: EdgeInsets.all(ring ? 2 : 0),
+        decoration: BoxDecoration(shape: BoxShape.circle, color: ring ? Colors.white : null),
+        child: ClipOval(
+          child: Image.asset('assets/images/sara_avatar.jpg',
+              fit: BoxFit.cover,
+              cacheWidth: (size * 3).round(),
+              errorBuilder: (_, _, _) => Container(color: AppColors.primary.withValues(alpha: .12))),
+        ),
+      );
+}
+
+/// Every place a table of the file can go (the four imported sections,
+/// what joins into them, and what is never imported).
 const importRoleGroups = <String, List<TableRole>>{
-  'cards': [TableRole.customers, TableRole.suppliers, TableRole.products, TableRole.accounts],
+  'cards': [TableRole.accounts, TableRole.products, TableRole.customers, TableRole.suppliers],
   'productParts': [TableRole.units, TableRole.barcodes, TableRole.images, TableRole.categories, TableRole.prices, TableRole.stock],
   'balances': [TableRole.balances],
   'reference': [TableRole.branches, TableRole.currencies],
@@ -118,7 +156,7 @@ class SmartImportEntry extends ConsumerWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: AppColors.border)),
       child: ListTile(
         key: const Key('si-entry'),
-        leading: const Icon(Icons.auto_awesome_rounded, color: AppColors.primary),
+        leading: const Icon(Icons.move_to_inbox_rounded, color: AppColors.primary),
         title: Text(_t('siTitle'), style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800)),
         trailing: const Icon(Icons.chevron_right_rounded),
         onTap: () => openSmartImport(context),
@@ -132,6 +170,16 @@ Future<void> openSmartImport(BuildContext context) => Navigator.of(context).push
       MaterialPageRoute<void>(fullscreenDialog: true, builder: (_) => const SmartImportPage()),
     );
 
+/// The section of FYONA a table goes to (the four imported sections).
+String _sectionOf(TableRole r) => switch (r) {
+      TableRole.accounts => 'accounts',
+      TableRole.products => 'products',
+      TableRole.customers => 'customers',
+      _ => 'suppliers',
+    };
+
+enum _SaraState { idle, working, done, failed }
+
 class SmartImportPage extends ConsumerStatefulWidget {
   const SmartImportPage({super.key, this.initialFile});
 
@@ -142,18 +190,23 @@ class SmartImportPage extends ConsumerStatefulWidget {
 }
 
 class _SmartImportPageState extends ConsumerState<SmartImportPage> {
-  int _step = 0; // 0 file · 1 plan · 2 review
+  int _step = 0; // 0 file · 1 check · 2 review · 3 confirm
   File? _file;
   String? _sha;
   ImportSession? _session;
   TableAnalysis? _current;
   bool _busy = false;
   String? _progress;
-  String? _saraNote;
   List<Map<String, Object?>> _batches = const [];
   ImportRegistry? _registry;
-  final _chat = <({bool me, String text, List<String> done})>[];
   List<String> _enabled = const [];
+  final _rows = <TableAnalysis, int>{};
+
+  // Sara in the window: a button and one line to ask her (no chat).
+  _SaraState _sara = _SaraState.idle;
+  String? _saraText;
+  String? _saraRetry; // the request to send again (null: the full check)
+  final _ask = TextEditingController();
 
   DirectoryAccess? get _scope {
     final s = ref.read(businessLocalLedgerScopeProvider);
@@ -171,6 +224,7 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
   @override
   void dispose() {
     _registry?.close();
+    _ask.dispose();
     super.dispose();
   }
 
@@ -198,6 +252,7 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
       createCategory: inv.createCategory,
       createUnit: inv.createUnit,
       addBarcode: inv.addBarcode,
+      fallbackCurrency: _session?.currency ?? _enabled.firstOrNull ?? 'SAR',
       picture: (name) async {
         final p = await images.load(name);
         if (p == null) return null;
@@ -246,7 +301,54 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
     }
   }
 
-  // ── step 0: the file → Sara arranges it ─────────────────────────────
+  // ── step 0: where to, and the file ──────────────────────────────────
+
+  /// Another FYONA branch: the app's own branch switch, then the import
+  /// opens again in that branch (nothing of the old one is kept).
+  Future<void> _pickTargetBranch(List<Map<String, dynamic>> branches) async {
+    final picked = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const _Grip(),
+          _SheetTitle(icon: Icons.storefront_rounded, title: _t('si3TargetTitle'), hint: _t('si3TargetHint')),
+          Flexible(
+            child: ListView(shrinkWrap: true, children: [
+              for (final b in branches)
+                ListTile(
+                  key: Key('si-target-${b['id']}'),
+                  leading: const Icon(Icons.storefront_rounded, color: AppColors.primary),
+                  title: Text('${b['name'] ?? ''}', style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
+                  trailing: !BranchScope.allMode && b['id'] == BranchScope.branchId
+                      ? const Icon(Icons.check_circle_rounded, color: _green)
+                      : null,
+                  onTap: () => Navigator.pop(ctx, b),
+                ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+        ]),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    if (!BranchScope.allMode && picked['id'] == BranchScope.branchId) return;
+    final org = BranchScope.organizationId ?? _scope?.workspace.organizationId;
+    if (org == null) return;
+    final router = GoRouter.maybeOf(context);
+    await _guard(() async {
+      await ref.read(branchApiProvider).selectFromDrawer(
+            organizationId: org,
+            branchId: '${picked['id']}',
+            all: false,
+            connected: ref.read(connectivityServiceProvider).isOnline,
+          );
+      ref.invalidate(branchAccessProvider);
+      ref.read(branchEpochProvider.notifier).state++;
+      router?.go(RouteNames.smartImport);
+    });
+  }
 
   Future<void> _pick() async {
     final picked = await FilePicker.pickFiles(type: FileType.any, withData: false);
@@ -254,67 +356,210 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
     if (path != null) await _open(File(path));
   }
 
-  /// Reads the file, understands every table, then Sara looks at what the
-  /// rules were not sure of — all automatic, shown as it happens.
+  /// Reads the file and understands every table (deterministic rules).
+  /// Sara looks at the tables the rules were not sure of; the full check
+  /// is one tap away («فحص بواسطة سارة»).
   Future<void> _open(File f) => _guard(() async {
-        // What the branch already has (read again before the review).
         var existing = <String>{};
         try {
           existing = await _importer(await _reg()).existingNames();
         } catch (_) {}
-        // Amounts the file does not name a currency for: the business's own
-        // (home) currency by default; one tap changes it.
         try {
           _enabled = (await ref.read(bizEnabledCurrenciesProvider.future)).toList();
         } catch (_) {}
-        final home = _enabled.where((c) => c != 'USD').firstOrNull ?? _enabled.firstOrNull ?? 'SAR';
-        final saraOk = <bool>[true];
+        final saraOk = <bool?>[null];
         Future<ImportSession> work(void Function(String s, double d) stage) async {
           stage(_t('si2StageRead'), .05);
           final tables = await readImportFile(f);
           final images = await readImportImages(f);
           stage(_t('si2StageUnderstand', {'n': '${tables.length}'}), .3);
-          final s = await ImportSession.analyze(tables, images: images, currency: home, currentBranchName: BranchScope.branchName);
+          // No currency is assumed: the file's own, or the user's choice.
+          final s = await ImportSession.analyze(tables,
+              images: images,
+              enabled: _enabled.toSet(),
+              currentBranchName: BranchScope.branchName);
           s.existing = existing;
           stage(_t('si2StageLink'), .55);
           final unclear = s.forSara;
           if (unclear.isNotEmpty) {
             stage(_t('si2StageSara', {'n': '${unclear.length}'}), .7);
             final answers = await ref.read(smartImportSaraProvider).schema(unclear);
-            if (answers == null) {
-              saraOk[0] = false;
-            } else {
-              await s.applySara(answers);
-            }
+            saraOk[0] = answers != null;
+            if (answers != null) await s.applySara(answers);
           }
           stage(_t('si2StageCheck'), .85);
           _sha = '${await sha256.bind(f.openRead()).first}';
-          await s.buildReviews();
+          _rows.clear();
+          for (final a in s.analysis) {
+            _rows[a] = await a.table.count();
+          }
           return s;
         }
 
         if (!mounted) return;
         final ImportSession s;
         if (widget.initialFile != null) {
-          // Tests: no motion route.
           s = await work((_, _) {});
         } else {
           s = await OperationMotion.run<ImportSession>(context,
-              kind: MotionKind.smartImport,
-              doneText: _t('si2Arranged'),
-              failureText: _failure,
-              work: (m) => work(m.stage));
+              kind: MotionKind.smartImport, doneText: _t('si2Arranged'), failureText: _failure, work: (m) => work(m.stage));
         }
         setState(() {
           _file = f;
           _session = s;
           _current = s.importable.firstOrNull;
-          _saraNote = saraOk[0] ? null : _t('si2SaraOffline');
+          _sara = saraOk[0] == false ? _SaraState.failed : (saraOk[0] == true ? _SaraState.done : _SaraState.idle);
+          _saraText = saraOk[0] == false ? _t('si3SaraOff') : (saraOk[0] == true ? _t('si3SaraLooked') : null);
+          _saraRetry = null;
           _step = 1;
         });
       });
 
-  // ── step 1: the plan ────────────────────────────────────────────────
+  // ── Sara: «فحص بواسطة سارة» and one line to ask her ─────────────────
+
+  Future<void> _saraCheck() async {
+    final s = _session;
+    if (s == null || _sara == _SaraState.working) return;
+    setState(() {
+      _sara = _SaraState.working;
+      _saraText = null;
+      _saraRetry = null;
+    });
+    final ans = await ref.read(smartImportSaraProvider).schema(s.analysis);
+    if (!mounted) return;
+    if (ans == null) {
+      setState(() {
+        _sara = _SaraState.failed;
+        _saraText = _t('si3SaraOff');
+      });
+      return;
+    }
+    final n = await s.applySara(ans);
+    if (_step == 2) await s.buildReviews();
+    if (!mounted) return;
+    setState(() {
+      _sara = _SaraState.done;
+      _saraText = n == 0 ? _t('si3SaraAllGood', {'n': '${ans.length}'}) : _t('si3SaraChanged', {'n': '$n'});
+      _current = s.importable.contains(_current) ? _current : s.importable.firstOrNull;
+    });
+  }
+
+  Future<void> _saraAsk([String? again]) async {
+    final s = _session;
+    final text = (again ?? _ask.text).trim();
+    if (s == null || text.isEmpty || _sara == _SaraState.working) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _sara = _SaraState.working;
+      _saraText = null;
+    });
+    final ans = await ref.read(smartImportSaraProvider).agent(text, s);
+    if (!mounted) return;
+    if (ans == null) {
+      setState(() {
+        _sara = _SaraState.failed;
+        _saraText = _t('si3SaraOff');
+        _saraRetry = text;
+      });
+      return;
+    }
+    final done = await s.applyOps(ans.ops);
+    if (_step == 2 && s.reviews.length != s.importable.length) await s.buildReviews();
+    if (!mounted) return;
+    _ask.clear();
+    setState(() {
+      _sara = _SaraState.done;
+      _saraRetry = null;
+      _saraText = ans.reply.isNotEmpty
+          ? ans.reply
+          : (done.isEmpty ? _t('si3SaraNothing') : _t('si3SaraChanged', {'n': '${done.length}'}));
+      _current = s.importable.contains(_current) ? _current : s.importable.firstOrNull;
+    });
+  }
+
+  Widget _saraCard() {
+    final working = _sara == _SaraState.working;
+    final failed = _sara == _SaraState.failed;
+    return Container(
+      key: const Key('si-sara-card'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: failed ? _yellow.withValues(alpha: .5) : AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          const SaraAvatar(size: 42),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(_t('si2Sara'), style: const TextStyle(fontFamily: _font, fontSize: 14.5, fontWeight: FontWeight.w800)),
+              Text(
+                working ? _t('si3SaraWorking') : (_saraText ?? _t('si3SaraHint')),
+                key: const Key('si-sara-status'),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontFamily: _font, fontSize: 12, height: 1.45, color: failed ? _yellow : AppColors.textSecondary),
+              ),
+            ]),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(
+            child: SizedBox(
+              height: 44,
+              child: FilledButton.icon(
+                key: const Key('si-sara-check'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 44),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                onPressed: working || _busy
+                    ? null
+                    : failed && _saraRetry != null
+                        ? () => _saraAsk(_saraRetry)
+                        : _saraCheck,
+                icon: working
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : Icon(failed ? Icons.refresh_rounded : Icons.fact_check_rounded, size: 19),
+                label: Text(failed ? _t('si3SaraRetry') : _t('si3SaraCheck'),
+                    style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800)),
+              ),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        TextField(
+          key: const Key('si-sara-ask'),
+          controller: _ask,
+          enabled: !working && !_busy,
+          textInputAction: TextInputAction.send,
+          onSubmitted: (_) => _saraAsk(),
+          style: const TextStyle(fontFamily: _font, fontSize: 13),
+          decoration: InputDecoration(
+            isDense: true,
+            filled: true,
+            fillColor: AppColors.background,
+            hintText: _t('si3SaraAskHint'),
+            hintStyle: TextStyle(fontFamily: _font, fontSize: 12.5, color: AppColors.textSecondary),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.border)),
+            enabledBorder:
+                OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.border)),
+            suffixIcon: IconButton(
+              key: const Key('si-sara-send'),
+              onPressed: working ? null : () => _saraAsk(),
+              icon: const Icon(Icons.send_rounded, color: AppColors.primary, textDirection: TextDirection.ltr),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // ── step 1: the check ───────────────────────────────────────────────
 
   Future<void> _changeRole(TableAnalysis a) async {
     final role = await showModalBottomSheet<TableRole>(
@@ -345,18 +590,22 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
     await _guard(() async {
       s.setMapping(a, changed);
       if (a.role.part) await linkImportSchema(s.analysis, context: s.context);
+      if (_step == 2) await s.buildReviews();
     });
   }
+
+  Future<String?> _chooseCurrency(String? current) => showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: AppColors.background,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+        builder: (_) => _CurrencyPicker(current: current, enabled: _enabled),
+      );
 
   Future<void> _pickCurrency() async {
     final s = _session;
     if (s == null) return;
-    final code = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppColors.background,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
-      builder: (_) => _CurrencyPicker(current: s.currency, enabled: _enabled),
-    );
+    final code = await _chooseCurrency(s.currency);
     if (code != null) setState(() => s.setCurrency(code));
   }
 
@@ -371,20 +620,24 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           const _Grip(),
-          _SheetTitle(icon: Icons.storefront_rounded, title: _t('si2BranchTitle'), hint: _t('si2BranchHint')),
-          for (final b in ['', ...choices])
-            ListTile(
-              key: Key('si-branch-$b'),
-              leading: Icon(b.isEmpty ? Icons.all_inclusive_rounded : Icons.storefront_rounded, color: AppColors.primary),
-              title: Text(b.isEmpty ? _t('si2AllBranches') : b, style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
-              trailing: (s.sourceBranch ?? '') == b ? const Icon(Icons.check_circle_rounded, color: _green) : null,
-              onTap: () => Navigator.pop(ctx, b),
-            ),
+          _SheetTitle(icon: Icons.call_split_rounded, title: _t('si2BranchTitle'), hint: _t('si3FileBranchHint')),
+          Flexible(
+            child: ListView(shrinkWrap: true, children: [
+              for (final b in choices)
+                ListTile(
+                  key: Key('si-branch-$b'),
+                  leading: const Icon(Icons.description_outlined, color: AppColors.primary),
+                  title: Text(b, style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
+                  trailing: s.sourceBranch == b ? const Icon(Icons.check_circle_rounded, color: _green) : null,
+                  onTap: () => Navigator.pop(ctx, b),
+                ),
+            ]),
+          ),
           const SizedBox(height: 12),
         ]),
       ),
     );
-    if (picked != null) setState(() => s.setSourceBranch(picked.isEmpty ? null : picked));
+    if (picked != null) setState(() => s.setSourceBranch(picked));
   }
 
   Future<void> _toReview() => _guard(() async {
@@ -398,59 +651,12 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
           if (mounted) setState(() => _progress = '$t · ${_t('siRows', {'n': '$n'})}');
         });
         setState(() {
-          _current = s.reviews.keys.firstOrNull;
+          _current = s.reviews.keys.contains(_current) ? _current : s.reviews.keys.firstOrNull;
           _step = 2;
         });
       });
 
-  // ── Sara inside the window ──────────────────────────────────────────
-
-  Future<void> _openSara() async {
-    final s = _session;
-    if (s == null) {
-      _snack(_t('si2SaraNeedsFile'));
-      return;
-    }
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => FractionallySizedBox(
-        heightFactor: .88,
-        child: _SaraChat(
-          history: _chat,
-          onSend: (text) async {
-            final hist = [
-              for (final m in _chat.reversed.take(8).toList().reversed) {'role': m.me ? 'user' : 'assistant', 'content': m.text},
-            ];
-            setState(() => _chat.add((me: true, text: text, done: const [])));
-            final ans = await ref.read(smartImportSaraProvider).agent(text, s, hist);
-            if (ans == null) {
-              _chat.add((me: false, text: _t('si2SaraOffline'), done: const []));
-            } else {
-              final done = await s.applyOps(ans.ops);
-              _chat.add((me: false, text: ans.reply.isEmpty ? _t('si2SaraDoneShort') : ans.reply, done: done));
-            }
-            if (mounted) setState(() {});
-          },
-          onArrange: () async {
-            final unclear = s.analysis.where((a) => a.by != 'user' && !a.role.importable || a.confidence < .9).toList();
-            final ans = await ref.read(smartImportSaraProvider).schema(unclear.isEmpty ? s.analysis : unclear);
-            if (ans == null) {
-              _chat.add((me: false, text: _t('si2SaraOffline'), done: const []));
-            } else {
-              final n = await s.applySara(ans);
-              _chat.add((me: false, text: _t('si2SaraArranged', {'n': '$n'}), done: const []));
-            }
-            if (mounted) setState(() {});
-          },
-        ),
-      ),
-    );
-    if (mounted) setState(() {});
-  }
-
-  // ── step 2: review → confirm → import ───────────────────────────────
+  // ── step 3: confirm → save ──────────────────────────────────────────
 
   Future<void> _apply() async {
     final s = _session;
@@ -463,36 +669,45 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
     setState(() => _busy = true);
     var refusedByRules = 0;
     try {
-      final ids = await OperationMotion.run<List<String>>(context,
-          kind: MotionKind.smartImport,
-          doneText: _t('siDoneShort', {'n': '$total'}),
-          failureText: _failure, work: (m) async {
+      Future<List<String>> work(void Function(String) stage, void Function(double) progress) async {
         final reg = await _reg();
         final imp = _importer(reg);
         var base = 0;
         final ids = <String>[];
         for (final e in ready) {
           final p = e.value.toPreview();
-          m.stage(_t('siImportingTable', {'t': _t('si2Role_${e.key.role.name}')}), base / total);
+          stage(_t('siImportingTable', {'t': _t('si2Role_${e.key.role.name}')}));
+          progress(base / total);
           final key = '$_sha|${e.key.table.name}|${e.key.role.name}';
-          ids.add(await imp.apply(p, fileSha: '${sha256.convert(utf8.encode(key))}', fileName: _file!.uri.pathSegments.last,
-              onProgress: (d, n) => m.progress((base + d) / total)));
+          ids.add(await imp.apply(p,
+              fileSha: '${sha256.convert(utf8.encode(key))}',
+              fileName: _file!.uri.pathSegments.last,
+              onProgress: (d, n) => progress((base + d) / total)));
           refusedByRules += imp.skippedRows.length;
           base += p.ready;
         }
         return ids;
-      });
-      _snack(refusedByRules == 0
-          ? _t('siDone', {'id': ids.map((i) => i.substring(0, 8)).join(', ')})
-          : _t('si2DoneSome', {'n': '$refusedByRules'}));
+      }
+
+      if (widget.initialFile != null) {
+        await work((_) {}, (_) {});
+      } else {
+        await OperationMotion.run<List<String>>(context,
+            kind: MotionKind.smartImport,
+            doneText: _t('siDoneShort', {'n': '$total'}),
+            failureText: _failure,
+            work: (m) => work(m.stage, m.progress));
+      }
+      _snack(refusedByRules == 0 ? _t('si3Done', {'n': '$total'}) : _t('si2DoneSome', {'n': '$refusedByRules'}));
       setState(() {
         _step = 0;
         _session = null;
         _file = null;
-        _chat.clear();
+        _sara = _SaraState.idle;
+        _saraText = null;
       });
-    } catch (_) {
-      // shown by the motion
+    } catch (e) {
+      if (widget.initialFile != null) _snack(_failure(e), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
       await _loadBatches();
@@ -507,7 +722,10 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
         content: Text(_t('siUndoBody'), style: const TextStyle(fontFamily: _font, fontSize: 13)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('cancel'))),
-          FilledButton(key: const Key('si-undo-confirm'), onPressed: () => Navigator.pop(ctx, true), child: Text(_t('siUndo'))),
+          TextButton(
+              key: const Key('si-undo-confirm'),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(_t('siUndo'), style: const TextStyle(color: _red, fontWeight: FontWeight.w800))),
         ],
       ),
     );
@@ -520,182 +738,277 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
     });
   }
 
+  void _back() {
+    if (_busy) return;
+    if (_step > 0) {
+      setState(() => _step = _step == 1 ? 0 : _step - 1);
+    } else {
+      Navigator.of(context).maybePop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: _scope == null
-          ? const SizedBox.shrink()
-          : DefaultTextStyle.merge(
-              style: TextStyle(color: AppColors.textPrimary),
-              child: Column(children: [
-              _Header(
-                step: _step,
-                onClose: () => Navigator.of(context).maybePop(),
-                onStep: _busy ? null : (i) => setState(() => _step = i < _step ? i : _step),
-                onSara: _busy ? null : _openSara,
-              ),
-              if (_busy)
-                Column(children: [
-                  const LinearProgressIndicator(minHeight: 3),
-                  if (_progress != null)
-                    Padding(
-                      padding: const EdgeInsets.all(6),
-                      child: Text(_progress!, style: TextStyle(fontFamily: _font, fontSize: 12, color: AppColors.textSecondary)),
+    return PopScope(
+      canPop: _step == 0 && !_busy,
+      onPopInvokedWithResult: (popped, _) {
+        if (!popped) _back();
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        body: _scope == null
+            ? const SizedBox.shrink()
+            : DefaultTextStyle.merge(
+                style: TextStyle(color: AppColors.textPrimary),
+                child: Column(children: [
+                  _Header(
+                    step: _step,
+                    onClose: () => Navigator.of(context).maybePop(),
+                    onStep: _busy ? null : (i) => setState(() => _step = i < _step ? i : _step),
+                  ),
+                  if (_busy)
+                    Column(children: [
+                      const LinearProgressIndicator(minHeight: 3),
+                      if (_progress != null)
+                        Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Text(_progress!,
+                              style: TextStyle(fontFamily: _font, fontSize: 12, color: AppColors.textSecondary)),
+                        ),
+                    ]),
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      switchInCurve: Curves.easeOutCubic,
+                      transitionBuilder: (child, a) => FadeTransition(opacity: a, child: child),
+                      child: KeyedSubtree(
+                        key: ValueKey(_step),
+                        child: switch (_step) {
+                          0 => _fileStep(),
+                          1 => _checkStep(),
+                          2 => _reviewStep(),
+                          _ => _confirmStep(),
+                        },
+                      ),
                     ),
-                ]),
-              Expanded(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 380),
-                  switchInCurve: Curves.easeOutCubic,
-                  transitionBuilder: (child, a) => FadeTransition(
-                    opacity: a,
-                    child: SlideTransition(position: Tween(begin: const Offset(0, .04), end: Offset.zero).animate(a), child: child),
                   ),
-                  child: KeyedSubtree(
-                    key: ValueKey(_step),
-                    child: switch (_step) { 0 => _fileStep(), 1 => _planStep(), _ => _reviewStep() },
-                  ),
-                ),
-              ),
-            ])),
+                ])),
+      ),
     );
   }
 
-  Widget _fileStep() => ListView(padding: const EdgeInsets.fromLTRB(18, 8, 18, 28), children: [
-        const _Orbit(),
-        const SizedBox(height: 6),
-        Text(_t('si2Hero'),
-            textAlign: TextAlign.center, style: const TextStyle(fontFamily: _font, fontSize: 20, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 6),
-        Text(_t('si2HeroSub'),
-            textAlign: TextAlign.center, style: TextStyle(fontFamily: _font, fontSize: 13.5, color: AppColors.textSecondary, height: 1.6)),
-        const SizedBox(height: 16),
-        Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8, children: [
-          _Pill(icon: Icons.auto_awesome_rounded, text: _t('si2Point1'), color: _sara1),
-          _Pill(icon: Icons.fact_check_rounded, text: _t('si2Point2'), color: _green),
-          _Pill(icon: Icons.shield_rounded, text: _t('si2Point3'), color: AppColors.primary),
-        ]),
-        const SizedBox(height: 22),
-        SizedBox(
-          height: 58,
-          child: FilledButton.icon(
-            key: const Key('si-pick'),
-            style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18))),
-            onPressed: _busy ? null : _pick,
-            icon: const Icon(Icons.upload_file_rounded),
-            label: Text(_t('siPick'), style: const TextStyle(fontFamily: _font, fontSize: 16.5, fontWeight: FontWeight.w800)),
+  Widget _primary({required Key key, required String label, required IconData icon, VoidCallback? onPressed}) => SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: FilledButton.icon(
+          key: key,
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(0, 52),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
+          onPressed: onPressed,
+          icon: Icon(icon),
+          label: Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontFamily: _font, fontSize: 15.5, fontWeight: FontWeight.w800)),
         ),
-        const SizedBox(height: 10),
-        Text(_t('si2Formats'),
-            textAlign: TextAlign.center, style: TextStyle(fontFamily: _font, fontSize: 12, color: AppColors.textSecondary)),
-        if (_batches.isNotEmpty) ...[
-          const SizedBox(height: 22),
-          Container(
-            decoration: BoxDecoration(
-                color: AppColors.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppColors.border)),
-            child: Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                leading: const Icon(Icons.history_rounded, color: AppColors.primary),
-                title: Text(_t('siBatches'), style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800)),
-                children: [
-                  for (final b in _batches)
-                    ListTile(
-                      dense: true,
-                      title: Text('${b['file_name']}', style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
-                      subtitle: Text('${_t('siStatus_${b['status']}')} · ${b['rows_done']}/${b['rows_ready']}',
-                          style: const TextStyle(fontFamily: _font, fontSize: 12)),
-                      trailing: b['status'] == 'undone'
-                          ? null
-                          : TextButton(
-                              onPressed: _busy ? null : () => _undo('${b['id']}'),
-                              child: Text(_t('siUndo'), style: const TextStyle(fontFamily: _font, color: _red)),
-                            ),
-                    ),
-                ],
+      );
+
+  Widget _fileStep() {
+    final branches = ref.watch(smartImportBranchesProvider).valueOrNull ?? const <Map<String, dynamic>>[];
+    final needsBranch = BranchScope.allMode;
+    return ListView(padding: const EdgeInsets.fromLTRB(16, 14, 16, 28), children: [
+      Text(_t('si3Hero'), style: const TextStyle(fontFamily: _font, fontSize: 19, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 4),
+      Text(_t('si3HeroSub'), style: TextStyle(fontFamily: _font, fontSize: 13, color: AppColors.textSecondary, height: 1.5)),
+      const SizedBox(height: 14),
+      GridView.count(
+        crossAxisCount: 2,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        childAspectRatio: 2.6,
+        children: [
+          for (final r in [TableRole.accounts, TableRole.products, TableRole.customers, TableRole.suppliers])
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border),
               ),
+              child: Row(children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: .09), shape: BoxShape.circle),
+                  child: Icon(importRoleIcon(r), size: 17, color: AppColors.primary),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(_t('si3Section_${_sectionOf(r)}'),
+                      maxLines: 2,
+                      style: const TextStyle(fontFamily: _font, fontSize: 12.5, fontWeight: FontWeight.w700, height: 1.25)),
+                ),
+              ]),
+            ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      _SettingChip(
+        key: const Key('si-target'),
+        icon: Icons.storefront_rounded,
+        label: _t('si3TargetLabel'),
+        value: needsBranch ? _t('si3TargetChoose') : (BranchScope.branchName ?? _t('si3TargetCurrent')),
+        onTap: _busy || (branches.length < 2 && !needsBranch) ? null : () => _pickTargetBranch(branches),
+        showArrow: branches.length > 1 || needsBranch,
+      ),
+      const SizedBox(height: 16),
+      _primary(
+        key: const Key('si-pick'),
+        label: _t('siPick'),
+        icon: Icons.upload_file_rounded,
+        onPressed: _busy || needsBranch ? null : _pick,
+      ),
+      const SizedBox(height: 8),
+      Text(_t('si2Formats'),
+          textAlign: TextAlign.center, style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary)),
+      if (_batches.isNotEmpty) ...[
+        const SizedBox(height: 18),
+        Material(
+          color: AppColors.surface,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: AppColors.border)),
+          child: Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              leading: const Icon(Icons.history_rounded, color: AppColors.primary),
+              title: Text(_t('siBatches'), style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800)),
+              children: [
+                for (final b in _batches)
+                  ListTile(
+                    dense: true,
+                    title: Text('${b['file_name']}', style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
+                    subtitle: Text('${_t('siStatus_${b['status']}')} · ${b['rows_done']}/${b['rows_ready']}',
+                        style: const TextStyle(fontFamily: _font, fontSize: 12)),
+                    trailing: b['status'] == 'undone'
+                        ? null
+                        : TextButton(
+                            style: TextButton.styleFrom(minimumSize: const Size(0, 36)),
+                            onPressed: _busy ? null : () => _undo('${b['id']}'),
+                            child: Text(_t('siUndo'), style: const TextStyle(fontFamily: _font, color: _red)),
+                          ),
+                  ),
+              ],
             ),
           ),
-        ],
-      ]);
+        ),
+      ],
+    ]);
+  }
 
-  Widget _planStep() {
+  Widget _checkStep() {
     final s = _session;
     if (s == null) return const SizedBox.shrink();
-    final importable = s.importable, linked = s.linked, reference = s.reference, skipped = s.skipped;
+    final importable = s.importable, linked = s.linked;
+    final excluded = [...s.reference, ...s.skipped];
     final branches = s.branchChoices;
+    int rowsOf(TableRole r) => [for (final a in importable) if (a.role == r) _rows[a] ?? 0].fold(0, (x, y) => x + y);
     return Column(children: [
       Expanded(
         child: ListView(padding: const EdgeInsets.fromLTRB(14, 12, 14, 20), children: [
-          _Summary(add: importable.length, linked: linked.length, skipped: skipped.length),
-          const SizedBox(height: 12),
           Row(children: [
-            Expanded(
-              child: _SettingChip(
-                key: const Key('si-currency'),
-                icon: Icons.payments_rounded,
-                label: _t('si2Currency'),
-                value: _curName(s.currency).isEmpty ? s.currency : '${_curName(s.currency)} (${s.currency})',
-                onTap: _busy ? null : _pickCurrency,
-              ),
-            ),
-            if (branches.length > 1) ...[
-              const SizedBox(width: 10),
+            for (final r in [TableRole.accounts, TableRole.products, TableRole.customers, TableRole.suppliers]) ...[
               Expanded(
-                child: _SettingChip(
-                  key: const Key('si-branch'),
-                  icon: Icons.storefront_rounded,
-                  label: _t('si2FileBranch'),
-                  value: s.sourceBranch ?? _t('si2AllBranches'),
-                  onTap: _busy ? null : _pickBranch,
-                ),
+                child: _Count(icon: importRoleIcon(r), n: rowsOf(r), label: _t('si3Short_${_sectionOf(r)}')),
               ),
+              if (r != TableRole.suppliers) const SizedBox(width: 6),
             ],
           ]),
-          if (_saraNote != null) ...[
-            const SizedBox(height: 10),
-            _Note(text: _saraNote!, color: _yellow, icon: Icons.cloud_off_rounded),
+          const SizedBox(height: 12),
+          _saraCard(),
+          const SizedBox(height: 12),
+          _SettingChip(
+            key: const Key('si-currency'),
+            icon: Icons.payments_rounded,
+            label: _t('si3Currency'),
+            value: s.currency == null ? _t('si3CurrencyNone') : _curLabel(s.currency!),
+            warn: s.currency == null,
+            onTap: _busy ? null : _pickCurrency,
+          ),
+          if (branches.length > 1) ...[
+            const SizedBox(height: 8),
+            _SettingChip(
+              key: const Key('si-branch'),
+              icon: Icons.call_split_rounded,
+              label: _t('si3FileBranch'),
+              value: s.sourceBranch ?? '—',
+              onTap: _busy ? null : _pickBranch,
+            ),
           ],
           const SizedBox(height: 16),
           if (importable.isNotEmpty) ...[
-            _SectionTitle(text: _t('si2WillAdd'), color: _green, icon: Icons.add_circle_rounded),
+            _SectionTitle(text: _t('si2WillAdd'), color: _green, icon: Icons.check_circle_rounded),
             for (final a in importable)
               _TableCard(
                 key: Key('si-table-${a.table.name}'),
                 analysis: a,
+                rows: _rows[a],
                 children: [for (final p in linked) if (p.link?.parent == a.table) p],
                 onRole: _busy ? null : _changeRole,
                 onColumns: _busy ? null : _editColumns,
               ),
-          ],
-          if (reference.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _SectionTitle(text: _t('si2ForReference'), color: AppColors.textSecondary, icon: Icons.info_rounded),
-            for (final a in reference)
-              _TableCard(key: Key('si-table-${a.table.name}'), analysis: a, onRole: _busy ? null : _changeRole),
-          ],
-          if (skipped.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _SectionTitle(text: _t('si2WontAdd', {'n': '${skipped.length}'}), color: _red, icon: Icons.remove_circle_rounded),
-            for (final a in skipped)
-              _TableCard(key: Key('si-table-${a.table.name}'), analysis: a, onRole: _busy ? null : _changeRole, compact: true),
+          ] else
+            _Note(text: _t('si3NothingFound'), color: _yellow, icon: Icons.info_outline_rounded),
+          if (excluded.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Material(
+              color: AppColors.surface,
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: AppColors.border)),
+              child: Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  key: const Key('si-excluded'),
+                  leading: const Icon(Icons.remove_circle_outline_rounded, color: _red),
+                  title: Text(_t('si3Excluded', {'n': '${excluded.length}'}),
+                      style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800, fontSize: 14)),
+                  subtitle: Text(_t('si3ExcludedHint'),
+                      style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary)),
+                  children: [
+                    for (final a in excluded)
+                      ListTile(
+                        key: Key('si-table-${a.table.name}'),
+                        dense: true,
+                        leading: Icon(importRoleIcon(a.role), size: 20, color: AppColors.textSecondary),
+                        title: Text(a.table.name.split(' · ').last,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700, fontSize: 13)),
+                        subtitle: Text(_t('si3Why_${a.role.name}'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary)),
+                        trailing: _RoleChip(
+                            key: Key('si-dest-${a.table.name}'),
+                            role: a.role,
+                            onTap: _busy ? null : () => _changeRole(a)),
+                      ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ]),
       ),
       _BottomBar(
-        child: SizedBox(
-          width: double.infinity,
-          height: 54,
-          child: FilledButton.icon(
-            key: const Key('si-review'),
-            style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-            onPressed: _busy || importable.isEmpty || importable.any((a) => !a.mapping.containsKey('name')) ? null : _toReview,
-            icon: const Icon(Icons.fact_check_rounded),
-            label: Text(_t('si2ToReview', {'n': '${importable.length}'}),
-                style: const TextStyle(fontFamily: _font, fontSize: 15.5, fontWeight: FontWeight.w800)),
-          ),
+        child: _primary(
+          key: const Key('si-review'),
+          label: _t('si2ToReview', {'n': '${importable.length}'}),
+          icon: Icons.fact_check_rounded,
+          onPressed: _busy || importable.isEmpty || importable.any((a) => !a.mapping.containsKey('name')) ? null : _toReview,
         ),
       ),
     ]);
@@ -703,13 +1016,24 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
 
   Widget _reviewStep() {
     final s = _session;
-    if (s == null || s.reviews.isEmpty) return const SizedBox.shrink();
+    if (s == null) return const SizedBox.shrink();
+    if (s.reviews.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: _primary(
+              key: const Key('si-rebuild'), label: _t('si2ToReview', {'n': '${s.importable.length}'}), icon: Icons.refresh_rounded,
+              onPressed: _busy ? null : _toReview),
+        ),
+      );
+    }
     final keys = s.reviews.keys.toList();
     final cur = keys.contains(_current) ? _current! : keys.first;
     final total = s.readyCount;
+    final blocked = s.reviews.values.fold<int>(0, (a, r) => a + r.refusedCount);
     return Column(children: [
       SizedBox(
-        height: 56,
+        height: 54,
         child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), children: [
           for (final a in keys)
             Padding(
@@ -717,7 +1041,7 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
               child: ChoiceChip(
                 key: Key('si-review-${a.table.name}'),
                 avatar: Icon(importRoleIcon(a.role), size: 18, color: a == cur ? Colors.white : AppColors.primary),
-                label: Text('${_t('si2Role_${a.role.name}')} · ${s.reviews[a]!.acceptedCount}',
+                label: Text('${_t('si3Section_${_sectionOf(a.role)}')} · ${s.reviews[a]!.acceptedCount}',
                     style: TextStyle(fontFamily: _font, fontSize: 12.5, fontWeight: FontWeight.w700, color: a == cur ? Colors.white : null)),
                 selected: a == cur,
                 selectedColor: AppColors.primary,
@@ -732,9 +1056,9 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
           key: ValueKey(cur),
           review: s.reviews[cur]!,
           images: s.images,
-          skipped: [
-            for (final t in s.skipped) _t('siSkippedTableWhy', {'t': t.table.name, 'why': _t('siWhy_${t.reason ?? 'no_place'}')}),
-          ],
+          currencies: _enabled,
+          chooseCurrency: _chooseCurrency,
+          onColumns: _busy ? null : () => _editColumns(cur),
           onChanged: () => setState(() {}),
         ),
       ),
@@ -743,21 +1067,131 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
           Expanded(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(_t('siWillAdd', {'n': '$total'}),
-                  style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800, color: _green, fontSize: 15)),
-              Text(_t('si2SavedOnlyAfter'), style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary)),
+                  style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800, color: _green, fontSize: 14.5)),
+              if (blocked > 0)
+                Text(_t('si3NotAdded', {'n': '$blocked'}),
+                    style: const TextStyle(fontFamily: _font, fontSize: 11.5, color: _red, fontWeight: FontWeight.w700)),
             ]),
           ),
+          const SizedBox(width: 10),
+          // A bounded width: the app's buttons are as wide as they may be
+          // (an unbounded Row made the whole screen blank).
           SizedBox(
-            height: 50,
+            width: 150,
+            height: 48,
             child: FilledButton.icon(
-              key: const Key('si-apply'),
-              style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-              onPressed: _busy || total == 0 ? null : _apply,
-              icon: const Icon(Icons.fingerprint_rounded),
-              label: Text(_t('siImport', {'n': '$total'}), style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800)),
+              key: const Key('si-next'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, 48),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
+              onPressed: _busy || total == 0 ? null : () => setState(() => _step = 3),
+              icon: const Icon(Icons.arrow_forward_rounded, size: 19),
+              label: Text(_t('si3Next'), style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800)),
             ),
           ),
         ]),
+      ),
+    ]);
+  }
+
+  Widget _confirmStep() {
+    final s = _session;
+    if (s == null || s.reviews.isEmpty) return const SizedBox.shrink();
+    final total = s.readyCount;
+    final bySection = <String, List<ImportReview>>{};
+    for (final e in s.reviews.entries) {
+      (bySection[_sectionOf(e.key.role)] ??= []).add(e.value);
+    }
+    String money(int minor) {
+      final neg = minor < 0;
+      final a = minor.abs();
+      final whole = '${a ~/ 100}'.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',');
+      return '${neg ? '-' : ''}$whole.${(a % 100).toString().padLeft(2, '0')}';
+    }
+
+    return Column(children: [
+      Expanded(
+        child: ListView(padding: const EdgeInsets.fromLTRB(14, 14, 14, 20), children: [
+          _SettingChip(
+              icon: Icons.storefront_rounded,
+              label: _t('si3TargetLabel'),
+              value: BranchScope.branchName ?? _t('si3TargetCurrent'),
+              showArrow: false),
+          const SizedBox(height: 8),
+          _SettingChip(
+              icon: Icons.description_outlined,
+              label: _t('si3FileLabel'),
+              value: _file?.uri.pathSegments.last ?? '',
+              showArrow: false),
+          const SizedBox(height: 14),
+          for (final section in const ['accounts', 'products', 'customers', 'suppliers'])
+            if (bySection[section] case final reviews?)
+              Builder(builder: (_) {
+                final ok = reviews.fold<int>(0, (a, r) => a + r.acceptedCount);
+                final no = reviews.fold<int>(0, (a, r) => a + r.refusedCount);
+                final totals = <String, int>{};
+                for (final r in reviews) {
+                  final p = r.toPreview();
+                  for (final m in p.totals.values) {
+                    m.forEach((c, v) => totals[c] = (totals[c] ?? 0) + v);
+                  }
+                  for (final a in p.accounts) {
+                    totals[a.currency] = (totals[a.currency] ?? 0) + a.amountMinor;
+                  }
+                }
+                return Container(
+                  key: Key('si-confirm-$section'),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Icon(importRoleIcon(reviews.first.target == ImportTarget.accounts
+                          ? TableRole.accounts
+                          : reviews.first.target == ImportTarget.products
+                              ? TableRole.products
+                              : section == 'customers'
+                                  ? TableRole.customers
+                                  : TableRole.suppliers),
+                          color: AppColors.primary, size: 22),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(_t('si3Section_$section'),
+                            style: const TextStyle(fontFamily: _font, fontSize: 15, fontWeight: FontWeight.w800)),
+                      ),
+                      Text('$ok', style: const TextStyle(fontFamily: _font, fontSize: 18, fontWeight: FontWeight.w800, color: _green)),
+                    ]),
+                    if (no > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(_t('si3NotAdded', {'n': '$no'}),
+                            style: const TextStyle(fontFamily: _font, fontSize: 12, color: _red, fontWeight: FontWeight.w700)),
+                      ),
+                    for (final e in totals.entries)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text('${money(e.value)} ${_curLabel(e.key)}',
+                            textDirection: TextDirection.rtl,
+                            style: TextStyle(fontFamily: _font, fontSize: 12.5, color: AppColors.textSecondary)),
+                      ),
+                  ]),
+                );
+              }),
+          _Note(text: _t('si3OnlyFour'), color: AppColors.textSecondary, icon: Icons.info_outline_rounded),
+        ]),
+      ),
+      _BottomBar(
+        child: _primary(
+          key: const Key('si-apply'),
+          label: _t('siImport', {'n': '$total'}),
+          icon: Icons.fingerprint_rounded,
+          onPressed: _busy || total == 0 ? null : _apply,
+        ),
       ),
     ]);
   }
@@ -766,24 +1200,21 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
 // ── pieces ──────────────────────────────────────────────────────────────
 
 class _Header extends StatelessWidget {
-  const _Header({required this.step, required this.onClose, this.onStep, this.onSara});
+  const _Header({required this.step, required this.onClose, this.onStep});
   final int step;
   final VoidCallback onClose;
   final void Function(int)? onStep;
-  final VoidCallback? onSara;
 
   @override
   Widget build(BuildContext context) => Container(
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-              colors: [Color(0xFF9E1B32), Color(0xFF6B0E22)], begin: Alignment.topRight, end: Alignment.bottomLeft),
-          borderRadius: const BorderRadius.vertical(bottom: Radius.circular(26)),
-          boxShadow: [BoxShadow(color: const Color(0xFF9E1B32).withValues(alpha: .25), blurRadius: 18, offset: const Offset(0, 6))],
+        decoration: const BoxDecoration(
+          color: AppColors.primary,
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
         ),
         child: SafeArea(
           bottom: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 4, 12, 14),
+            padding: const EdgeInsets.fromLTRB(6, 2, 12, 12),
             child: Column(children: [
               Row(children: [
                 IconButton(
@@ -792,63 +1223,12 @@ class _Header extends StatelessWidget {
                     icon: const Icon(Icons.close_rounded, color: Colors.white)),
                 Expanded(
                   child: Text(_t('siTitle'),
-                      style: const TextStyle(fontFamily: _font, fontSize: 19, fontWeight: FontWeight.w800, color: Colors.white)),
+                      style: const TextStyle(fontFamily: _font, fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)),
                 ),
-                _SaraButton(onTap: onSara),
               ]),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               _Steps(step: step, onTap: onStep),
             ]),
-          ),
-        ),
-      );
-}
-
-/// Sara, always at the top of the window.
-class _SaraButton extends StatefulWidget {
-  const _SaraButton({this.onTap});
-  final VoidCallback? onTap;
-  @override
-  State<_SaraButton> createState() => _SaraButtonState();
-}
-
-class _SaraButtonState extends State<_SaraButton> with SingleTickerProviderStateMixin {
-  late final _c = AnimationController(vsync: this, duration: const Duration(seconds: 3))..repeat();
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-        animation: _c,
-        builder: (_, child) => Container(
-          padding: const EdgeInsets.all(1.6),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            gradient: SweepGradient(
-              colors: const [_sara1, _sara2, Colors.white, _sara1],
-              transform: GradientRotation(_c.value * 2 * math.pi),
-            ),
-          ),
-          child: child,
-        ),
-        child: Material(
-          color: const Color(0xFF2A0710),
-          borderRadius: BorderRadius.circular(21),
-          child: InkWell(
-            key: const Key('si-sara'),
-            borderRadius: BorderRadius.circular(21),
-            onTap: widget.onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 18),
-                const SizedBox(width: 6),
-                Text(_t('si2Sara'), style: const TextStyle(fontFamily: _font, color: Colors.white, fontWeight: FontWeight.w800)),
-              ]),
-            ),
           ),
         ),
       );
@@ -858,168 +1238,82 @@ class _Steps extends StatelessWidget {
   const _Steps({required this.step, this.onTap});
   final int step;
   final void Function(int)? onTap;
-  static const _icons = [Icons.upload_file_rounded, Icons.account_tree_rounded, Icons.fact_check_rounded];
   @override
   Widget build(BuildContext context) => Row(children: [
-        for (var i = 0; i < 3; i++) ...[
+        for (var i = 0; i < 4; i++) ...[
           Expanded(
             child: InkWell(
               key: Key('si-step-$i'),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
               onTap: onTap == null ? null : () => onTap!(i),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 350),
-                curve: Curves.easeOutCubic,
-                padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
-                decoration: BoxDecoration(
-                  color: i == step ? Colors.white : Colors.white.withValues(alpha: i < step ? .22 : .10),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(i < step ? Icons.check_circle_rounded : _icons[i],
-                      size: 17, color: i == step ? AppColors.primary : Colors.white),
-                  const SizedBox(width: 5),
-                  Flexible(
-                    child: Text(_t('si2Step$i'),
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontFamily: _font,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w800,
-                            color: i == step ? AppColors.primary : Colors.white)),
+              child: Column(children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: i <= step ? 1 : .28),
+                    borderRadius: BorderRadius.circular(2),
                   ),
-                ]),
-              ),
+                ),
+                const SizedBox(height: 6),
+                Text(_t('si3Step$i'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontFamily: _font,
+                        fontSize: 11.5,
+                        fontWeight: i == step ? FontWeight.w800 : FontWeight.w600,
+                        color: Colors.white.withValues(alpha: i <= step ? 1 : .7))),
+              ]),
             ),
           ),
-          if (i < 2) const SizedBox(width: 6),
+          if (i < 3) const SizedBox(width: 6),
         ],
       ]);
 }
 
-/// The first screen's moving picture: the kinds of data circling FYONA.
-class _Orbit extends StatefulWidget {
-  const _Orbit();
-  @override
-  State<_Orbit> createState() => _OrbitState();
-}
-
-class _OrbitState extends State<_Orbit> with SingleTickerProviderStateMixin {
-  late final _c = AnimationController(vsync: this, duration: const Duration(seconds: 14))..repeat();
-  static const _icons = [
-    Icons.inventory_2_rounded,
-    Icons.people_alt_rounded,
-    Icons.qr_code_2_rounded,
-    Icons.account_balance_rounded,
-    Icons.photo_library_rounded,
-    Icons.local_shipping_rounded,
-  ];
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-        height: 190,
-        child: AnimatedBuilder(
-          animation: _c,
-          builder: (_, _) {
-            final t = _c.value * 2 * math.pi;
-            return Stack(alignment: Alignment.center, children: [
-              Container(
-                width: 150,
-                height: 150,
-                decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.primary.withValues(alpha: .12), width: 1.5)),
-              ),
-              Transform.scale(
-                scale: 1 + .04 * math.sin(t * 3),
-                child: Container(
-                  width: 78,
-                  height: 78,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: const LinearGradient(colors: [Color(0xFF9E1B32), Color(0xFF6B0E22)]),
-                    boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: .35), blurRadius: 22, spreadRadius: 2)],
-                  ),
-                  child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 34),
-                ),
-              ),
-              for (var i = 0; i < _icons.length; i++)
-                Transform.translate(
-                  offset: Offset(math.cos(t + i * math.pi / 3) * 75, math.sin(t + i * math.pi / 3) * 75),
-                  child: Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .08), blurRadius: 8, offset: const Offset(0, 3))],
-                    ),
-                    child: Icon(_icons[i], size: 19, color: AppColors.primary),
-                  ),
-                ),
-            ]);
-          },
-        ),
-      );
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.icon, required this.text, required this.color});
+class _Count extends StatelessWidget {
+  const _Count({required this.icon, required this.n, required this.label});
   final IconData icon;
-  final String text;
-  final Color color;
+  final int n;
+  final String label;
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(color: color.withValues(alpha: .09), borderRadius: BorderRadius.circular(20)),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
-          Text(text, style: TextStyle(fontFamily: _font, fontSize: 12.5, fontWeight: FontWeight.w700, color: color)),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(children: [
+          Icon(icon, size: 18, color: n > 0 ? AppColors.primary : AppColors.textSecondary),
+          const SizedBox(height: 2),
+          FittedBox(
+            child: Text('$n',
+                style: TextStyle(
+                    fontFamily: _font,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: n > 0 ? AppColors.textPrimary : AppColors.textSecondary)),
+          ),
+          Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontFamily: _font, fontSize: 11, color: AppColors.textSecondary)),
         ]),
       );
 }
 
-class _Summary extends StatelessWidget {
-  const _Summary({required this.add, required this.linked, required this.skipped});
-  final int add, linked, skipped;
-  @override
-  Widget build(BuildContext context) {
-    Widget cell(String n, String label, Color c, IconData icon) => Expanded(
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(color: c.withValues(alpha: .08), borderRadius: BorderRadius.circular(16)),
-            child: Column(children: [
-              Icon(icon, color: c, size: 20),
-              const SizedBox(height: 4),
-              TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0, end: double.parse(n)),
-                duration: const Duration(milliseconds: 700),
-                builder: (_, v, _) => Text('${v.round()}',
-                    style: TextStyle(fontFamily: _font, fontSize: 22, fontWeight: FontWeight.w800, color: c)),
-              ),
-              Text(label, textAlign: TextAlign.center, style: TextStyle(fontFamily: _font, fontSize: 11.5, color: c, fontWeight: FontWeight.w700)),
-            ]),
-          ),
-        );
-    return Row(children: [
-      cell('$add', _t('si2SumAdd'), _green, Icons.add_circle_rounded),
-      const SizedBox(width: 8),
-      cell('$linked', _t('si2SumLinked'), _blue, Icons.link_rounded),
-      const SizedBox(width: 8),
-      cell('$skipped', _t('si2SumSkipped'), _red, Icons.remove_circle_rounded),
-    ]);
-  }
-}
-
 class _SettingChip extends StatelessWidget {
-  const _SettingChip({super.key, required this.icon, required this.label, required this.value, this.onTap});
+  const _SettingChip(
+      {super.key, required this.icon, required this.label, required this.value, this.onTap, this.warn = false, this.showArrow = true});
   final IconData icon;
   final String label, value;
   final VoidCallback? onTap;
+
+  /// Still to be chosen (shown in the warning colour).
+  final bool warn;
+  final bool showArrow;
   @override
   Widget build(BuildContext context) => Material(
         color: AppColors.surface,
@@ -1029,9 +1323,10 @@ class _SettingChip extends StatelessWidget {
           onTap: onTap,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
+            decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16), border: Border.all(color: warn ? _yellow : AppColors.border)),
             child: Row(children: [
-              Icon(icon, size: 20, color: AppColors.primary),
+              Icon(icon, size: 20, color: warn ? _yellow : AppColors.primary),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1039,10 +1334,10 @@ class _SettingChip extends StatelessWidget {
                   Text(value,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontFamily: _font, fontSize: 13, fontWeight: FontWeight.w800)),
+                      style: TextStyle(fontFamily: _font, fontSize: 13, fontWeight: FontWeight.w800, color: warn ? _yellow : null)),
                 ]),
               ),
-              Icon(Icons.expand_more_rounded, color: AppColors.textSecondary),
+              if (showArrow && onTap != null) Icon(Icons.expand_more_rounded, color: AppColors.textSecondary),
             ]),
           ),
         ),
@@ -1085,12 +1380,13 @@ class _Note extends StatelessWidget {
 /// One table of the file: what it is in FYONA (tap to put it anywhere
 /// else), its rows, its columns, and the tables joined into it.
 class _TableCard extends StatelessWidget {
-  const _TableCard({super.key, required this.analysis, this.children = const [], this.onRole, this.onColumns, this.compact = false});
+  const _TableCard(
+      {super.key, required this.analysis, this.rows, this.children = const [], this.onRole, this.onColumns});
   final TableAnalysis analysis;
+  final int? rows;
   final List<TableAnalysis> children;
   final Future<void> Function(TableAnalysis)? onRole;
   final Future<void> Function(TableAnalysis)? onColumns;
-  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -1122,16 +1418,13 @@ class _TableCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     textDirection: TextDirection.ltr,
                     style: const TextStyle(fontFamily: _font, fontSize: 14, fontWeight: FontWeight.w800)),
-                FutureBuilder<int>(
-                  future: a.table.count(),
-                  builder: (_, snap) => Text(
-                    [
-                      if (snap.hasData) _t('si2RowsN', {'n': '${snap.data}'}),
-                      _t('siColumnsCount', {'n': '${a.table.columns.length}'}),
-                      if (a.by == 'sara') _t('siBySara'),
-                    ].join(' · '),
-                    style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary),
-                  ),
+                Text(
+                  [
+                    if (rows != null) _t('si2RowsN', {'n': '$rows'}),
+                    _t('siColumnsCount', {'n': '${a.table.columns.length}'}),
+                    if (a.by == 'sara') _t('siBySara'),
+                  ].join(' · '),
+                  style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary),
                 ),
               ]),
             ),
@@ -1179,6 +1472,7 @@ class _TableCard extends StatelessWidget {
               child: OutlinedButton.icon(
                 key: Key('si-columns-${a.table.name}'),
                 style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 42),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   side: BorderSide(color: AppColors.border),
                 ),
@@ -1339,7 +1633,7 @@ const importCurrencies = ['SAR', 'YER', 'USD', 'AED', 'KWD', 'QAR', 'OMR', 'BHD'
 
 class _CurrencyPicker extends StatelessWidget {
   const _CurrencyPicker({required this.current, this.enabled = const []});
-  final String current;
+  final String? current;
 
   /// The business's own currencies (shown first).
   final List<String> enabled;
@@ -1347,7 +1641,7 @@ class _CurrencyPicker extends StatelessWidget {
   Widget build(BuildContext context) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           const _Grip(),
-          _SheetTitle(icon: Icons.payments_rounded, title: _t('si2CurrencyTitle'), hint: _t('si2CurrencyHint')),
+          _SheetTitle(icon: Icons.payments_rounded, title: _t('si2CurrencyTitle'), hint: _t('si3CurrencyHint')),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
             child: GridView.count(
@@ -1358,7 +1652,8 @@ class _CurrencyPicker extends StatelessWidget {
               crossAxisSpacing: 8,
               childAspectRatio: 1.7,
               children: [
-                for (final c in {...enabled.where(RegExp(r'^[A-Z]{3}$').hasMatch), ...importCurrencies})
+                // A record is saved only in one of the business's currencies.
+                for (final c in enabled.isNotEmpty ? enabled : importCurrencies)
                   Material(
                     color: c == current ? AppColors.primary : AppColors.surface,
                     borderRadius: BorderRadius.circular(14),
@@ -1554,231 +1849,6 @@ class _ColumnMappingSheetState extends State<ColumnMappingSheet> {
 /// Sara inside the import window: the user asks in their own words
 /// ("prices in dollars", "add 10% to the sale prices", "this table is my
 /// customers"); Sara answers with operations the app applies by its rules.
-class _SaraChat extends StatefulWidget {
-  const _SaraChat({required this.history, required this.onSend, required this.onArrange});
-  final List<({bool me, String text, List<String> done})> history;
-  final Future<void> Function(String text) onSend;
-  final Future<void> Function() onArrange;
-  @override
-  State<_SaraChat> createState() => _SaraChatState();
-}
-
-class _SaraChatState extends State<_SaraChat> {
-  final _c = TextEditingController();
-  final _scroll = ScrollController();
-  bool _thinking = false;
-
-  @override
-  void dispose() {
-    _c.dispose();
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  Future<void> _run(Future<void> Function() work) async {
-    if (_thinking) return;
-    setState(() => _thinking = true);
-    try {
-      await work();
-    } finally {
-      if (mounted) setState(() => _thinking = false);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scroll.hasClients) _scroll.animateTo(_scroll.position.maxScrollExtent, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      });
-    }
-  }
-
-  Future<void> _send([String? text]) async {
-    final msg = (text ?? _c.text).trim();
-    if (msg.isEmpty) return;
-    _c.clear();
-    await _run(() => widget.onSend(msg));
-  }
-
-  String _doneLabel(String d) {
-    final p = d.split(':');
-    return switch (p.first) {
-      'role' => _t('si2DidRole', {'t': p.length > 1 ? p[1] : '', 'r': p.length > 2 ? _t('si2Role_${p[2]}') : ''}),
-      'map' => _t('si2DidMap', {'t': p.length > 1 ? p[1] : '', 'f': p.length > 2 ? _t('siField_${p[2]}') : ''}),
-      'currency' => _t('si2DidCurrency', {'c': p.length > 1 ? p[1] : ''}),
-      'set' || 'adjust' => _t('si2DidRows', {'n': p.length > 2 ? p[2] : '0'}),
-      'reject' => _t('si2DidReject', {'n': p.length > 1 ? p[1] : '0'}),
-      'accept' => _t('si2DidAccept', {'n': p.length > 1 ? p[1] : '0'}),
-      _ => d,
-    };
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final msgs = widget.history;
-    return Container(
-      decoration: BoxDecoration(color: AppColors.background, borderRadius: const BorderRadius.vertical(top: Radius.circular(26))),
-      child: Column(children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(colors: [_sara1, _sara2]),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-          ),
-          child: Row(children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(color: Colors.white.withValues(alpha: .18), shape: BoxShape.circle),
-              child: const Icon(Icons.auto_awesome_rounded, color: Colors.white),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(_t('si2SaraTitle'), style: const TextStyle(fontFamily: _font, fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white)),
-                Text(_t('si2SaraSub'), style: TextStyle(fontFamily: _font, fontSize: 11.5, color: Colors.white.withValues(alpha: .85))),
-              ]),
-            ),
-            IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded, color: Colors.white)),
-          ]),
-        ),
-        Expanded(
-          child: ListView(controller: _scroll, padding: const EdgeInsets.all(14), children: [
-            _Bubble(me: false, text: _t('si2SaraHello')),
-            for (final m in msgs) ...[
-              _Bubble(me: m.me, text: m.text),
-              if (m.done.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Wrap(spacing: 6, runSpacing: 6, children: [
-                    for (final d in m.done)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(color: _green.withValues(alpha: .10), borderRadius: BorderRadius.circular(12)),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          const Icon(Icons.check_rounded, size: 14, color: _green),
-                          const SizedBox(width: 4),
-                          Text(_doneLabel(d), style: const TextStyle(fontFamily: _font, fontSize: 11.5, color: _green, fontWeight: FontWeight.w700)),
-                        ]),
-                      ),
-                  ]),
-                ),
-            ],
-            if (_thinking) const _Typing(),
-          ]),
-        ),
-        SizedBox(
-          height: 44,
-          child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
-            ActionChip(
-              key: const Key('si-sara-arrange'),
-              avatar: const Icon(Icons.auto_fix_high_rounded, size: 16, color: _sara1),
-              label: Text(_t('si2Suggest0'), style: const TextStyle(fontFamily: _font, fontSize: 12)),
-              onPressed: _thinking ? null : () => _run(widget.onArrange),
-            ),
-            for (final k in ['si2Suggest1', 'si2Suggest2', 'si2Suggest3'])
-              Padding(
-                padding: const EdgeInsetsDirectional.only(start: 6),
-                child: ActionChip(
-                  label: Text(_t(k), style: const TextStyle(fontFamily: _font, fontSize: 12)),
-                  onPressed: _thinking ? null : () => _send(_t(k)),
-                ),
-              ),
-          ]),
-        ),
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(12, 6, 12, 10 + MediaQuery.of(context).viewInsets.bottom),
-            child: Row(children: [
-              Expanded(
-                child: TextField(
-                  key: const Key('si-sara-input'),
-                  controller: _c,
-                  minLines: 1,
-                  maxLines: 4,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _send(),
-                  decoration: InputDecoration(
-                    hintText: _t('si2SaraHint'),
-                    filled: true,
-                    fillColor: AppColors.surface,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide(color: AppColors.border)),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [_sara1, _sara2])),
-                child: IconButton(
-                  key: const Key('si-sara-send'),
-                  onPressed: _thinking ? null : _send,
-                  icon: const Icon(Icons.send_rounded, color: Colors.white),
-                ),
-              ),
-            ]),
-          ),
-        ),
-      ]),
-    );
-  }
-}
-
-class _Bubble extends StatelessWidget {
-  const _Bubble({required this.me, required this.text});
-  final bool me;
-  final String text;
-  @override
-  Widget build(BuildContext context) => Align(
-        alignment: me ? AlignmentDirectional.centerStart : AlignmentDirectional.centerEnd,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * .78),
-          decoration: BoxDecoration(
-            gradient: me ? null : const LinearGradient(colors: [Color(0xFFF3EAFE), Color(0xFFFDE8EF)]),
-            color: me ? AppColors.primary : null,
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Text(text, style: TextStyle(fontFamily: _font, fontSize: 13.5, height: 1.5, color: me ? Colors.white : const Color(0xFF2B1B3D))),
-        ),
-      );
-}
-
-class _Typing extends StatefulWidget {
-  const _Typing();
-  @override
-  State<_Typing> createState() => _TypingState();
-}
-
-class _TypingState extends State<_Typing> with SingleTickerProviderStateMixin {
-  late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat();
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => Align(
-        alignment: AlignmentDirectional.centerEnd,
-        child: AnimatedBuilder(
-          animation: _c,
-          builder: (_, _) => Row(mainAxisSize: MainAxisSize.min, children: [
-            for (var i = 0; i < 3; i++)
-              Container(
-                margin: const EdgeInsets.all(3),
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _sara1.withValues(alpha: .3 + .7 * ((math.sin((_c.value * 2 * math.pi) - i) + 1) / 2)),
-                ),
-              ),
-          ]),
-        ),
-      );
-}
-
-/// The two-part review of one table: what will be added (editable) and
-/// what will not (red, with the reason in yellow). Rows are built lazily,
-/// so thousands stay smooth.
 class ImportReviewView extends StatefulWidget {
   const ImportReviewView({
     super.key,
@@ -1786,11 +1856,21 @@ class ImportReviewView extends StatefulWidget {
     required this.onChanged,
     this.images,
     this.skipped = const [],
+    this.currencies = const [],
+    this.chooseCurrency,
+    this.onColumns,
   });
   final ImportReview review;
   final ImportImages? images;
   final List<String> skipped;
   final VoidCallback onChanged;
+
+  /// The business's currencies, and how one is chosen (a sheet).
+  final List<String> currencies;
+  final Future<String?> Function(String? current)? chooseCurrency;
+
+  /// Swap / change which column is which field.
+  final VoidCallback? onColumns;
   @override
   State<ImportReviewView> createState() => _ImportReviewViewState();
 }
@@ -1802,19 +1882,41 @@ class _ImportReviewViewState extends State<ImportReviewView> {
   final _selected = <int>{};
   late List<ReviewRow> _shown;
   final _h = ScrollController();
+  Timer? _typing;
+  String? _sortBy;
+  bool _sortUp = true;
 
   ImportReview get r => widget.review;
 
-  List<String> get _fields => [
-        for (final f in importFields[r.target]!)
-          if (r.mapping.containsKey(f.key) ||
+  // What FYONA saves for this section (the file's branch column only
+  // chooses rows; it is never saved).
+  late List<String> _fields = _fieldsOf();
+
+  List<String> _fieldsOf() => [
+    for (final f in importFields[r.target]!)
+      if (f.key != 'branch' &&
+          (r.mapping.containsKey(f.key) ||
               (f.key == 'image' && r.rows.any((x) => x['image'] != null)) ||
-              (const {'sale_price', 'cost_price', 'stock', 'unit', 'balance', 'currency'}.contains(f.key) &&
-                  r.rows.take(200).any((x) => x[f.key] != null)))
-            f.key,
-        if (r.rows.any((x) => x.units.isNotEmpty)) '_units',
-        if (r.rows.any((x) => x.barcodes.isNotEmpty)) '_codes',
-      ];
+              (f.key == 'currency') ||
+              (const {'sale_price', 'cost_price', 'stock', 'unit', 'balance', 'category'}.contains(f.key) &&
+                  r.rows.take(500).any((x) => x[f.key] != null))))
+        f.key,
+    if (r.rows.any((x) => x.units.isNotEmpty || x.prices.isNotEmpty)) '_units',
+    if (r.rows.any((x) => x.barcodes.isNotEmpty)) '_codes',
+  ];
+
+  @override
+  void didUpdateWidget(ImportReviewView old) {
+    super.didUpdateWidget(old);
+    // The review was rebuilt (columns, currency or Sara changed it).
+    if (old.review != widget.review) {
+      _fields = _fieldsOf();
+      _selected.clear();
+      _filter();
+    } else {
+      _filter();
+    }
+  }
 
   @override
   void initState() {
@@ -1824,6 +1926,7 @@ class _ImportReviewViewState extends State<ImportReviewView> {
 
   @override
   void dispose() {
+    _typing?.cancel();
     _h.dispose();
     super.dispose();
   }
@@ -1837,6 +1940,42 @@ class _ImportReviewViewState extends State<ImportReviewView> {
             (q.isEmpty || row.values.values.any((v) => v != null && importFold(v).contains(q))))
           row,
     ];
+    final by = _sortBy;
+    if (by != null) {
+      int cmp(ReviewRow a, ReviewRow b) {
+        final x = a[by], y = b[by];
+        if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
+        final nx = double.tryParse(importDecimal(x) ?? ''), ny = double.tryParse(importDecimal(y) ?? '');
+        final c = nx != null && ny != null ? nx.compareTo(ny) : importFold(x).compareTo(importFold(y));
+        return _sortUp ? c : -c;
+      }
+
+      _shown.sort(cmp);
+    }
+  }
+
+  void _sort(String field) => setState(() {
+        if (_sortBy == field) {
+          _sortUp = !_sortUp;
+        } else {
+          _sortBy = field;
+          _sortUp = true;
+        }
+        _filter();
+      });
+
+  Future<void> _bulkCurrency() async {
+    final code = await widget.chooseCurrency?.call(null);
+    if (code == null) return;
+    r.setCurrency(r.rows.where((e) => _selected.contains(e.row)), code);
+    _selected.clear();
+    _changed();
+  }
+
+  void _bulkRename() {
+    r.renameExisting(r.rows.where((e) => _selected.contains(e.row)));
+    _selected.clear();
+    _changed();
   }
 
   void _changed() {
@@ -1845,6 +1984,13 @@ class _ImportReviewViewState extends State<ImportReviewView> {
   }
 
   Future<void> _editCell(ReviewRow row, String field) async {
+    if (field == 'currency' && widget.chooseCurrency != null) {
+      final code = await widget.chooseCurrency!(row[field]);
+      if (code == null) return;
+      r.setCurrency([row], code);
+      _changed();
+      return;
+    }
     final ctrl = TextEditingController(text: row[field] ?? '');
     final v = await showDialog<String>(
       context: context,
@@ -1865,17 +2011,18 @@ class _ImportReviewViewState extends State<ImportReviewView> {
   }
 
   double _width(String f) => switch (f) {
-        '_units' || '_codes' => 90,
-        'name' => 200,
-        'image' => 70,
-        'phone' || 'barcode' || 'sku' || 'category' || 'description' || 'notes' => 130,
-        _ => 100,
+        '_units' || '_codes' => 84,
+        'name' => 190,
+        'image' => 60,
+        'phone' || 'barcode' || 'category' || 'bank' || 'number' || 'iban' => 130,
+        'currency' => 92,
+        _ => 96,
       };
 
   @override
   Widget build(BuildContext context) {
     final fields = _fields;
-    const check = 44.0, rowNo = 56.0, reasonW = 230.0;
+    const check = 44.0, rowNo = 48.0, reasonW = 220.0;
     final width = check + rowNo + fields.fold<double>(0, (a, f) => a + _width(f)) + reasonW + 3;
     final reasons = r.refusedByReason;
     return Column(children: [
@@ -1946,15 +2093,29 @@ class _ImportReviewViewState extends State<ImportReviewView> {
                 hintText: _t('siSearch'),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.border)),
               ),
-              onChanged: (v) => setState(() {
-                _query = v;
-                _filter();
-              }),
+              onChanged: (v) {
+                _typing?.cancel();
+                _typing = Timer(const Duration(milliseconds: 250), () {
+                  if (!mounted) return;
+                  setState(() {
+                    _query = v;
+                    _filter();
+                  });
+                });
+              },
             ),
           ),
           const SizedBox(width: 6),
+          if (widget.onColumns != null)
+            IconButton(
+              key: const Key('si-swap-columns'),
+              tooltip: _t('si3SwapColumns'),
+              onPressed: widget.onColumns,
+              icon: const Icon(Icons.swap_horiz_rounded, color: AppColors.primary),
+            ),
           TextButton(
             key: const Key('si-select-all'),
+            style: TextButton.styleFrom(minimumSize: const Size(0, 40)),
             onPressed: () => setState(() {
               if (_selected.length == _shown.length) {
                 _selected.clear();
@@ -1969,23 +2130,22 @@ class _ImportReviewViewState extends State<ImportReviewView> {
         ]),
       ),
       if (_selected.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
-          child: SizedBox(
-            width: double.infinity,
-            child: FilledButton.tonalIcon(
-              key: const Key('si-bulk'),
-              onPressed: () {
-                final rows = r.rows.where((e) => _selected.contains(e.row));
-                r.setRejected(rows, !_refused);
-                _selected.clear();
-                _changed();
-              },
-              icon: Icon(_refused ? Icons.undo_rounded : Icons.remove_circle_outline_rounded),
-              label: Text(_refused ? _t('siApproveSel', {'n': '${_selected.length}'}) : _t('siRejectSel', {'n': '${_selected.length}'}),
-                  style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
-            ),
-          ),
+        SizedBox(
+          height: 46,
+          child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.fromLTRB(10, 2, 10, 4), children: [
+            _bulk('si-bulk', _refused ? Icons.undo_rounded : Icons.remove_circle_outline_rounded,
+                _refused ? _t('siApproveSel', {'n': '${_selected.length}'}) : _t('siRejectSel', {'n': '${_selected.length}'}), () {
+              final rows = r.rows.where((e) => _selected.contains(e.row));
+              r.setRejected(rows, !_refused);
+              _selected.clear();
+              _changed();
+            }),
+            if (widget.chooseCurrency != null)
+              _bulk('si-bulk-currency', Icons.payments_rounded, _t('si3SetCurrency', {'n': '${_selected.length}'}), _bulkCurrency),
+            if (r.target != ImportTarget.accounts &&
+                r.rows.any((e) => _selected.contains(e.row) && e.reasons.contains('exists')))
+              _bulk('si-bulk-rename', Icons.drive_file_rename_outline_rounded, _t('si3RenameNew'), _bulkRename),
+          ]),
         ),
       Text(_t('siShowing', {'n': '${_shown.length}'}), style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary)),
       Expanded(
@@ -2004,7 +2164,7 @@ class _ImportReviewViewState extends State<ImportReviewView> {
                   child: Row(children: [
                     const SizedBox(width: check),
                     _head('#', rowNo),
-                    for (final f in fields) _head(_t('siField_$f'), _width(f)),
+                    for (final f in fields) _head(_t('siField_$f'), _width(f), sort: f.startsWith('_') ? null : f),
                     _head(_refused ? _t('siWhyNot') : _t('siNotes'), reasonW),
                   ]),
                 ),
@@ -2050,28 +2210,55 @@ class _ImportReviewViewState extends State<ImportReviewView> {
         width: double.infinity,
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: _red.withValues(alpha: 0.06),
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _red.withValues(alpha: 0.35)),
+          border: Border.all(color: AppColors.border),
         ),
-        child: Text(text, style: const TextStyle(fontFamily: _font, fontSize: 12, color: _yellow, fontWeight: FontWeight.w700, height: 1.5)),
+        child: Text(text,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary, height: 1.5)),
       );
 
-  Widget _head(String text, double w) => SizedBox(
+  Widget _bulk(String key, IconData icon, String label, VoidCallback onTap) => Padding(
+        padding: const EdgeInsetsDirectional.only(end: 6),
+        child: ActionChip(
+          key: Key(key),
+          avatar: Icon(icon, size: 17, color: AppColors.primary),
+          label: Text(label, style: const TextStyle(fontFamily: _font, fontSize: 12.5, fontWeight: FontWeight.w700)),
+          onPressed: onTap,
+        ),
+      );
+
+  Widget _head(String text, double w, {String? sort}) => SizedBox(
         width: w,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: Text(text,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontFamily: _font, fontSize: 12, fontWeight: FontWeight.w800)),
+        child: InkWell(
+          key: sort == null ? null : Key('si-sort-$sort'),
+          onTap: sort == null ? null : () => _sort(sort),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Row(children: [
+              Flexible(
+                child: Text(text,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontFamily: _font, fontSize: 12, fontWeight: FontWeight.w800)),
+              ),
+              if (sort != null && _sortBy == sort)
+                Icon(_sortUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 14, color: AppColors.primary),
+            ]),
+          ),
         ),
       );
 
   Widget _row(ReviewRow row, List<String> fields, double check, double rowNo, double reasonW) {
     final refused = !row.accepted;
+    final more = [
+      for (final (c, minor) in row.more)
+        '+ ${(minor / 100).toStringAsFixed(2)} ${c ?? r.defaultCurrency ?? '?'}',
+    ].join('  ');
     final note = refused
         ? [for (final x in row.reasons.isEmpty ? ['rejected_by_user'] : row.reasons) _t('siIssue_$x')].join(' · ')
-        : [for (final w in row.warnings) _t('siIssue_$w')].join(' · ');
+        : [if (more.isNotEmpty) more, for (final w in row.warnings) if (w != 'multi_currency') _t('siIssue_$w')].join(' · ');
     return Container(
       key: Key('si-row-${row.row}'),
       decoration: BoxDecoration(
@@ -2101,12 +2288,19 @@ class _ImportReviewViewState extends State<ImportReviewView> {
                 child: f == 'image'
                     ? _picture(row[f])
                     : f.startsWith('_')
-                        ? Text('${f == '_units' ? row.units.length : row.barcodes.length}',
+                        ? Text('${f == '_units' ? row.units.length + row.prices.length : row.barcodes.length}',
                             style: const TextStyle(fontFamily: _font, fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.primary))
-                        : Text(row[f] ?? '—',
+                        : Text(f == 'currency' ? (row[f] ?? r.defaultCurrency ?? '—') : (row[f] ?? '—'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontFamily: _font, fontSize: 12.5, color: row[f] == null ? AppColors.textSecondary : null)),
+                            style: TextStyle(
+                                fontFamily: _font,
+                                fontSize: 12.5,
+                                color: f == 'currency' && row[f] == null && r.defaultCurrency == null
+                                    ? _yellow
+                                    : row[f] == null
+                                        ? AppColors.textSecondary
+                                        : null)),
               ),
             ),
           ),

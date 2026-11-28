@@ -112,14 +112,14 @@ void main() {
   test('three different databases: every table recognised and linked by itself', () async {
     final shop = await buildShopDb('${dir.path}/shop.db', products: 400, customers: 120);
     final s1 = await ImportSession.analyze(await readImportFile(File('${dir.path}/shop.db')),
-        currentBranchName: 'فرع الحصبه');
+        currentBranchName: 'فرع الحصبه', currency: 'SAR');
     expect(_roles(s1.analysis), shop.roles);
     expect(s1.sourceBranch, 'فرع الحصبة'); // the file's branch named like the FYONA one
     expect(s1.branchChoices.keys.toSet(), {'الفرع الرئيسي', 'فرع الحصبة'});
     expect(s1.context.currencyCodes, {'1': 'SAR', '2': 'USD', '3': 'YER'});
     TableAnalysis t(String n) => s1.analysis.firstWhere((x) => x.table.name == n);
     expect(t('products').mapping, allOf(containsPair('name', 'name_ar'), containsPair('barcode', 'barcode'),
-        containsPair('sku', 'sku'), containsPair('category', 'category_id'), containsPair('unit', 'unit'),
+        containsPair('category', 'category_id'), containsPair('unit', 'unit'),
         containsPair('min_stock', 'min_qty')));
     expect(t('customers').mapping.containsKey('credit'), isFalse, reason: 'credit_limit is no credit balance');
     for (final p in ['product_units', 'product_barcodes', 'product_prices', 'product_images', 'inventory_stock']) {
@@ -133,7 +133,7 @@ void main() {
         containsPair('currency', 'currency_id')));
 
     final arabic = await buildArabicDb('${dir.path}/ar.db', products: 120);
-    final s2 = await ImportSession.analyze(await readImportFile(File('${dir.path}/ar.db')));
+    final s2 = await ImportSession.analyze(await readImportFile(File('${dir.path}/ar.db')), currency: 'SAR');
     expect(_roles(s2.analysis), arabic.roles);
     final items = s2.analysis.firstWhere((x) => x.table.name == 'الأصناف');
     expect(items.mapping, allOf(containsPair('name', 'اسم الصنف'), containsPair('category', 'رقم المجموعة'),
@@ -142,7 +142,7 @@ void main() {
     expect(s2.analysis.firstWhere((x) => x.table.name == 'الصناديق').mapping['name'], 'اسم الصندوق');
 
     final csv = buildCsvZip('${dir.path}/export.zip', products: 50);
-    final s3 = await ImportSession.analyze(await readImportFile(File('${dir.path}/export.zip')));
+    final s3 = await ImportSession.analyze(await readImportFile(File('${dir.path}/export.zip')), currency: 'SAR');
     String role3(String file) => s3.analysis.firstWhere((x) => x.table.name.startsWith('$file.csv')).role.name;
     csv.roles.forEach((k, v) => expect(role3(k), v, reason: k));
     expect(role3('Chart of Accounts'), 'unsupported');
@@ -151,7 +151,7 @@ void main() {
   test('the review of the shop file: prices, stock of the chosen branch, balances, codes', () async {
     final e = await buildShopDb('${dir.path}/shop.db', products: 1300, customers: 400);
     final f = File('${dir.path}/shop.db');
-    final s = await ImportSession.analyze(await readImportFile(f), images: await readImportImages(f), currentBranchName: 'فرع الحصبة');
+    final s = await ImportSession.analyze(await readImportFile(f), images: await readImportImages(f), currentBranchName: 'فرع الحصبة', currency: 'SAR');
     await s.buildReviews();
     ImportReview r(String n) => s.reviews.entries.firstWhere((x) => x.key.table.name == n).value;
     final products = r('products');
@@ -178,7 +178,8 @@ void main() {
     final customers = r('customers');
     expect(customers.acceptedCount, e.customersOk);
     expect(customers.refusedByReason['other_branch'], e.customersOtherBranch);
-    expect(customers.refusedByReason['multi_currency'] ?? 0, e.multiCurrency);
+    expect(customers.rows.where((x) => x.accepted && x.more.isNotEmpty).length, e.multiCurrency);
+    expect(customers.toPreview().parties.where((x) => x.more.isNotEmpty).length, e.multiCurrency);
     expect(customers.refusedByReason['credit_balance'] ?? 0, e.credit);
     expect(customers.toPreview().totals['customer']?['SAR'] ?? 0, e.customerTotalMinor);
     expect(r('suppliers').toPreview().totals['supplier']?['SAR'], e.supplierTotalMinor);
@@ -186,35 +187,43 @@ void main() {
     expect(accounts.length, e.accountsOk);
     expect(accounts.where((a) => a.currency == 'SAR').fold<int>(0, (a, x) => a + x.amountMinor), e.accountTotalMinor);
     expect(accounts.where((a) => a.currency == 'USD').single.amountMinor, 400000);
+    expect(r('bank_accounts').refusedByReason, {'duplicate_in_file': 1});
+    // The boxes are cash: their balances go into FYONA's «كاش» account.
+    expect(r('cash_boxes').toPreview().accounts.every((a) => a.cash && a.bank == 'كاش'), isTrue);
 
-    // All branches: quantities of both branches add up; customers of both.
+    // Never all branches together (balances and quantities are not added
+    // up): one of the file's branches is always chosen.
     s.setSourceBranch(null);
+    expect(s.sourceBranch, 'فرع الحصبة');
+    s.setSourceBranch('الفرع الرئيسي');
     await s.buildReviews();
-    expect(r('customers').refusedByReason['other_branch'], isNull);
+    expect(r('customers').refusedByReason['other_branch'], isNotNull);
   });
 
-  test('Sara\'s operations change the review by the app\'s rules', () async {
+  test('Sara\'s operations change the review by the app\'s rules — never an amount', () async {
     await buildShopDb('${dir.path}/shop.db', products: 200, customers: 60);
-    final s = await ImportSession.analyze(await readImportFile(File('${dir.path}/shop.db')), currentBranchName: 'فرع الحصبة');
+    final s = await ImportSession.analyze(await readImportFile(File('${dir.path}/shop.db')),
+        currentBranchName: 'فرع الحصبة', enabled: {'SAR', 'USD', 'YER_NEW'}, currency: 'SAR');
     await s.buildReviews();
     final before = s.reviews.entries.firstWhere((x) => x.key.table.name == 'products').value.toPreview().products.first;
     final done = await s.applyOps([
+      // Not allowed: prices, quantities and balances come from the file.
       {'op': 'adjust', 'field': 'sale_price', 'percent': 10},
       {'op': 'set_field', 'target': 'products', 'field': 'min_stock', 'value': '7', 'only_empty': false},
+      {'op': 'set_field', 'target': 'customers', 'field': 'balance', 'value': '99', 'only_empty': false},
+      // Allowed.
+      {'op': 'set_field', 'target': 'products', 'field': 'category', 'value': 'عام', 'only_empty': true},
       {'op': 'reject', 'target': 'customers', 'where': {'field': 'phone', 'op': 'contains', 'value': '7700000'}},
       {'op': 'set_role', 'table': 'audit_logs', 'role': 'unsupported'},
-      {'op': 'map', 'table': 'products', 'field': 'description', 'column': 'name_en'},
     ]);
-    expect(done.length, 5);
+    expect(done.length, 3, reason: '$done');
     await s.buildReviews();
     final after = s.reviews.entries.firstWhere((x) => x.key.table.name == 'products').value.toPreview().products.first;
-    expect(after.description, 'Product ${after.row}');
-    // The review was rebuilt after the mapping change: Sara's price rise
-    // and the minimum stock are still there (never lost).
-    expect(importMinor(after.sale), ((importMinor(before.sale)! * 1.1)).round());
-    expect(after.minStock, '7');
+    expect(after.sale, before.sale);
+    expect(after.minStock, before.minStock);
+    // FYONA's own currency codes: YER → the business's YER_NEW.
     await s.applyOps([{'op': 'set_currency', 'currency': 'YER'}]);
-    expect(s.currency, 'YER');
+    expect(s.currency, 'YER_NEW');
     expect(s.reviews, isEmpty); // rebuilt with the new currency
   });
 
@@ -230,7 +239,7 @@ void main() {
     final led = await _Ledger.open(dir);
     final sw = Stopwatch()..start();
     final s = await ImportSession.analyze(await readImportFile(file),
-        images: await readImportImages(file), currentBranchName: 'فرع الحصبة');
+        images: await readImportImages(file), currentBranchName: 'فرع الحصبة', currency: 'SAR');
     s.existing = await led.importer(s.images).existingNames();
     await s.buildReviews();
     final review = sw.elapsedMilliseconds;
@@ -257,7 +266,7 @@ void main() {
     final gs = BusinessLedgerAccess(led.sibling, BusinessLedgerAction.values.toSet());
     expect(await led.store.withLedger(gs, () => led.sibling, (l) => l.accounts(gs)), isEmpty);
     // The same file again: nothing doubled.
-    final s2 = await ImportSession.analyze(await readImportFile(file), images: s.images, currentBranchName: 'فرع الحصبة');
+    final s2 = await ImportSession.analyze(await readImportFile(file), images: s.images, currentBranchName: 'فرع الحصبة', currency: 'SAR');
     s2.existing = await led.importer(s.images).existingNames();
     await s2.buildReviews();
     expect(s2.reviews.entries.firstWhere((x) => x.key.table.name == 'products').value.acceptedCount, 0);
@@ -271,7 +280,7 @@ void main() {
     final a = await buildArabicDb('${dir.path}/ar.db', products: Platform.isWindows ? 100 : 1200);
     final led = await _Ledger.open(dir);
     final f1 = File('${dir.path}/ar.db');
-    final s1 = await ImportSession.analyze(await readImportFile(f1));
+    final s1 = await ImportSession.analyze(await readImportFile(f1), currency: 'SAR');
     s1.existing = await led.importer(s1.images).existingNames();
     await s1.buildReviews();
     await led.importAll(s1, f1);
@@ -283,7 +292,7 @@ void main() {
 
     final c = buildCsvZip('${dir.path}/export.zip', products: Platform.isWindows ? 50 : 400);
     final f2 = File('${dir.path}/export.zip');
-    final s2 = await ImportSession.analyze(await readImportFile(f2));
+    final s2 = await ImportSession.analyze(await readImportFile(f2), currency: 'SAR');
     s2.existing = await led.importer(s2.images).existingNames();
     await s2.buildReviews();
     // Vendor phones 011, 012… are already used by the Arabic file's

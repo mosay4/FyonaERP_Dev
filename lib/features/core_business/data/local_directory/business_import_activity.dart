@@ -14,6 +14,7 @@ extension BusinessImportActivity on BusinessLedger {
     required Map<String, String> openings,
     required List<String> products,
     Map<String, String> accounts = const {},
+    Map<String, List<String>> extraOpenings = const {},
   }) {
     final branch = _branch(access, BusinessLedgerAction.readDebt);
     return _directory._transaction((txn) async {
@@ -22,11 +23,13 @@ extension BusinessImportActivity on BusinessLedger {
           (await txn.rawQuery('$sql LIMIT 1', args)).isNotEmpty;
       for (final e in parties.entries) {
         final p = e.key, kind = e.value;
-        // Anything but the untouched opening document of this import.
+        // Anything but the untouched opening documents of this import.
+        final own = [if (openings[p] != null) openings[p]!, ...?extraOpenings[p]];
+        final marks = own.isEmpty ? "''" : List.filled(own.length, '?').join(',');
         if (await any(
               'SELECT 1 FROM ${BusinessLedger._debts} WHERE branch_id = ? AND kind = ? AND party_id = ? '
-              'AND (id IS NOT ? OR paid_minor != 0 OR revision != 0 OR cancelled_us IS NOT NULL)',
-              [branch, kind, p, openings[p]],
+              'AND (id NOT IN ($marks) OR paid_minor != 0 OR revision != 0 OR cancelled_us IS NOT NULL)',
+              [branch, kind, p, ...own],
             ) ||
             await any('SELECT 1 FROM $_commerceInvoices WHERE branch_id = ? AND party_id = ?', [branch, p])) {
           busy.add(p);
@@ -49,6 +52,36 @@ extension BusinessImportActivity on BusinessLedger {
     });
   }
 
+  /// Is anything an import batch made still in the ledger? (A backup
+  /// restored from before the import has none of it: the same file may then
+  /// be imported again.)
+  Future<bool> importAnyPresent(
+    BusinessLedgerAccess access, {
+    List<String> parties = const [],
+    List<String> products = const [],
+    List<String> accounts = const [],
+  }) {
+    final branch = _branch(access, BusinessLedgerAction.readDebt);
+    return _directory._transaction((txn) async {
+      Future<bool> any(String table, String extra, List<String> ids) async {
+        for (var i = 0; i < ids.length; i += 400) {
+          final chunk = ids.sublist(i, i + 400 > ids.length ? ids.length : i + 400);
+          final marks = List.filled(chunk.length, '?').join(',');
+          if ((await txn.rawQuery('SELECT 1 FROM $table WHERE branch_id = ? AND id IN ($marks)$extra LIMIT 1',
+                  [branch, ...chunk]))
+              .isNotEmpty) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      return await any(DirectoryDatabase._table, '', parties) ||
+          await any(_commerceProducts, ' AND deleted_us IS NULL', products) ||
+          await any(BusinessLedger._accounts, '', accounts);
+    });
+  }
+
   /// Every live card name (`customer|name`, `supplier|name`) and product
   /// name/barcode (`product|…`) of the branch, as the import compares them
   /// ([fold] = the import's spelling fold).
@@ -66,8 +99,11 @@ extension BusinessImportActivity on BusinessLedger {
         if (phone.isNotEmpty) out.add('phone|${r['kind']}|$phone');
       }
       for (final r in await txn.rawQuery(
-          'SELECT account_name, bank_name FROM ${BusinessLedger._accounts} WHERE branch_id = ?', [branch])) {
+          'SELECT account_name, bank_name, currency FROM ${BusinessLedger._accounts} WHERE branch_id = ? AND closed_us IS NULL',
+          [branch])) {
         out.add('account|${fold('${r['account_name']}')}|${fold('${r['bank_name']}')}');
+        // FYONA keeps one account per bank and currency (the import's type).
+        out.add('bank|${fold('${r['bank_name']}')}|${r['currency']}');
       }
       for (final r in await txn.rawQuery(
           'SELECT name, barcode, sku FROM $_commerceProducts WHERE branch_id = ? AND deleted_us IS NULL', [branch])) {

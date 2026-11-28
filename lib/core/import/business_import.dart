@@ -44,6 +44,9 @@ class ImportRegistry {
     await db.execute('''CREATE TABLE IF NOT EXISTS import_items (
       batch_id TEXT NOT NULL, kind TEXT NOT NULL, entity_id TEXT NOT NULL, party_kind TEXT,
       opening_id TEXT, row_no INTEGER NOT NULL, PRIMARY KEY (batch_id, kind, entity_id))''');
+    // A cash balance is a deposit into FYONA's «كاش» (amount kept for undo).
+    final cols = {for (final c in await db.rawQuery('PRAGMA table_info(import_items)')) '${c['name']}'};
+    if (!cols.contains('amount_minor')) await db.execute('ALTER TABLE import_items ADD COLUMN amount_minor INTEGER');
     return ImportRegistry._(db);
   }
 
@@ -60,7 +63,8 @@ class ImportRegistry {
 class ImportRefused implements Exception {
   const ImportRefused(this.code, [this.count = 0]);
 
-  /// already_imported | busy_after_import | not_found | already_undone
+  /// already_imported | busy_after_import | not_found | already_undone |
+  /// cash_spent
   final String code;
   final int count;
 }
@@ -79,7 +83,12 @@ class BusinessImporter {
     this.picture,
     this.createUnit,
     this.addBarcode,
+    this.fallbackCurrency = 'SAR',
   });
+
+  /// cost_currency of a product that has no price at all (the form's own
+  /// default; the business's main currency is passed in).
+  final String fallbackCurrency;
 
   /// The app's own unit / extra barcode operations (LocalInventoryApi).
   final Future<Map<String, dynamic>> Function(String productId, Map<String, dynamic> body)? createUnit;
@@ -115,7 +124,30 @@ class BusinessImporter {
         BusinessLedgerAction.manageProducts,
         BusinessLedgerAction.createBank,
         BusinessLedgerAction.manageBank,
+        BusinessLedgerAction.readBank,
+        BusinessLedgerAction.moveMoney,
       });
+
+  /// FYONA's «كاش» account of [currency] in this branch: the existing one,
+  /// else created exactly as the banks screen creates it (same command id,
+  /// so two devices never make a second one).
+  Future<String> _cashAccount(BusinessLedgerAccess g, String currency) async {
+    final rows = await store.withLedger(g, () => access, (l) => l.managedBankAccounts(g, includeBalances: false));
+    for (final a in rows) {
+      final bank = '${a['bank_name'] ?? ''}'.trim();
+      if (const ['كاش', 'Cash', 'CASH'].contains(bank) && '${a['currency']}'.toUpperCase() == currency) return '${a['id']}';
+    }
+    final made = await store.withLedger(g, () => access, (l) => l.createAccount(
+          g,
+          commandId: const Uuid().v5(Uuid.NAMESPACE_URL, 'fyona-cash:${access.branchId}:$currency'),
+          bankName: 'كاش',
+          accountName: 'حساب الكاش',
+          accountNumber: 'CASH',
+          currency: currency,
+          managed: true,
+        ));
+    return '${made['id']}';
+  }
 
   /// One batch per (file, branch, target): the same file twice is refused.
   String batchIdFor(String fileSha, ImportTarget target) =>
@@ -137,11 +169,18 @@ class BusinessImporter {
     ImportProgress? onProgress,
   }) async {
     final id = batchIdFor(fileSha, preview.target);
-    final prior = await registry.batch(id);
+    var prior = await registry.batch(id);
+    final db = registry._db;
+    if (prior != null && prior['status'] == 'done' && !await _stillThere(id)) {
+      // A backup from before this import was restored: nothing of it is in
+      // the ledger any more, so the same file may be imported again.
+      await db.delete('import_items', where: 'batch_id = ?', whereArgs: [id]);
+      await db.delete('import_batches', where: 'id = ?', whereArgs: [id]);
+      prior = null;
+    }
     if (prior != null && prior['status'] != 'applying') {
       throw ImportRefused(prior['status'] == 'undone' ? 'already_undone' : 'already_imported');
     }
-    final db = registry._db;
     final now = DateTime.now().toUtc().microsecondsSinceEpoch;
     if (prior == null) {
       await db.insert('import_batches', {
@@ -172,6 +211,8 @@ class BusinessImporter {
         skippedRows[no] = 'directory:${e.problem.name}';
       } on BusinessLedgerError catch (e) {
         skippedRows[no] = 'ledger:${e.problem.name}';
+      } on DirectoryAccessDenied {
+        skippedRows[no] = 'denied';
       } on FormatException {
         skippedRows[no] = 'format';
       }
@@ -180,19 +221,41 @@ class BusinessImporter {
     if (preview.target == ImportTarget.parties) {
       for (final r in preview.parties) {
         final cmd = _rowCommand(id, r.row, 'party');
+        final kind = r.kind == 'supplier' ? DirectoryPartyKind.supplier : DirectoryPartyKind.customer;
         final res = await row(r.row, () => store.withLedger(g, () => access, (l) => l.addPartyWithOpeningDebt(
               g,
-              r.kind == 'supplier' ? DirectoryPartyKind.supplier : DirectoryPartyKind.customer,
+              kind,
               commandId: cmd,
               name: r.name,
               phone: r.phone,
               amountMinor: r.amountMinor,
               currency: r.currency,
             )));
-        if (res != null) await db.insert('import_items', {
-          'batch_id': id, 'kind': 'party', 'entity_id': '${res['party_id']}', 'party_kind': r.kind,
-          'opening_id': res['invoice_id'], 'row_no': r.row,
-        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        if (res != null) {
+          await db.insert('import_items', {
+            'batch_id': id, 'kind': 'party', 'entity_id': '${res['party_id']}', 'party_kind': r.kind,
+            'opening_id': res['invoice_id'], 'row_no': r.row,
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
+          // Its balances in other currencies: one opening debt each, as the
+          // card screen adds them (recordOpeningDebt).
+          final ref = DirectoryPartyReference(scope: access, kind: kind, id: '${res['party_id']}');
+          for (var k = 0; k < r.more.length; k++) {
+            final (cur, minor) = r.more[k];
+            final open = await row(r.row, () => store.withLedger(g, () => access, (l) => l.recordOpeningDebt(
+                  g,
+                  ref,
+                  commandId: _rowCommand(id, r.row, 'opening|$cur'),
+                  amountMinor: minor,
+                  currency: cur,
+                )));
+            if (open != null) {
+              await db.insert('import_items', {
+                'batch_id': id, 'kind': 'opening', 'entity_id': '${open['invoice_id']}', 'party_kind': r.kind,
+                'opening_id': '${res['party_id']}', 'row_no': r.row,
+              }, conflictAlgorithm: ConflictAlgorithm.ignore);
+            }
+          }
+        }
         if (++done % 200 == 0 || done == total) {
           await db.update('import_batches', {'rows_done': done}, where: 'id = ?', whereArgs: [id]);
           onProgress?.call(done, total);
@@ -201,19 +264,43 @@ class BusinessImporter {
     } else if (preview.target == ImportTarget.accounts) {
       for (final r in preview.accounts) {
         final cmd = _rowCommand(id, r.row, 'account');
-        final res = await row(r.row, () => store.withLedger(g, () => access, (l) => l.createAccount(
-              g,
-              commandId: cmd,
-              bankName: r.bank,
-              accountName: r.name,
-              accountNumber: r.number,
-              iban: r.iban,
-              currency: r.currency,
-              openingMinor: r.amountMinor,
-            )));
-        if (res != null) await db.insert('import_items', {
-          'batch_id': id, 'kind': 'account', 'entity_id': '${res['id']}', 'opening_id': cmd, 'row_no': r.row,
-        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        if (r.cash) {
+          // Cash: FYONA's one «كاش» account per currency; the balance is a
+          // deposit into it (FYONA's way of adding to an existing account).
+          final cashId = await row(r.row, () => _cashAccount(g, r.currency));
+          if (cashId != null && r.amountMinor > 0) {
+            final moved = await row(r.row, () => store.withLedger(g, () => access, (l) => l.move(
+                  g,
+                  commandId: cmd,
+                  accountId: cashId,
+                  amountMinor: r.amountMinor,
+                  withdraw: false,
+                  description: 'رصيد مستورد — ${r.name}',
+                )));
+            if (moved != null) {
+              await db.insert('import_items', {
+                'batch_id': id, 'kind': 'cash', 'entity_id': cmd, 'opening_id': cashId, 'row_no': r.row,
+                'amount_minor': r.amountMinor,
+              }, conflictAlgorithm: ConflictAlgorithm.ignore);
+            }
+          }
+        } else {
+          final res = await row(r.row, () => store.withLedger(g, () => access, (l) => l.createAccount(
+                g,
+                commandId: cmd,
+                bankName: r.bank,
+                accountName: r.name,
+                accountNumber: r.number,
+                iban: r.iban,
+                currency: r.currency,
+                openingMinor: r.amountMinor,
+                // As the banks screen: one account per bank, currency and type.
+                managed: true,
+              )));
+          if (res != null) await db.insert('import_items', {
+            'batch_id': id, 'kind': 'account', 'entity_id': '${res['id']}', 'opening_id': cmd, 'row_no': r.row,
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
         if (++done % 200 == 0 || done == total) {
           await db.update('import_batches', {'rows_done': done}, where: 'id = ?', whereArgs: [id]);
           onProgress?.call(done, total);
@@ -231,26 +318,28 @@ class BusinessImporter {
         String? category;
         if (r.category != null && createCategory != null) {
           final k = importFold(r.category!);
-          category = catIds[k] ??= '${(await createCategory!(r.category!))['id']}';
+          // A category FYONA refuses leaves the product without one (listed).
+          category = catIds[k] ??= await row(r.row, () async => '${(await createCategory!(r.category!))['id']}') ?? '';
+          if (category.isEmpty) category = null;
         }
         final image = r.image == null || picture == null ? null : await picture!(r.image!);
+        // Exactly the fields of the product form: the main currency's price
+        // first (cost_currency = that currency), every currency in prices.
+        final main = r.prices.firstOrNull;
         final created = await row(r.row, () => createProduct({
           'command_id': cmd,
           'name': r.name,
-          if (r.unit != null) 'unit': r.unit,
-          'price': r.sale ?? '0',
-          if (r.cost != null) 'cost_price': r.cost,
-          if (r.stock != null) 'stock': r.stock,
+          'unit': (r.unit ?? '').trim().isEmpty ? 'قطعة' : r.unit!.trim(),
+          'price': main?['price'] ?? '0',
+          'cost_price': main?['buy_price'],
+          'cost_currency': r.currency ?? fallbackCurrency,
+          'stock': r.stock ?? '0',
           if (r.barcode != null) 'barcode': r.barcode,
-          if (r.sku != null) 'sku': r.sku,
           if (category != null) 'category_id': category,
           if (image != null) 'image': image,
-          if (r.minStock != null) 'min_stock': r.minStock,
-          if (r.description != null) 'description': r.description,
+          'min_stock': r.minStock ?? '0',
           if (r.expiry != null) 'expiry_date': r.expiry,
-          if (r.notes != null) 'notes': r.notes,
-          if (r.cost != null) 'cost_currency': preview.currency,
-          if (r.prices.isNotEmpty) 'prices': r.prices,
+          'prices': r.prices,
         }));
         if (created == null) {
           if (++done % 200 == 0 || done == total) onProgress?.call(done, total);
@@ -292,6 +381,17 @@ class BusinessImporter {
     return id;
   }
 
+  Future<bool> _stillThere(String id) async {
+    final items = await registry._db.query('import_items', where: 'batch_id = ?', whereArgs: [id]);
+    if (items.isEmpty) return true;
+    final g = _grant;
+    List<String> of(String kind) => [for (final i in items) if (i['kind'] == kind) '${i['entity_id']}'];
+    final cashIds = [for (final i in items) if (i['kind'] == 'cash') '${i['opening_id']}'];
+    if (of('party').isEmpty && of('product').isEmpty && of('account').isEmpty) return cashIds.isNotEmpty;
+    return store.withLedger(g, () => access,
+        (l) => l.importAnyPresent(g, parties: of('party'), products: of('product'), accounts: of('account')));
+  }
+
   /// Undoes batch [id] when nothing happened since to what it created.
   /// Throws [ImportRefused] `busy_after_import` (with how many) otherwise.
   Future<int> undo(String id, {ImportProgress? onProgress}) async {
@@ -308,10 +408,35 @@ class BusinessImporter {
     };
     final products = [for (final i in items.where((i) => i['kind'] == 'product')) '${i['entity_id']}'];
     final accounts = {for (final i in items.where((i) => i['kind'] == 'account')) '${i['entity_id']}': '${i['opening_id']}'};
+    final cash = [for (final i in items.where((i) => i['kind'] == 'cash')) i];
+    // A card with more opening debts (other currencies) is still untouched
+    // when only its own opening documents are there.
+    final extra = <String, List<String>>{};
+    for (final i in items.where((i) => i['kind'] == 'opening')) {
+      (extra['${i['opening_id']}'] ??= []).add('${i['entity_id']}');
+    }
     final busy = await store.withLedger(g, () => access,
-        (l) => l.importLaterActivity(g, parties: parties, openings: openings, products: products, accounts: accounts));
+        (l) => l.importLaterActivity(g, parties: parties, openings: openings, products: products, accounts: accounts,
+            extraOpenings: extra));
     if (busy.isNotEmpty) throw ImportRefused('busy_after_import', busy.length);
     var done = 0;
+    // Cash deposits are taken back out of «كاش» (refused when that money
+    // has been spent since).
+    for (final i in cash) {
+      try {
+        await store.withLedger(g, () => access, (l) => l.move(
+              g,
+              commandId: _uuid.v5(_ns, 'undo|$id|${i['entity_id']}'),
+              accountId: '${i['opening_id']}',
+              amountMinor: i['amount_minor'] as int,
+              withdraw: true,
+              description: 'تراجع عن رصيد مستورد',
+            ));
+      } on BusinessLedgerError {
+        throw const ImportRefused('cash_spent');
+      }
+      done++;
+    }
     for (final e in parties.entries) {
       await store.withLedger(g, () => access, (l) => l.deleteUnlinkedParty(
             g,

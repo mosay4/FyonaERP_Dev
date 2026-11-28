@@ -65,7 +65,7 @@ void main() {
               saraAsked++;
               return const [];
             },
-            agent: (m, s, h) async => null,
+            agent: (m, s) async => null,
           )),
         ],
         child: MaterialApp(
@@ -112,8 +112,9 @@ void main() {
     expect(find.descendant(of: find.byKey(const Key('si-field-stock')), matching: find.text('السعر')), findsOneWidget);
     await tester.tap(find.byKey(const Key('si-columns-done')));
     await _settle(tester);
-    // Sara sits at the top of the window.
-    expect(find.byKey(const Key('si-sara')), findsOneWidget);
+    // Sara is a button in the check (no chat window), with her picture.
+    expect(find.byKey(const Key('si-sara-check')), findsOneWidget);
+    expect(find.byType(SaraAvatar), findsWidgets);
   });
 
   testWidgets('review of 5 000 rows: two parts, red refused rows with the reason, edit and bulk choices', (tester) async {
@@ -126,7 +127,7 @@ void main() {
     final f = File('${dir.path}/c.csv')..writeAsStringSync(b.toString());
     final review = (await tester.runAsync(() async {
       final t = (await readImportFile(f)).single;
-      return ImportReview.load(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns));
+      return ImportReview.load(t, ImportTarget.parties, autoMapColumns(ImportTarget.parties, t.columns), defaultCurrency: 'SAR');
     }))!;
     expect(review.refusedCount, 715);
     await tester.runAsync(() => AppLocalizations.preload('ar'));
@@ -159,7 +160,7 @@ void main() {
     await tester.tap(find.byKey(const Key('si-tab-add')));
     await tester.pump();
     await tester.enterText(find.byKey(const Key('si-search')), 'عميل 49');
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300)); // typing pause
     await tester.tap(find.byKey(const Key('si-select-all')));
     await tester.pump();
     await tester.tap(find.byKey(const Key('si-bulk')));

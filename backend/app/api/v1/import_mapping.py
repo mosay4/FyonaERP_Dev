@@ -1,5 +1,6 @@
 """Smart import — Sara suggests which column of the user's file is which
-FYONA field. That is ALL the AI does: the device reads the file, checks
+FYONA field. Only four things are ever imported: final balances of banks and
+cash, products with their stock, customers and suppliers. That is ALL the AI does: the device reads the file, checks
 every row, shows the preview and imports it with its own deterministic
 rules. Only the column titles and at most 30 sample rows (each value cut to
 60 characters) are sent; nothing is stored or logged here."""
@@ -8,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import List, Literal, Optional
 from uuid import UUID
 
@@ -31,7 +33,6 @@ FIELDS = {
     "products": {
         "name": "اسم المنتج",
         "barcode": "الباركود",
-        "sku": "رمز المنتج",
         "unit": "الوحدة",
         "sale_price": "سعر البيع",
         "cost_price": "سعر الشراء أو التكلفة",
@@ -39,7 +40,8 @@ FIELDS = {
         "category": "التصنيف",
         "image": "الصورة",
         "min_stock": "الحد الأدنى",
-        "description": "الوصف",
+        "expiry": "تاريخ الانتهاء",
+        "currency": "عملة أسعار المنتج (إن كانت مكتوبة)",
     },
     "accounts": {
         "name": "اسم الحساب أو الصندوق",
@@ -69,14 +71,21 @@ ROLES = {
     "prices": "أسعار المنتجات (جدول مرتبط بالمنتجات: سعر لكل منتج/عملة/نوع)",
     "stock": "كميات المخزون لكل منتج (وقد يكون لكل فرع)",
     "balances": "أرصدة العملاء أو الموردين الحالية: ذمم مدينة/دائنة، مستحقات، أرصدة افتتاحية (مرتبطة بالعملاء/الموردين)",
-    "branches": "قائمة الفروع أو المستودعات (للمعرفة فقط)",
+    "branches": "قائمة الفروع أو المستودعات (لا تُستورد أبدًا؛ تُستخدم فقط لمعرفة أي صفوف تخص أي فرع)",
     "currencies": "قائمة العملات (للمعرفة فقط)",
-    "history": "سجلات سابقة: فواتير، سندات، حركات، مدفوعات",
-    "unsupported": "بيانات لا مكان لها في برنامج محاسبة للتجارة (موظفون، رواتب، أصول، إعدادات…)",
+    "history": "سجلات سابقة: فواتير، سندات، حركات، مدفوعات، مصروفات، إيرادات (لا تُستورد)",
+    "unsupported": "بيانات لا تُستورد: موظفون، رواتب، أصول، مستخدمون، إعدادات، ضرائب…",
     "unknown": "غير واضح",
 }
 
 _TIMEOUT = 40.0
+# FYONA currency codes: ISO (SAR, USD…) or ISO with a variant (YER_NEW, YER_OLD).
+_CURRENCY = r"^[A-Za-z]{3}(?:_[A-Za-z]{3})?$"
+
+
+def _currency_code(value) -> Optional[str]:
+    code = str(value or "").strip().upper()
+    return code if re.match(_CURRENCY, code) else None
 _SCHEMA_GROUP = 6
 _SCHEMA_TOKENS = 8000
 _SCHEMA_TIMEOUT = 75.0
@@ -253,11 +262,13 @@ async def import_schema(body: SchemaIn, user_id: UUID = Depends(get_current_user
 AGENT_ROLES = ["customers", "suppliers", "products", "accounts", "units", "barcodes", "images", "categories",
                "prices", "stock", "balances", "branches", "currencies", "history", "unsupported", "unknown"]
 AGENT_TARGETS = {"products", "customers", "suppliers", "accounts"}
+# Sara never writes amounts, prices, quantities or phone numbers: those come
+# from the file only. She may name a currency, a unit, a category or a bank.
 AGENT_SET_FIELDS = {
-    "products": {"sale_price", "cost_price", "unit", "category", "min_stock", "stock", "description"},
-    "customers": {"balance", "currency", "phone"},
-    "suppliers": {"balance", "currency", "phone"},
-    "accounts": {"balance", "currency", "bank"},
+    "products": {"currency", "unit", "category"},
+    "customers": {"currency"},
+    "suppliers": {"currency"},
+    "accounts": {"currency", "bank"},
 }
 AGENT_WHERE_OPS = {"empty", "not_empty", "equals", "contains", "lt", "gt"}
 _MAX_OPS = 30
@@ -274,17 +285,10 @@ class AgentTableIn(BaseModel):
 
 class AgentIn(BaseModel):
     message: str = Field(min_length=1, max_length=800)
-    currency: str = Field(default="SAR", max_length=3)
+    # Empty: the user has not chosen one yet (never assumed).
+    currency: Optional[str] = Field(default=None, max_length=7)
     tables: List[AgentTableIn] = Field(default_factory=list, max_length=60)
     history: List[dict] = Field(default_factory=list, max_length=8)
-
-
-def _num(v) -> Optional[float]:
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if f == f and abs(f) < 1e12 else None
 
 
 def validate_ops(raw: object, tables: List[AgentTableIn]) -> list:
@@ -310,8 +314,8 @@ def validate_ops(raw: object, tables: List[AgentTableIn]) -> list:
                 continue
             out.append({"op": "map", "table": t.name, "field": field, "column": None if col is None else str(col)})
         elif kind == "set_currency":
-            code = str(o.get("currency") or "").upper()
-            if len(code) == 3 and code.isalpha():
+            code = _currency_code(o.get("currency"))
+            if code:
                 out.append({"op": "set_currency", "currency": code})
         elif kind == "set_field":
             target, field = str(o.get("target")), str(o.get("field"))
@@ -320,17 +324,17 @@ def validate_ops(raw: object, tables: List[AgentTableIn]) -> list:
             value = o.get("value")
             if value is None or len(str(value)) > 120:
                 continue
-            out.append({"op": "set_field", "target": target, "field": field, "value": str(value),
-                        "only_empty": bool(o.get("only_empty", False))})
-        elif kind == "adjust":
-            field = str(o.get("field"))
-            if field not in ("sale_price", "cost_price"):
-                continue
-            pct, add = _num(o.get("percent")), _num(o.get("add"))
-            if pct is not None and -95 <= pct <= 1000:
-                out.append({"op": "adjust", "field": field, "percent": pct})
-            elif add is not None:
-                out.append({"op": "adjust", "field": field, "add": add})
+            if field == "currency":
+                value = _currency_code(value)
+                if not value:
+                    continue
+            where = o.get("where") if isinstance(o.get("where"), dict) else None
+            op = {"op": "set_field", "target": target, "field": field, "value": str(value),
+                  "only_empty": bool(o.get("only_empty", False))}
+            if where and str(where.get("op") or "") in AGENT_WHERE_OPS:
+                op["where"] = {"field": str(where.get("field") or "")[:30], "op": str(where.get("op")),
+                               "value": None if where.get("value") is None else str(where.get("value"))[:120]}
+            out.append(op)
         elif kind in ("reject", "accept"):
             target = str(o.get("target"))
             where = o.get("where") if isinstance(o.get("where"), dict) else {}
@@ -345,24 +349,29 @@ def validate_ops(raw: object, tables: List[AgentTableIn]) -> list:
 
 _AGENT_SYSTEM = (
     "You are Sara, the assistant inside FYONA ERP's smart import window. The user imports an old database "
-    "into FYONA. You see the outline of the file: each table, what FYONA recognised it as (role), its columns, "
-    "the field→column mapping and a few sample rows. Do what the user asks by returning operations; the app "
-    "applies them, re-checks every row and shows the result before saving anything.\n"
+    "into FYONA. FYONA imports ONLY four things: final balances of bank accounts and cash boxes, products with "
+    "their stock, customers and suppliers (name, phone, what they owe). Branches, invoices, payments, movements, "
+    "employees and anything else are never imported. You see the outline of the file: each table, what FYONA "
+    "recognised it as (role), its columns, the field→column mapping and a few sample rows. Do what the user asks "
+    "by returning operations; the app applies them, re-checks every row and shows the result before saving.\n"
+    "You NEVER invent or change amounts, prices, quantities, balances, phone numbers or exchange rates: they "
+    "come from the file only. You never convert currencies.\n"
     "Answer JSON only: {\"reply\": <short answer in the user's language and dialect, 1-3 sentences, say what "
     "you changed>, \"ops\": [...]}.\n"
     "Operations:\n"
     "- {\"op\":\"set_role\",\"table\":T,\"role\":R} put a table somewhere else. Roles: " + ", ".join(AGENT_ROLES) + ".\n"
     "- {\"op\":\"map\",\"table\":T,\"field\":F,\"column\":C or null} which column is which field.\n"
-    "- {\"op\":\"set_currency\",\"currency\":\"SAR\"} currency of amounts the file does not name.\n"
+    "- {\"op\":\"set_currency\",\"currency\":\"SAR\"} currency of amounts the file does not name "
+    "(FYONA codes: SAR, USD, AED, YER_NEW, YER_OLD…; only when the user names it).\n"
     "- {\"op\":\"set_field\",\"target\":\"products|customers|suppliers|accounts\",\"field\":F,\"value\":V,"
-    "\"only_empty\":true|false} give a field one value (products: sale_price, cost_price, unit, category, "
-    "min_stock, stock, description; customers/suppliers: balance, currency, phone; accounts: balance, currency, bank).\n"
-    "- {\"op\":\"adjust\",\"field\":\"sale_price|cost_price\",\"percent\":10} or {\"add\":5} change prices.\n"
+    "\"only_empty\":true|false, \"where\":{optional filter as below}} give rows one value (products: currency, "
+    "unit, category; customers/suppliers: currency; accounts: currency, bank).\n"
     "- {\"op\":\"reject\"|\"accept\",\"target\":...,\"where\":{\"field\":F,\"op\":\"empty|not_empty|equals|contains|lt|gt\","
     "\"value\":V}} leave rows out / put them back.\n"
     "Never invent tables or columns. Invoices, payments and other past documents must stay history (importing "
-    "them would double debts and stock) — explain that if asked. If the request is unclear or impossible, "
-    "return no ops and ask one short question."
+    "them would double debts and stock) — explain that if asked. If the user asks to check or arrange the "
+    "file, fix roles and mappings so each table goes to the right one of the four sections. If the request is "
+    "unclear or impossible (e.g. changing prices or importing branches), return no ops and say why in one sentence."
 )
 
 
@@ -371,7 +380,7 @@ async def import_agent(body: AgentIn, user_id: UUID = Depends(get_current_user_u
     from app.domain.services.ai_router import build_client, route
 
     outline = {
-        "currency": body.currency.upper()[:3],
+        "currency": _currency_code(body.currency) or "not chosen yet",
         "tables": [{
             "name": t.name[:120], "role": t.role[:20], "rows": t.rows,
             "columns": [str(c)[:80] for c in t.columns[:120]],

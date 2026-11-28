@@ -86,8 +86,12 @@ void main() {
       expect(p.units.single.barcode, '30$n');
       expect(p.units.single.sale, '93');
       expect(p.barcodes, isEmpty); // the carton code went to the carton
-      expect(p.prices.single['currency'], 'USD');
-      expect(p.prices.single['price'], '4.25');
+      // As the product form saves it: the main currency first, then USD.
+      expect(p.currency, 'SAR');
+      expect(p.prices.map((x) => x['currency']), ['SAR', 'USD']);
+      expect(p.prices.first['price'], '15.5');
+      expect(p.prices.first['buy_price'], '10');
+      expect(p.prices.last['price'], '4.25');
       expect(p.image, isNotNull);
     }
     final customers = s.reviews.entries.firstWhere((e) => e.key.role == TableRole.customers).value;

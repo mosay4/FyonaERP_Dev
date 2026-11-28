@@ -270,7 +270,7 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
         context,
         title: _t('axTitle'),
         icon: Icons.ios_share_rounded,
-        colors: const [Color(0xFF0F766E), Color(0xFF14B8A6)],
+        colors: _brand,
         scenes: [
           IntroScene(const [Icons.event_rounded], _t('axIntro1')),
           IntroScene(const [Icons.account_balance_wallet_rounded, Icons.all_inbox_rounded, Icons.checklist_rounded], _t('axIntro2')),
@@ -288,18 +288,17 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
   void _openImport() => showFeatureIntro(
         context,
         title: _t('siTitle'),
-        icon: Icons.auto_awesome_rounded,
-        colors: const [Color(0xFF7B2FF7), Color(0xFFE0457B)],
+        icon: Icons.move_to_inbox_rounded,
+        colors: _brand,
         scenes: [
-          IntroScene(const [Icons.upload_file_rounded], _t('siIntro1')),
-          IntroScene(const [Icons.table_chart_rounded, Icons.auto_awesome_rounded], _t('siIntro2')),
-          IntroScene(const [Icons.check_circle_rounded, Icons.block_rounded, Icons.fact_check_rounded], _t('siIntro3')),
+          IntroScene(const [Icons.upload_file_rounded, Icons.storefront_rounded], _t('si3Intro1')),
+          IntroScene(const [Icons.table_chart_rounded, Icons.face_rounded], _t('si3Intro2'), saraAt: 1),
+          IntroScene(const [Icons.edit_note_rounded, Icons.fact_check_rounded], _t('si3Intro3')),
           IntroScene(const [Icons.fingerprint_rounded, Icons.verified_rounded], _t('siIntro4')),
         ],
         points: [
-          (Icons.auto_awesome_rounded, _t('siPoint1')),
-          (Icons.fact_check_rounded, _t('siPoint2')),
-          (Icons.shield_rounded, _t('siPoint3')),
+          (Icons.inventory_2_rounded, _t('si3Point1')),
+          (Icons.shield_rounded, _t('si3Point2')),
         ],
         start: _t('siStart'),
         onStart: () => openSmartImport(context),
@@ -336,26 +335,21 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
           ),
         ),
         const SizedBox(height: 14),
-        Row(children: [
-          Expanded(
-            child: _Tile(
-              key: const Key('bkh-device'),
-              icon: Icons.phone_android_rounded,
-              title: _t('bkhFromDevice'),
-              onTap: _busy ? null : _restoreFromDevice,
-            ),
+        _Group(children: [
+          _Tile(
+            key: const Key('bkh-device'),
+            icon: Icons.phone_android_rounded,
+            title: _t('bkhFromDevice'),
+            onTap: _busy ? null : _restoreFromDevice,
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _Tile(
-              key: const Key('bkh-cloud'),
-              icon: Icons.cloud_download_rounded,
-              title: _t('bkhFromCloud'),
-              onTap: _busy ? null : _restoreFromCloud,
-            ),
+          _Tile(
+            key: const Key('bkh-cloud'),
+            icon: Icons.cloud_download_rounded,
+            title: _t('bkhFromCloud'),
+            onTap: _busy ? null : _restoreFromCloud,
           ),
         ]),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
         Container(
           decoration: BoxDecoration(
             color: AppColors.surface,
@@ -372,25 +366,24 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
         ),
         if (_owner) ...[
           const SizedBox(height: 18),
-          Row(children: [
-            Expanded(
-              child: FeatureButton(
-                key: const Key('bkh-export'),
-                title: _t('bkhExportBtn'),
-                icon: Icons.ios_share_rounded,
-                colors: const [Color(0xFF0F766E), Color(0xFF14B8A6)],
-                onTap: _busy ? null : _openExport,
-              ),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 4, bottom: 8),
+            child: Text(_t('bkhMoveData'),
+                style: TextStyle(fontFamily: _font, fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textSecondary)),
+          ),
+          _Group(children: [
+            _Tile(
+              key: const Key('bkh-export'),
+              icon: Icons.ios_share_rounded,
+              title: _t('bkhExportBtn'),
+              onTap: _busy ? null : _openExport,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: FeatureButton(
-                key: const Key('bkh-import'),
-                title: _t('siTitle'),
-                icon: Icons.auto_awesome_rounded,
-                colors: const [Color(0xFF7B2FF7), Color(0xFFE0457B)],
-                onTap: _busy ? null : _openImport,
-              ),
+            _Tile(
+              key: const Key('bkh-import'),
+              icon: Icons.move_to_inbox_rounded,
+              title: _t('siTitle'),
+              trailing: const SaraAvatar(size: 26),
+              onTap: _busy ? null : _openImport,
             ),
           ]),
         ],
@@ -398,6 +391,9 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
     );
   }
 }
+
+/// FYONA's brand red (the explainers of export and import).
+const _brand = [Color(0xFF9E1B32), Color(0xFF6B0E22)];
 
 class _Hero extends StatelessWidget {
   const _Hero({required this.lastDevice, required this.problem, this.lastCloud});
@@ -410,7 +406,7 @@ class _Hero extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(22),
           gradient: const LinearGradient(colors: [Color(0xFF9E1B32), Color(0xFF6B0E22)]),
-          boxShadow: [BoxShadow(color: const Color(0xFF9E1B32).withValues(alpha: .25), blurRadius: 18, offset: const Offset(0, 8))],
+          boxShadow: [BoxShadow(color: const Color(0xFF9E1B32).withValues(alpha: .18), blurRadius: 14, offset: const Offset(0, 6))],
         ),
         child: Row(children: [
           Container(
@@ -441,34 +437,57 @@ class _Hero extends StatelessWidget {
       );
 }
 
+/// Rows in one card (restore, export / import): calm and compact.
+class _Group extends StatelessWidget {
+  const _Group({required this.children});
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppColors.border),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0) Divider(height: 1, indent: 64, color: AppColors.border),
+            children[i],
+          ],
+        ]),
+      );
+}
+
 class _Tile extends StatelessWidget {
-  const _Tile({super.key, required this.icon, required this.title, this.onTap});
+  const _Tile({super.key, required this.icon, required this.title, this.onTap, this.trailing});
   final IconData icon;
   final String title;
   final VoidCallback? onTap;
+  final Widget? trailing;
   @override
   Widget build(BuildContext context) => Material(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
+        color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
           onTap: onTap,
-          child: Container(
-            height: 118,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(18), border: Border.all(color: AppColors.border)),
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: .10), shape: BoxShape.circle),
-                child: Icon(icon, color: AppColors.primary),
-              ),
-              const SizedBox(height: 10),
-              Text(title,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontFamily: _font, fontSize: 13.5, fontWeight: FontWeight.w800)),
-            ]),
+          child: Opacity(
+            opacity: onTap == null ? .5 : 1,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: .09), shape: BoxShape.circle),
+                  child: Icon(icon, color: AppColors.primary, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(title, style: const TextStyle(fontFamily: _font, fontSize: 14, fontWeight: FontWeight.w700)),
+                ),
+                if (trailing != null) ...[trailing!, const SizedBox(width: 8)],
+                Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
+              ]),
+            ),
           ),
         ),
       );
