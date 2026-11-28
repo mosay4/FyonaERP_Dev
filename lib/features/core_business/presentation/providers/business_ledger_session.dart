@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/di/providers.dart' show secureStorageProvider;
 import '../../../../core/services/currency/currency_engine.dart';
+import '../../../../core/utils/document_number.dart';
 import '../../../branches/data/branch_scope.dart';
 import '../../../employees/presentation/providers/employee_providers.dart';
 import '../../data/local_directory/directory_database.dart';
@@ -63,6 +64,13 @@ Future<BusinessDebtProjection> loadLocalDebts(
       dateTo: dateTo,
     ),
   );
+  // Short, sequential document numbers on these screens (OPEN-208).
+  if (rows.any((r) => DocumentSerials.missing(r['number']))) {
+    try {
+      DocumentSerials.put(await withBusinessLedger(
+          ref, scope, BusinessLedgerAction.readDebt, const [], (ledger, grant) => ledger.documentSerials(grant)));
+    } catch (_) {}
+  }
   return BusinessDebtProjection(rows);
 }
 

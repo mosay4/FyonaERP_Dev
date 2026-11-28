@@ -5,6 +5,7 @@ import 'package:uuid/enums.dart';
 import '../../../../core/services/currency/currency_engine.dart' show currencyEngineProvider;
 
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/document_number.dart';
 import '../../../branches/data/branch_epoch.dart';
 import '../../../branches/data/branch_scope.dart';
 import '../../../dashboard/data/business_finance_api.dart';
@@ -278,6 +279,7 @@ final class LocalCommerceBridge {
       ),
     );
     _require(permissions);
+    await documentSerials(rows.map((r) => r['number']));
     final projection = BusinessDebtProjection(rows);
     return {'debts': projection.perCurrency, 'items': projection.operations};
   }
@@ -1125,14 +1127,32 @@ final class LocalCommerceBridge {
         permissions.addAll(entry.value);
       }
     }
-    return _read(
+    // A short number typed in the search (OPEN-208) finds its document.
+    final full = search == null ? null : DocumentSerials.full(search);
+    final rows = await _read(
       {BusinessLedgerAction.readOperations}, permissions.toList(),
       (ledger, grant) => ledger.operations(
-        grant, allowedKinds: visible, kind: kind, period: period, search: search,
+        grant, allowedKinds: visible, kind: kind, period: period, search: full ?? search,
         dateFrom: dateFrom, dateTo: dateTo, sourceId: sourceId,
         sourceType: sourceType, limit: limit,
       ),
     );
+    await documentSerials(rows.map((r) => r['ref'] ?? r['reference'] ?? r['number']));
+    return rows;
+  }
+
+  /// Reads the branch's sequential document numbers again when [numbers]
+  /// holds one not known yet (a new or synced document).
+  Future<void> documentSerials([Iterable<Object?>? numbers]) async {
+    if (numbers != null && !numbers.any(DocumentSerials.missing)) return;
+    try {
+      DocumentSerials.put(await _read(
+        {BusinessLedgerAction.readDebt}, const [],
+        (ledger, grant) => ledger.documentSerials(grant),
+      ));
+    } catch (_) {
+      // Without the right to read operations the long short-code stays.
+    }
   }
 
   /// Barcode → product/unit in the connected scanner contract.

@@ -13,6 +13,10 @@ String shortDocumentNumber(Object? raw, {String? uuidPrefix}) {
   final value = '${raw ?? ''}'.trim();
   if (value.isEmpty || value == 'null') return '';
   final dated = _dated.firstMatch(value);
+  // In order of creation (owner, 28-11): OPEN-208, INV-15 — known once the
+  // branch's documents were read (DocumentSerials).
+  final serial = dated == null ? null : DocumentSerials.of(value);
+  if (serial != null) return '${dated![1]!.toUpperCase()}-$serial';
   if (dated != null) {
     return '${dated[1]!.toUpperCase()}-${dated[2]!.substring(0, 8).toUpperCase()}';
   }
@@ -27,3 +31,32 @@ final _dated = RegExp(r'^([A-Za-z]{2,5})-\d{8}-([0-9A-Fa-f]{32})$');
 final _uuid = RegExp(
   r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
 );
+
+/// Sequential numbers of the branch's device documents, per kind (INV,
+/// PUR, OPEN, RET…), in the order they were made. Read from the ledger
+/// (the stored number stays the long unique one: two phones offline never
+/// collide); the screens show `OPEN-208` instead of a long code.
+abstract final class DocumentSerials {
+  static final _of = <String, int>{};
+  static final _back = <String, String>{};
+
+  static void put(Map<String, int> serials) {
+    _of
+      ..clear()
+      ..addAll(serials);
+    _back
+      ..clear()
+      ..addAll({for (final e in serials.entries) '${e.key.split('-').first}-${e.value}': e.key});
+  }
+
+  static int? of(String number) => _of[number.trim().toUpperCase()];
+
+  /// Whether [number] is a device document number not read yet.
+  static bool missing(Object? number) {
+    final v = '${number ?? ''}'.trim();
+    return _dated.hasMatch(v) && !_of.containsKey(v.toUpperCase());
+  }
+
+  /// The full number a short one (`OPEN-208`) stands for, for search.
+  static String? full(String short) => _back[short.trim().toUpperCase()];
+}

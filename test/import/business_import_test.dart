@@ -196,6 +196,9 @@ void main() {
         branches: {scope.branchId}, images: images.names, defaultCurrency: 'SAR');
     expect(review.rows[1].warnings, ['image_missing']);
     expect(review.rows[2].reasons, ['other_branch']);
+    // Another branch of the file is not an error: its own group.
+    expect(review.rows[2].status, RowStatus.elsewhere);
+    expect(review.skippedCount, 0);
     final media = <String>[];
     final imp = BusinessImporter(
       store: store, access: scope, registry: registry,
@@ -334,6 +337,44 @@ void main() {
     await store.remember(scope, _entitlement());
     await importer().apply(p, fileSha: sha, fileName: 'again.csv');
     expect(await store.search(scope, DirectoryPartyKind.customer, 'عميل مستعاد'), hasLength(1));
+  });
+
+  test('the same file again: what it added shows as already there (not an error), only new rows are added, cash is not deposited twice',
+      () async {
+    final (t, sha) = await file('again2.csv', 'الاسم,الجوال,الرصيد,العملة\nعميل 1,0501,10,SAR\nعميل 2,0502,0,\n');
+    final (ta, shaA) = await file('cash2.csv', 'الحساب,الرصيد,العملة\nالصندوق,900,SAR\n');
+    final imp = importer();
+    Future<ImportReview> review(ImportTable table, ImportTarget target, String key) async => ImportReview.load(
+        table, target, autoMapColumns(target, table.columns),
+        defaultCurrency: 'SAR', enabledCurrencies: {'SAR'},
+        existing: await imp.existingNames(), imported: await imp.importedRows(key, target));
+    // First time: row 2 left out by the user.
+    var r = await review(t, ImportTarget.parties, sha);
+    r.setRejected([r.rows[1]], true);
+    await imp.apply(r.toPreview(), fileSha: sha, fileName: 'again2.csv');
+    await imp.apply((await review(ta, ImportTarget.accounts, shaA)).toPreview(), fileSha: shaA, fileName: 'cash2.csv');
+    expect(await imp.importedRows(sha, ImportTarget.parties), {1});
+    // Again: row 1 is "already imported", row 2 can now be added.
+    r = await review(t, ImportTarget.parties, sha);
+    expect(r.rows[0].reasons, ['already_imported']);
+    expect(r.rows[0].status, RowStatus.present);
+    expect(r.rows[1].status, RowStatus.add);
+    expect(r.skippedCount, 0);
+    await imp.apply(r.toPreview(), fileSha: sha, fileName: 'again2.csv');
+    expect(await store.search(scope, DirectoryPartyKind.customer, 'عميل'), hasLength(2));
+    // A third time: everything is already there; nothing is an error.
+    r = await review(t, ImportTarget.parties, sha);
+    expect(r.acceptedCount, 0);
+    expect(r.countOf(RowStatus.present), 2);
+    expect(r.skippedCount, 0);
+    // The cash box of the same file: already there, never deposited twice.
+    final cash = await review(ta, ImportTarget.accounts, shaA);
+    expect(cash.rows.single.status, RowStatus.present);
+    expect(cash.acceptedCount, 0);
+    await expectLater(imp.apply(cash.toPreview(), fileSha: shaA, fileName: 'cash2.csv'),
+        throwsA(isA<ImportRefused>().having((e) => e.code, 'code', 'already_imported')));
+    final rows = await store.withLedger(grant, () => scope, (l) => l.managedBankAccounts(grant, includeBalances: true));
+    expect(rows.where((a) => a['bank_name'] == 'كاش').single['balance_minor'], 90000);
   });
 
   // FYONA_IMPORT_PRODUCTS_BENCH=10000: products with prices in two

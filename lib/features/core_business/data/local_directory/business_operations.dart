@@ -13,6 +13,27 @@ const _visibleBankLeg =
 ''';
 
 extension BusinessOperations on BusinessLedger {
+  /// Every device document number of the branch → its place among the
+  /// documents of its kind (prefix), in creation order: the short,
+  /// sequential number people see (OPEN-208). Deleted ones keep their place
+  /// so the numbers never shift.
+  Future<Map<String, int>> documentSerials(BusinessLedgerAccess access) {
+    final branch = _branch(access, BusinessLedgerAction.readDebt);
+    return _directory._read((db) async {
+      final rows = await db.rawQuery('''
+        WITH docs(number, created_us) AS (
+          SELECT number, created_us FROM $_commerceInvoices WHERE branch_id = ?
+          UNION ALL SELECT number, created_us FROM $_commerceReturns WHERE branch_id = ?
+          UNION ALL SELECT number, created_us FROM ${BusinessLedger._debts} WHERE branch_id = ?
+        )
+        SELECT number, ROW_NUMBER() OVER (
+          PARTITION BY substr(number, 1, instr(number, '-')) ORDER BY created_us, number) AS n
+        FROM docs WHERE number IS NOT NULL AND instr(number, '-') > 1
+      ''', [branch, branch, branch]);
+      return {for (final r in rows) '${r['number']}'.toUpperCase(): (r['n'] as num).toInt()};
+    });
+  }
+
   Future<List<Map<String, dynamic>>> operations(
     BusinessLedgerAccess access, {
     required Set<String> allowedKinds,

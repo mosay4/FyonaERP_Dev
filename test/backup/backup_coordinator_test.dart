@@ -380,6 +380,13 @@ void main() {
       expect(fresh, isNotNull);
       expect(fresh!.name, isNot(first.name));
       expect(fresh.size, greaterThan(first.size));
+      // It replaced the newest file (owner, 28-11): still one file, the
+      // latest data in it — no new copy per change.
+      expect((await c.deviceFiles(s)).map((f) => f.name), [fresh.name]);
+      // "Back up now" adds a copy of its own.
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      await c.saveToDevice(s);
+      expect(await c.deviceFiles(s), hasLength(2));
       // Automatic backup off: changes do not touch the folder.
       await c.configure(s.id, enabled: false);
       await write(s.dbPath, "INSERT INTO t VALUES (999, 'z', 1)");

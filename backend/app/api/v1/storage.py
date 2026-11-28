@@ -128,15 +128,19 @@ async def _download(tenant: str, body: DownloadIn) -> dict:
 
 async def _list_backups(tenant: str) -> dict:
     cfg = _cfg()
-    rows = await r2.list_prefix(cfg, f"t/{tenant}/b/")
+    rows = await r2.list_objects(cfg, f"t/{tenant}/b/")
     backups: dict[str, dict] = {}
-    for key, size in rows:
+    for key, size, when in rows:
         parts = key.split("/")
         if len(parts) < 5:
             continue
-        b = backups.setdefault(parts[3], {"backup_id": parts[3], "parts": 0, "bytes": 0, "complete": False})
+        b = backups.setdefault(parts[3], {"backup_id": parts[3], "parts": 0, "bytes": 0, "complete": False,
+                                          "updated": ""})
         b["parts"] += 1
         b["bytes"] += size
+        # When the set last changed (continuous backup keeps adding to it).
+        if when > b["updated"]:
+            b["updated"] = when
         if parts[4] == "manifest.enc":
             b["complete"] = True
     return {"success": True, "data": {"backups": sorted(backups.values(), key=lambda b: b["backup_id"])}}

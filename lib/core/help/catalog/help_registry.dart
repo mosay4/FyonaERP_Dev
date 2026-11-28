@@ -1,4 +1,5 @@
 import 'help_catalog.dart';
+import 'help_catalog_backup.dart';
 import 'help_catalog_business.dart';
 import 'help_catalog_common.dart';
 import 'help_catalog_gaps.dart';
@@ -17,6 +18,7 @@ class HelpRegistry {
     kHelpBusiness,
     kHelpOperations,
     kHelpSettings,
+    kHelpBackup,
     kHelpGaps,
     kHelpCommon,
   ];

@@ -5,6 +5,7 @@ import '../../../../shared/widgets/invoice_amount.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/utils/document_number.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/services/currency/enabled_currencies_service.dart';
@@ -1085,7 +1086,7 @@ class _MerchantDebtOverviewPageState
       titlePrefix: l10n.translate('debtInvoiceWord'),
       onTap: () => context.push(
           '/personal/debt-operation?link=$linkId&inv=${op['id']}'
-          '&name=${Uri.encodeComponent('${op['number'] ?? ''}')}'),
+          '&name=${Uri.encodeComponent(shortDocumentNumber(op['number']))}'),
     );
   }
 
@@ -1330,7 +1331,7 @@ class _DebtSectionPageState extends ConsumerState<DebtSectionPage> {
                             onTap: () => context.push(
                                 '/personal/debt-operation?link=${widget.linkId}'
                                 '&inv=${op['id']}'
-                                '&name=${Uri.encodeComponent('${op['number'] ?? ''}')}'),
+                                '&name=${Uri.encodeComponent(shortDocumentNumber(op['number']))}'),
                           ),
                     ],
                   ),
@@ -1475,7 +1476,7 @@ class _DebtOperationDetailPageState
                   : '/personal/chat?link=$_chatLinkId'),
             ),
         ],
-        title: Text('${d?['number'] ?? widget.name}',
+        title: Text(d?['number'] == null ? widget.name : shortDocumentNumber(d!['number']),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(

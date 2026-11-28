@@ -162,6 +162,20 @@ class BusinessImporter {
     return store.withLedger(g, () => access, (l) => l.importExistingKeys(g, importFold));
   }
 
+  /// File rows of [fileSha] already imported into this branch (an earlier
+  /// batch of the same file whose records are still there). Rows that
+  /// batch could not save are not included: they can be added now.
+  Future<Set<int>> importedRows(String fileSha, ImportTarget target) async {
+    final id = batchIdFor(fileSha, target);
+    final prior = await registry.batch(id);
+    if (prior == null || prior['status'] == 'undone') return const {};
+    if (prior['status'] == 'done' && !await _stillThere(id)) return const {};
+    return {
+      for (final r in await registry._db.query('import_items', columns: ['row_no'], where: 'batch_id = ?', whereArgs: [id]))
+        (r['row_no'] as num).toInt(),
+    };
+  }
+
   Future<String> apply(
     ImportPreview preview, {
     required String fileSha,
@@ -178,8 +192,15 @@ class BusinessImporter {
       await db.delete('import_batches', where: 'id = ?', whereArgs: [id]);
       prior = null;
     }
-    if (prior != null && prior['status'] != 'applying') {
-      throw ImportRefused(prior['status'] == 'undone' ? 'already_undone' : 'already_imported');
+    if (prior != null && prior['status'] == 'undone') throw const ImportRefused('already_undone');
+    if (prior != null && prior['status'] == 'done') {
+      // The same file again: only rows that batch did not save (new rows
+      // the user fixed, or rows refused then). What it saved is never
+      // written twice.
+      final had = await importedRows(fileSha, preview.target);
+      preview = preview.without(had);
+      if (preview.ready == 0) throw const ImportRefused('already_imported');
+      await db.update('import_batches', {'status': 'applying'}, where: 'id = ?', whereArgs: [id]);
     }
     final now = DateTime.now().toUtc().microsecondsSinceEpoch;
     if (prior == null) {

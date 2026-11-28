@@ -396,6 +396,20 @@ class ImportPreview {
         ImportTarget.products => products.length,
         ImportTarget.accounts => accounts.length,
       };
+
+  /// The same preview without the file rows [done] (already imported).
+  ImportPreview without(Set<int> done) {
+    if (done.isEmpty) return this;
+    final p = ImportPreview(target, mapping, currency: currency)
+      ..rows = rows
+      ..issueCount = issueCount;
+    p.parties.addAll(parties.where((r) => !done.contains(r.row)));
+    p.products.addAll(products.where((r) => !done.contains(r.row)));
+    p.accounts.addAll(accounts.where((r) => !done.contains(r.row)));
+    p.issues.addAll(issues);
+    p.totals.addAll(totals);
+    return p;
+  }
 }
 
 /// Checks every row of [table] with [mapping] (see [ImportReview]) and
@@ -455,7 +469,23 @@ class ReviewRow {
   List<(String?, int)> more = const [];
   bool get accepted => reasons.isEmpty && !rejectedByUser;
   String? operator [](String field) => values[field];
+
+  /// Where the row stands: added; already in FYONA (same card / product /
+  /// account, or imported before from this very file — not an error);
+  /// belongs to another branch of the file (imported only into the FYONA
+  /// branch chosen for it); or not added (a real problem, or left out).
+  RowStatus get status => accepted
+      ? RowStatus.add
+      : reasons.contains('other_branch')
+          ? RowStatus.elsewhere
+          : reasons.any(presentReasons.contains)
+              ? RowStatus.present
+              : RowStatus.skipped;
+
+  static const presentReasons = {'already_imported', 'exists', 'barcode_exists'};
 }
+
+enum RowStatus { add, present, elsewhere, skipped }
 
 /// The review behind the import screen: every row of one table, mapped to
 /// FYONA fields, checked by the same rules again after every edit.
@@ -502,11 +532,13 @@ class ImportReview {
     PartyParts? partyParts,
     Map<String, String> currencyCodes = const {},
     void Function(int rows)? onRows,
+    Set<int> imported = const {},
   }) async {
     final r = ImportReview._(table, target, Map.of(mapping), defaultKind, defaultCurrency, existing,
         {for (final b in branches) importFold(b)}, {for (final i in images) i.toLowerCase()}, enabledCurrencies)
       ..blobImages = blobImages
-      ..currencyCodes = currencyCodes;
+      ..currencyCodes = currencyCodes
+      ..imported = imported;
     final idx = {for (final e in r.mapping.entries) e.key: table.columns.indexOf(e.value)}..removeWhere((_, v) => v < 0);
     final keyIdx = parts?.keyColumn != null
         ? table.columns.indexOf(parts!.keyColumn!)
@@ -636,6 +668,16 @@ class ImportReview {
   int get acceptedCount => rows.where((r) => r.accepted).length;
   int get refusedCount => rows.length - acceptedCount;
 
+  /// File rows this branch already has from an earlier import of the very
+  /// same file (shown as "already in FYONA", never added twice).
+  Set<int> imported = const {};
+
+  int countOf(RowStatus st) => rows.where((r) => r.status == st).length;
+
+  /// Rows that are not added because of a real problem (or left out by
+  /// the user) — not those already in FYONA or of another branch.
+  int get skippedCount => countOf(RowStatus.skipped);
+
   /// Refused rows grouped by their first reason (for the red section).
   Map<String, int> get refusedByReason {
     final out = <String, int>{};
@@ -670,7 +712,17 @@ class ImportReview {
       // Another branch of the file first: the row is not for this branch
       // whatever else is wrong with it.
       final b = r['branch'];
-      if (b != null && branches.isNotEmpty && !branches.contains(importFold(importKey(b)))) reasons.add('other_branch');
+      if (b != null && branches.isNotEmpty && !branches.contains(importFold(importKey(b)))) {
+        r.reasons = const ['other_branch'];
+        r.warnings = const [];
+        continue;
+      }
+      // Imported before from this same file: already in FYONA as it is.
+      if (imported.contains(r.row)) {
+        r.reasons = const ['already_imported'];
+        r.warnings = const [];
+        continue;
+      }
       if (name == null) reasons.add('missing_name');
       if (r.joinProblem != null) reasons.add(r.joinProblem!);
       if (target == ImportTarget.accounts) {

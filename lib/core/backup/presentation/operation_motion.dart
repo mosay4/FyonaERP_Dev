@@ -156,7 +156,7 @@ class _MotionScreenState extends State<_MotionScreen> with TickerProviderStateMi
   IconData get _icon => switch (widget.kind) {
         MotionKind.deviceRestore => Icons.phone_android_rounded,
         MotionKind.cloudRestore => Icons.cloud_download_rounded,
-        MotionKind.smartImport => Icons.auto_awesome_rounded,
+        MotionKind.smartImport => Icons.move_to_inbox_rounded,
         MotionKind.backup => Icons.shield_rounded,
       };
 
@@ -394,7 +394,12 @@ abstract final class _Sfx {
   }
 
   static Future<void> start() => _play('audio/restore_start.wav', .55);
+  static Future<void> any(String src, double volume) => _play(src, volume);
   static Future<void> tick() => _play('audio/restore_tick.wav', .35);
   static Future<void> done() => _play('audio/restore_done.wav', .7);
   static Future<void> fail() => _play('audio/restore_fail.wav', .5);
 }
+
+/// A motion cue from outside the operation screen (e.g. Sara's scan in the
+/// import window): same gate as the motion's own sounds.
+Future<void> playMotionSound(String src, {double volume = .5}) => _Sfx.any(src, volume);

@@ -32,6 +32,10 @@ class ImportSession {
   /// Names / codes already in the FYONA branch (the "exists" check).
   Set<String> existing = const {};
 
+  /// Per table: file rows this branch already has from an earlier import
+  /// of this same file (they show as "already in FYONA").
+  Map<String, Set<int>> imported = const {};
+
   final reviews = <TableAnalysis, ImportReview>{};
 
   /// Sara's value changes (prices, a field for all rows, rows left out):
@@ -74,18 +78,54 @@ class ImportSession {
   List<TableAnalysis> get forSara =>
       [for (final a in analysis) if (a.by != 'user' && (a.role == TableRole.unknown || a.confidence < .9)) a];
 
-  Future<int> applySara(List<Map<String, dynamic>> answers) async {
-    final n = await applySaraSchema(analysis, answers, context: context);
+  /// Tables Sara changed, with the system's arrangement before her (one
+  /// tap puts a table back). Sara only suggests: the user decides.
+  final saraBefore = <TableAnalysis, SaraUndo>{};
+
+  /// Applies Sara's reading; returns how many tables she changed.
+  Future<int> applySara(List<Map<String, dynamic>> answers, {bool everything = false}) async {
+    final before = {
+      for (final a in analysis)
+        a: SaraUndo(a.role, Map.of(a.mapping), a.by, a.confidence, a.reason),
+    };
+    await applySaraSchema(analysis, answers, context: context, everything: everything);
+    var changed = 0;
+    for (final a in analysis) {
+      final b = before[a]!;
+      final same = a.role == b.role && a.mapping.length == b.mapping.length &&
+          a.mapping.entries.every((e) => b.mapping[e.key] == e.value);
+      if (a.by == 'sara' && !same) {
+        saraBefore.putIfAbsent(a, () => b);
+        changed++;
+      }
+    }
     reviews.clear();
-    return n;
+    return changed;
+  }
+
+  /// Back to how the system placed [a] before Sara.
+  Future<void> revertSara(TableAnalysis a) async {
+    final b = saraBefore.remove(a);
+    if (b == null) return;
+    a
+      ..role = b.role
+      ..mapping = Map.of(b.mapping)
+      ..by = b.by
+      ..confidence = b.confidence
+      ..reason = b.reason
+      ..link = null;
+    await linkImportSchema(analysis, context: context);
+    reviews.clear();
   }
 
   Future<void> setRole(TableAnalysis a, TableRole role) async {
+    saraBefore.remove(a); // the user's own choice from now on
     await setTableRole(analysis, a, role, context: context);
     reviews.clear();
   }
 
   void setMapping(TableAnalysis a, Map<String, String> mapping) {
+    saraBefore.remove(a);
     a.mapping = mapping;
     reviews.clear();
   }
@@ -125,6 +165,7 @@ class ImportSession {
           parts: parts,
           partyParts: party,
           currencyCodes: context.currencyCodes,
+          imported: imported[a.table.name] ?? const {},
           onRows: (n) => onRows?.call(a.table.name, n));
       for (final o in _valueOps) {
         _applyValue(o, {a: reviews[a]!});
@@ -246,4 +287,14 @@ class ImportSession {
     }
     return false;
   }
+}
+
+/// How a table was placed before Sara changed it.
+class SaraUndo {
+  const SaraUndo(this.role, this.mapping, this.by, this.confidence, this.reason);
+  final TableRole role;
+  final Map<String, String> mapping;
+  final String by;
+  final double confidence;
+  final String? reason;
 }

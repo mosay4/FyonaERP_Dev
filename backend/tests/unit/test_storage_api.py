@@ -184,3 +184,38 @@ def test_real_r2_round_trip_through_the_api(monkeypatch):
     assert f"/u_{user.hex}/" in urlparse(dl["url"]).path
     import asyncio
     asyncio.run(r2.delete(r2.R2Config.from_env(), f"t/u_{user.hex}/m/{sha}"))
+
+
+def test_backup_list_follows_every_page(monkeypatch):
+    """A business backup with thousands of parts (product pictures): the
+    size and the set itself come from every listing page, not the first 1000."""
+    import asyncio
+
+    keys = [f"t/o/b/bk-20261128-170200-aaaaaa/m-{i:05d}" for i in range(2499)]
+    keys.append("t/o/b/bk-20261128-170200-aaaaaa/manifest.enc")
+    pages = [keys[i:i + 1000] for i in range(0, len(keys), 1000)]
+
+    class _R:
+        def __init__(self, text):
+            self.text = text
+
+        def raise_for_status(self):
+            pass
+
+    async def fake_request(cfg, method, key, q=None, **kw):
+        n = int(q.get("continuation-token", "0"))
+        body = "".join(f"<Contents><Key>{k}</Key><LastModified>2026-11-28T17:0{n}:00.000Z</LastModified>"
+                       f"<Size>1000</Size></Contents>" for k in pages[n])
+        more = n + 1 < len(pages)
+        tail = f"<IsTruncated>{'true' if more else 'false'}</IsTruncated>"
+        if more:
+            tail += f"<NextContinuationToken>{n + 1}</NextContinuationToken>"
+        return _R(f"<ListBucketResult>{body}{tail}</ListBucketResult>")
+
+    monkeypatch.setattr(r2, "_request", fake_request)
+    monkeypatch.setattr(storage, "_cfg", lambda: FAKE)
+    out = asyncio.run(storage._list_backups("o"))["data"]["backups"]
+    assert len(out) == 1
+    assert out[0]["parts"] == 2500 and out[0]["bytes"] == 2_500_000
+    assert out[0]["complete"] is True
+    assert out[0]["updated"] == "2026-11-28T17:02:00.000Z"

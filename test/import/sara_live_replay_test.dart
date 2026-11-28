@@ -1,7 +1,7 @@
 // Sara's REAL answers (recorded from DeepSeek through FYONA's own import
 // endpoints on 2026-11-28, support/sara_live/answers.json) shown in the
-// import window: «فحص بواسطة سارة», one line to ask her, the result in the
-// check and in the review — no chat window. Also: Sara unreachable shows a
+// import window: «تحليل سارة» in the header, her changes marked on each
+// table with an undo — no chat window. Also: Sara unreachable shows a
 // clear state with «إعادة المحاولة» while manual editing stays possible.
 import 'dart:convert';
 import 'dart:io';
@@ -17,6 +17,7 @@ import 'package:fyona_flutter/core/import/presentation/smart_import_page.dart';
 import 'package:fyona_flutter/core/import/sara_mapping.dart';
 import 'package:fyona_flutter/core/localization/app_localizations.dart';
 import 'package:fyona_flutter/core/services/currency/business_currency_scope.dart';
+import 'package:fyona_flutter/core/utils/currency_formatter.dart' show currencyLabel;
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_pilot.dart';
 import 'package:fyona_flutter/features/core_business/data/local_directory/directory_scope.dart';
 
@@ -105,28 +106,22 @@ void main() {
 
     await tester.tap(find.byKey(const Key('si-sara-check')));
     await wait(tester);
-    final status = tester.widget<Text>(find.byKey(const Key('si-sara-status'))).data!;
-    expect(status, anyOf(contains('فحصت سارة'), contains('عدّلت')));
-
-    // One line to ask her: the Arabic name instead of the English one.
-    await tester.enterText(find.byKey(const Key('si-sara-ask')), 'خذ اسم الصنف العربي بدل الإنجليزي');
-    await tester.tap(find.byKey(const Key('si-sara-send')));
-    await wait(tester);
-    expect(find.text(_agent('خذ اسم الصنف العربي بدل الإنجليزي').reply), findsOneWidget);
-    await tester.scrollUntilVisible(find.byKey(const Key('si-columns-tblMstItm')), 120, scrollable: find.byType(Scrollable).first);
-    await tester.tap(find.byKey(const Key('si-columns-tblMstItm')));
-    await wait(tester);
-    expect(find.descendant(of: find.byKey(const Key('si-field-name')), matching: find.text('ItmDescA')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('si-columns-done')));
-    await wait(tester);
-
-    // She refuses to change prices: nothing changes, her reason is shown.
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, 4000));
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.enterText(find.byKey(const Key('si-sara-ask')), 'زد الأسعار 10%');
-    await tester.tap(find.byKey(const Key('si-sara-send')));
-    await wait(tester);
-    expect(find.text(_agent('زد الأسعار 10%').reply), findsOneWidget);
+    // Her result in one line; every table she changed is marked «عدّلته
+    // سارة» with «تراجع» back to the system's arrangement (no chat).
+    expect(find.textContaining(RegExp('فحصت سارة|سارة عدّلت')), findsOneWidget);
+    expect(find.byKey(const Key('si-sara-ask')), findsNothing);
+    Finder keyed(String prefix) => find.byWidgetPredicate(
+        (w) => w.key is ValueKey<String> && (w.key as ValueKey<String>).value.startsWith(prefix));
+    final marked = keyed('si-bysara-');
+    if (marked.evaluate().isNotEmpty) {
+      final name = (marked.evaluate().first.widget.key as ValueKey<String>).value.substring('si-bysara-'.length);
+      final undo = find.byKey(Key('si-sara-undo-$name'));
+      await tester.ensureVisible(undo);
+      await tester.tap(undo);
+      await wait(tester);
+      expect(find.byKey(Key('si-bysara-$name')), findsNothing);
+      expect(find.text('رجع الجدول لترتيب النظام'), findsOneWidget);
+    }
   });
 
   testWidgets('Sara unreachable: a clear state, «إعادة المحاولة», manual tools still there', (tester) async {
@@ -140,13 +135,28 @@ void main() {
     expect(find.textContaining('تعذّر الوصول إلى سارة'), findsOneWidget);
     // Manual tools stay: any table can be put in its place by hand (here
     // the items table, which the rules alone could not be sure of).
+    // (the message goes away by itself; here it is closed to reach the list)
+    ScaffoldMessenger.of(tester.element(find.byKey(const Key('si-review')))).hideCurrentSnackBar();
+    await tester.pump(const Duration(milliseconds: 600));
     final dest = find.byKey(const Key('si-dest-tblMstItm'));
-    if (dest.evaluate().isEmpty) {
-      await tester.scrollUntilVisible(find.byKey(const Key('si-excluded')), 120, scrollable: find.byType(Scrollable).first);
+    final list = find.byType(Scrollable).first;
+    // Look through the whole check (top to bottom), opening the "not
+    // imported" group when the table is there.
+    Future<bool> look() async {
+      await tester.drag(list, const Offset(0, 6000));
+      await tester.pump(const Duration(milliseconds: 300));
+      for (var i = 0; i < 60 && dest.evaluate().isEmpty; i++) {
+        await tester.drag(list, const Offset(0, -150));
+        await tester.pump(const Duration(milliseconds: 80));
+      }
+      return dest.evaluate().isNotEmpty;
+    }
+
+    if (!await look()) {
       await tester.tap(find.byKey(const Key('si-excluded')));
       await tester.pump(const Duration(milliseconds: 400));
+      await look();
     }
-    await tester.scrollUntilVisible(dest, 120, scrollable: find.byType(Scrollable).first);
     expect(dest, findsOneWidget);
     expect(find.byKey(const Key('si-review')), findsOneWidget);
   });
@@ -182,7 +192,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
     expect(find.byKey(const Key('si-rows')), findsOneWidget);
-    expect(find.text('USD'), findsWidgets);
+    expect(find.textContaining(currencyLabel('USD')), findsWidgets);
     expect(importFields[ImportTarget.products]!.any((x) => x.key == 'sku'), isFalse);
   });
 }

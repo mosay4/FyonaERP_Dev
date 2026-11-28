@@ -63,11 +63,15 @@ class BackupStatus {
 }
 
 class BackupSetInfo {
-  BackupSetInfo({required this.id, required this.local, required this.cloud, this.bytes = 0});
+  BackupSetInfo({required this.id, required this.local, required this.cloud, this.bytes = 0, this.updated});
   final String id;
   final bool local;
   final bool cloud;
   final int bytes;
+
+  /// When the cloud copy last changed (continuous backup keeps adding to
+  /// the same set): shown instead of the day the set was started.
+  final DateTime? updated;
 
   /// `bk-YYYYMMDD-HHMMSS-xxxxxx` → when the set was started (UTC).
   DateTime? get startedAt {
@@ -101,8 +105,8 @@ class BackupCoordinator {
     this.remoteFor,
     FlutterSecureStorage? vault,
     Future<Directory> Function()? root,
-    this.interval = const Duration(minutes: 2),
-    this.deviceEvery = const Duration(minutes: 5),
+    this.interval = const Duration(minutes: 1),
+    this.deviceEvery = const Duration(minutes: 1),
     this.spaceCheckEvery = const Duration(seconds: 2),
   })  : _vault = vault ??
             const FlutterSecureStorage(
@@ -298,16 +302,24 @@ class BackupCoordinator {
   Future<List<BackupSetInfo>> listSets(BackupSpace space) async {
     final local = (await LocalBackupDestination(await _sets(space.id)).sets()).toSet();
     final cloud = <String, int>{};
+    final updated = <String, DateTime>{};
     final remote = remoteFor?.call(space.section);
     if (remote != null) {
       try {
         for (final b in await remote.list()) {
-          if (b['complete'] == true) cloud['${b['backup_id']}'] = (b['bytes'] as num?)?.toInt() ?? 0;
+          if (b['complete'] != true) continue;
+          cloud['${b['backup_id']}'] = (b['bytes'] as num?)?.toInt() ?? 0;
+          final u = DateTime.tryParse('${b['updated'] ?? ''}');
+          if (u != null) updated['${b['backup_id']}'] = u.toLocal();
         }
       } catch (_) {}
     }
     final ids = {...local, ...cloud.keys}.toList()..sort((a, b) => b.compareTo(a));
-    return [for (final id in ids) BackupSetInfo(id: id, local: local.contains(id), cloud: cloud.containsKey(id), bytes: cloud[id] ?? 0)];
+    return [
+      for (final id in ids)
+        BackupSetInfo(
+            id: id, local: local.contains(id), cloud: cloud.containsKey(id), bytes: cloud[id] ?? 0, updated: updated[id]),
+    ];
   }
 
   /// Rebuilds [set] into a NEW verified ledger file next to the live one.
@@ -466,7 +478,10 @@ class BackupCoordinator {
     final t = (now ?? DateTime.now()).millisecondsSinceEpoch;
     if (t - last < deviceEvery.inMilliseconds) return null;
     try {
-      return await saveToDevice(space);
+      // The newest file follows the data (owner, 28-11): the automatic
+      // refresh replaces it instead of adding a new copy each time; "Back
+      // up now" adds a new one.
+      return await saveToDevice(space, replaceNewest: true);
     } catch (_) {
       return null; // no space / folder unavailable: tried again next tick
     }
@@ -474,7 +489,8 @@ class BackupCoordinator {
 
   /// Keeps the newest local set as one file in the FYONA folder (it
   /// survives reinstalling the app); the 3 newest files are kept.
-  Future<DeviceBackupFile?> saveToDevice(BackupSpace space, {BackupProgress? onProgress}) async {
+  Future<DeviceBackupFile?> saveToDevice(BackupSpace space, {BackupProgress? onProgress, bool replaceNewest = false}) async {
+    final before = replaceNewest ? (await deviceFiles(space)).firstOrNull : null;
     final sets = (await listSets(space)).where((s) => s.local).toList();
     if (sets.isEmpty) return null;
     final set = sets.first;
@@ -495,6 +511,11 @@ class BackupCoordinator {
       m.remove('device_dirty');
       await _save(space.id, m);
     });
+    if (before != null && before.name != name) {
+      try {
+        await DeviceBackupFolder.delete(before);
+      } catch (_) {}
+    }
     final mine = await deviceFiles(space);
     for (final old in mine.skip(3)) {
       try {

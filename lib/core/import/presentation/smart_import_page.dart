@@ -7,7 +7,6 @@ import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../features/auth/presentation/widgets/app_pin_sheet.dart';
 import '../../../features/branches/data/branch_api.dart';
@@ -21,7 +20,6 @@ import '../../../features/inventory/presentation/providers/inventory_providers.d
 import '../../backup/presentation/operation_motion.dart';
 import '../../di/providers.dart';
 import '../../localization/app_localizations.dart';
-import '../../router/route_names.dart';
 import '../../services/connectivity_service.dart';
 import '../../services/currency/business_currency_scope.dart';
 import '../../media/media_store.dart';
@@ -32,17 +30,16 @@ import '../import_schema.dart';
 import '../import_session.dart';
 import '../import_source.dart';
 import '../sara_mapping.dart';
+import 'sara_scan.dart';
+import '../../../shared/widgets/biz_currency_items.dart';
+import '../../utils/currency_formatter.dart' show currencyLabel;
 
 String _t(String key, [Map<String, dynamic>? p]) => AppLocalizations.t(key, p);
 const _font = 'Cairo';
 
-/// A currency's name when the app knows it (else just its code is shown).
-String _curName(String code) {
-  final n = _t('cur_$code');
-  return n == 'cur_$code' ? '' : n;
-}
 
-String _curLabel(String code) => _curName(code).isEmpty ? code : '${_curName(code)} ($code)';
+/// The app's one currency label: Arabic name in Arabic, code in English.
+String _curLabel(String code) => currencyLabel(code);
 
 // FYONA's own colours: the brand red for actions, green / red only to say
 // "will be added" / "will not be added".
@@ -202,11 +199,13 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
   List<String> _enabled = const [];
   final _rows = <TableAnalysis, int>{};
 
-  // Sara in the window: a button and one line to ask her (no chat).
+  // Sara: one button in the header («تحليل سارة»), no chat. She only
+  // suggests; every table she changed can be put back.
   _SaraState _sara = _SaraState.idle;
-  String? _saraText;
-  String? _saraRetry; // the request to send again (null: the full check)
-  final _ask = TextEditingController();
+
+  /// The user chose the currency of amounts without one (else the
+  /// branch's own currency is used: choosing is optional).
+  bool _currencyChosen = false;
 
   DirectoryAccess? get _scope {
     final s = ref.read(businessLocalLedgerScopeProvider);
@@ -224,7 +223,6 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
   @override
   void dispose() {
     _registry?.close();
-    _ask.dispose();
     super.dispose();
   }
 
@@ -270,11 +268,17 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
     } catch (_) {}
   }
 
-  void _snack(String text, {bool error = false}) {
+  void _snack(String text, {bool error = false, VoidCallback? retry}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    // The newest message replaces the one on screen (never queued behind).
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
       backgroundColor: error ? _red : null,
       content: Text(text, style: const TextStyle(fontFamily: _font)),
+      action: retry == null
+          ? null
+          : SnackBarAction(label: _t('si3SaraRetry'), textColor: Colors.white, onPressed: retry),
     ));
   }
 
@@ -303,51 +307,37 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
 
   // ── step 0: where to, and the file ──────────────────────────────────
 
-  /// Another FYONA branch: the app's own branch switch, then the import
-  /// opens again in that branch (nothing of the old one is kept).
-  Future<void> _pickTargetBranch(List<Map<String, dynamic>> branches) async {
-    final picked = await showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      backgroundColor: AppColors.background,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
-      builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const _Grip(),
-          _SheetTitle(icon: Icons.storefront_rounded, title: _t('si3TargetTitle'), hint: _t('si3TargetHint')),
-          Flexible(
-            child: ListView(shrinkWrap: true, children: [
-              for (final b in branches)
-                ListTile(
-                  key: Key('si-target-${b['id']}'),
-                  leading: const Icon(Icons.storefront_rounded, color: AppColors.primary),
-                  title: Text('${b['name'] ?? ''}', style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
-                  trailing: !BranchScope.allMode && b['id'] == BranchScope.branchId
-                      ? const Icon(Icons.check_circle_rounded, color: _green)
-                      : null,
-                  onTap: () => Navigator.pop(ctx, b),
-                ),
-            ]),
-          ),
-          const SizedBox(height: 12),
-        ]),
-      ),
-    );
-    if (picked == null || !mounted) return;
-    if (!BranchScope.allMode && picked['id'] == BranchScope.branchId) return;
+  /// The FYONA branch the data goes to: the app's own branch switch, done
+  /// right here (before any file), then this window follows it.
+  Future<void> _selectTarget(Map<String, dynamic> picked) async {
+    final id = '${picked['id']}';
+    if (!BranchScope.allMode && id == BranchScope.branchId) return;
     final org = BranchScope.organizationId ?? _scope?.workspace.organizationId;
     if (org == null) return;
-    final router = GoRouter.maybeOf(context);
     await _guard(() async {
       await ref.read(branchApiProvider).selectFromDrawer(
             organizationId: org,
-            branchId: '${picked['id']}',
+            branchId: id,
             all: false,
             connected: ref.read(connectivityServiceProvider).isOnline,
           );
       ref.invalidate(branchAccessProvider);
       ref.read(branchEpochProvider.notifier).state++;
-      router?.go(RouteNames.smartImport);
+      // The ledger scope follows the switch: wait for it (a moment).
+      for (var i = 0; i < 50 && ref.read(businessLocalLedgerScopeProvider)?.branchId != id; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      await _registry?.close();
+      _registry = null;
+      _session = null;
+      _file = null;
+      _currencyChosen = false;
+      try {
+        _enabled = (await ref.read(bizEnabledCurrenciesProvider.future)).toList();
+      } catch (_) {}
+      await _loadBatches();
     });
+    if (mounted) setState(() {});
   }
 
   Future<void> _pick() async {
@@ -377,6 +367,9 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
           final s = await ImportSession.analyze(tables,
               images: images,
               enabled: _enabled.toSet(),
+              // Optional choice: amounts the file leaves without a currency
+              // are in the branch's own currency until the user picks one.
+              currency: _enabled.firstOrNull,
               currentBranchName: BranchScope.branchName);
           s.existing = existing;
           stage(_t('si2StageLink'), .55);
@@ -407,155 +400,81 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
         setState(() {
           _file = f;
           _session = s;
+          _currencyChosen = false;
           _current = s.importable.firstOrNull;
           _sara = saraOk[0] == false ? _SaraState.failed : (saraOk[0] == true ? _SaraState.done : _SaraState.idle);
-          _saraText = saraOk[0] == false ? _t('si3SaraOff') : (saraOk[0] == true ? _t('si3SaraLooked') : null);
-          _saraRetry = null;
           _step = 1;
         });
       });
 
-  // ── Sara: «فحص بواسطة سارة» and one line to ask her ─────────────────
+  // ── Sara: «تحليل سارة» (a button in the header; no chat) ────────────
 
+  /// Sara reads every table and places it; the scan plays meanwhile. Her
+  /// changes are marked on each table and can be undone one by one.
   Future<void> _saraCheck() async {
     final s = _session;
-    if (s == null || _sara == _SaraState.working) return;
-    setState(() {
-      _sara = _SaraState.working;
-      _saraText = null;
-      _saraRetry = null;
-    });
-    final ans = await ref.read(smartImportSaraProvider).schema(s.analysis);
+    if (s == null || _sara == _SaraState.working || _busy) return;
+    setState(() => _sara = _SaraState.working);
+    final ans = await SaraScan.run<List<Map<String, dynamic>>?>(
+      context,
+      tables: [for (final a in s.analysis) a.table.name.split(' · ').last],
+      work: () => ref.read(smartImportSaraProvider).schema(s.analysis),
+      ok: (a) => a != null,
+      motion: widget.initialFile == null,
+    );
     if (!mounted) return;
     if (ans == null) {
-      setState(() {
-        _sara = _SaraState.failed;
-        _saraText = _t('si3SaraOff');
-      });
+      setState(() => _sara = _SaraState.failed);
+      _snack(_t('si3SaraOff'), error: true, retry: _saraCheck);
       return;
     }
-    final n = await s.applySara(ans);
-    if (_step == 2) await s.buildReviews();
+    final n = await s.applySara(ans, everything: true);
+    if (_step == 2) await _toReview();
     if (!mounted) return;
     setState(() {
       _sara = _SaraState.done;
-      _saraText = n == 0 ? _t('si3SaraAllGood', {'n': '${ans.length}'}) : _t('si3SaraChanged', {'n': '$n'});
       _current = s.importable.contains(_current) ? _current : s.importable.firstOrNull;
     });
+    _snack(n == 0 ? _t('si3SaraAllGood', {'n': '${ans.length}'}) : _t('si3SaraChanged', {'n': '$n'}));
   }
 
-  Future<void> _saraAsk([String? again]) async {
+  Future<void> _undoSara(TableAnalysis a) async {
     final s = _session;
-    final text = (again ?? _ask.text).trim();
-    if (s == null || text.isEmpty || _sara == _SaraState.working) return;
-    FocusScope.of(context).unfocus();
-    setState(() {
-      _sara = _SaraState.working;
-      _saraText = null;
+    if (s == null) return;
+    await _guard(() async {
+      await s.revertSara(a);
+      if (_step == 2) await s.buildReviews();
     });
-    final ans = await ref.read(smartImportSaraProvider).agent(text, s);
-    if (!mounted) return;
-    if (ans == null) {
-      setState(() {
-        _sara = _SaraState.failed;
-        _saraText = _t('si3SaraOff');
-        _saraRetry = text;
-      });
-      return;
-    }
-    final done = await s.applyOps(ans.ops);
-    if (_step == 2 && s.reviews.length != s.importable.length) await s.buildReviews();
-    if (!mounted) return;
-    _ask.clear();
-    setState(() {
-      _sara = _SaraState.done;
-      _saraRetry = null;
-      _saraText = ans.reply.isNotEmpty
-          ? ans.reply
-          : (done.isEmpty ? _t('si3SaraNothing') : _t('si3SaraChanged', {'n': '${done.length}'}));
-      _current = s.importable.contains(_current) ? _current : s.importable.firstOrNull;
-    });
+    _snack(_t('si4SaraUndone'));
   }
 
-  Widget _saraCard() {
+  /// «تحليل سارة» in the header: her picture and the name, nothing else.
+  Widget _saraButton() {
     final working = _sara == _SaraState.working;
-    final failed = _sara == _SaraState.failed;
-    return Container(
-      key: const Key('si-sara-card'),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: failed ? _yellow.withValues(alpha: .5) : AppColors.border),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(children: [
-          const SaraAvatar(size: 42),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(_t('si2Sara'), style: const TextStyle(fontFamily: _font, fontSize: 14.5, fontWeight: FontWeight.w800)),
-              Text(
-                working ? _t('si3SaraWorking') : (_saraText ?? _t('si3SaraHint')),
-                key: const Key('si-sara-status'),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontFamily: _font, fontSize: 12, height: 1.45, color: failed ? _yellow : AppColors.textSecondary),
-              ),
+    return Material(
+      color: Colors.white,
+      shape: const StadiumBorder(),
+      elevation: 0,
+      child: InkWell(
+        key: const Key('si-sara-check'),
+        customBorder: const StadiumBorder(),
+        onTap: working || _busy ? null : _saraCheck,
+        child: Padding(
+          padding: const EdgeInsetsDirectional.fromSTEB(4, 4, 12, 4),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Stack(alignment: Alignment.center, children: [
+              const SaraAvatar(size: 30),
+              if (working)
+                const SizedBox(
+                    width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary)),
             ]),
-          ),
-        ]),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(
-            child: SizedBox(
-              height: 44,
-              child: FilledButton.icon(
-                key: const Key('si-sara-check'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(0, 44),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                onPressed: working || _busy
-                    ? null
-                    : failed && _saraRetry != null
-                        ? () => _saraAsk(_saraRetry)
-                        : _saraCheck,
-                icon: working
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : Icon(failed ? Icons.refresh_rounded : Icons.fact_check_rounded, size: 19),
-                label: Text(failed ? _t('si3SaraRetry') : _t('si3SaraCheck'),
-                    style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800)),
-              ),
-            ),
-          ),
-        ]),
-        const SizedBox(height: 8),
-        TextField(
-          key: const Key('si-sara-ask'),
-          controller: _ask,
-          enabled: !working && !_busy,
-          textInputAction: TextInputAction.send,
-          onSubmitted: (_) => _saraAsk(),
-          style: const TextStyle(fontFamily: _font, fontSize: 13),
-          decoration: InputDecoration(
-            isDense: true,
-            filled: true,
-            fillColor: AppColors.background,
-            hintText: _t('si3SaraAskHint'),
-            hintStyle: TextStyle(fontFamily: _font, fontSize: 12.5, color: AppColors.textSecondary),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.border)),
-            enabledBorder:
-                OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.border)),
-            suffixIcon: IconButton(
-              key: const Key('si-sara-send'),
-              onPressed: working ? null : () => _saraAsk(),
-              icon: const Icon(Icons.send_rounded, color: AppColors.primary, textDirection: TextDirection.ltr),
-            ),
-          ),
+            const SizedBox(width: 7),
+            Text(_t('si4SaraButton'),
+                key: const Key('si-sara-status'),
+                style: const TextStyle(fontFamily: _font, fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.primary)),
+          ]),
         ),
-      ]),
+      ),
     );
   }
 
@@ -606,7 +525,12 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
     final s = _session;
     if (s == null) return;
     final code = await _chooseCurrency(s.currency);
-    if (code != null) setState(() => s.setCurrency(code));
+    if (code != null) {
+      setState(() {
+        _currencyChosen = true;
+        s.setCurrency(code);
+      });
+    }
   }
 
   Future<void> _pickBranch() async {
@@ -640,16 +564,44 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
     if (picked != null) setState(() => s.setSourceBranch(picked));
   }
 
+  /// The key an import batch of table [a] is kept under (file + table).
+  String _batchKey(TableAnalysis a) => '${sha256.convert(utf8.encode('$_sha|${a.table.name}|${a.role.name}'))}';
+
   Future<void> _toReview() => _guard(() async {
         final s = _session!;
-        final existing = await _importer(await _reg()).existingNames();
-        if (existing.length != s.existing.length || !existing.containsAll(s.existing)) {
+        final imp = _importer(await _reg());
+        final existing = await imp.existingNames();
+        // What this branch already has from this same file: shown as
+        // "already in FYONA", never as an error, and never added twice.
+        final imported = <String, Set<int>>{
+          for (final a in s.importable) a.table.name: await imp.importedRows(_batchKey(a), a.role.target!),
+        };
+        bool same(Map<String, Set<int>> x, Map<String, Set<int>> y) =>
+            x.length == y.length && x.entries.every((e) => y[e.key]?.length == e.value.length && y[e.key]!.containsAll(e.value));
+        if (existing.length != s.existing.length || !existing.containsAll(s.existing) || !same(imported, s.imported)) {
           s.existing = existing;
+          s.imported = imported;
           s.reviews.clear();
         }
         await s.buildReviews(onRows: (t, n) {
           if (mounted) setState(() => _progress = '$t · ${_t('siRows', {'n': '$n'})}');
         });
+        // Not chosen by the user: the currency most of the file's amounts
+        // name (one of the branch's), else the branch's own.
+        if (!_currencyChosen) {
+          final count = <String, int>{};
+          for (final r in s.reviews.values) {
+            for (final row in r.rows.take(3000)) {
+              final c = importCurrency(row['currency'], null, s.context.currencyCodes, s.enabled);
+              if (c != null && _enabled.contains(c)) count[c] = (count[c] ?? 0) + 1;
+            }
+          }
+          final best = count.entries.fold<MapEntry<String, int>?>(null, (a, e) => a == null || e.value > a.value ? e : a)?.key;
+          if (best != null && best != s.currency) {
+            s.setCurrency(best);
+            await s.buildReviews();
+          }
+        }
         setState(() {
           _current = s.reviews.keys.contains(_current) ? _current : s.reviews.keys.firstOrNull;
           _step = 2;
@@ -678,9 +630,8 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
           final p = e.value.toPreview();
           stage(_t('siImportingTable', {'t': _t('si2Role_${e.key.role.name}')}));
           progress(base / total);
-          final key = '$_sha|${e.key.table.name}|${e.key.role.name}';
           ids.add(await imp.apply(p,
-              fileSha: '${sha256.convert(utf8.encode(key))}',
+              fileSha: _batchKey(e.key),
               fileName: _file!.uri.pathSegments.last,
               onProgress: (d, n) => progress((base + d) / total)));
           refusedByRules += imp.skippedRows.length;
@@ -704,7 +655,6 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
         _session = null;
         _file = null;
         _sara = _SaraState.idle;
-        _saraText = null;
       });
     } catch (e) {
       if (widget.initialFile != null) _snack(_failure(e), error: true);
@@ -763,6 +713,7 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
                 child: Column(children: [
                   _Header(
                     step: _step,
+                    trailing: _session != null && (_step == 1 || _step == 2) ? _saraButton() : null,
                     onClose: () => Navigator.of(context).maybePop(),
                     onStep: _busy ? null : (i) => setState(() => _step = i < _step ? i : _step),
                   ),
@@ -856,16 +807,31 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
             ),
         ],
       ),
-      const SizedBox(height: 12),
-      _SettingChip(
-        key: const Key('si-target'),
-        icon: Icons.storefront_rounded,
-        label: _t('si3TargetLabel'),
-        value: needsBranch ? _t('si3TargetChoose') : (BranchScope.branchName ?? _t('si3TargetCurrent')),
-        onTap: _busy || (branches.length < 2 && !needsBranch) ? null : () => _pickTargetBranch(branches),
-        showArrow: branches.length > 1 || needsBranch,
-      ),
       const SizedBox(height: 16),
+      // Where the data goes: the owner's FYONA branches, chosen right here
+      // (before the file). One branch: it is simply the one.
+      Text(_t('si4TargetTitle'), style: const TextStyle(fontFamily: _font, fontSize: 14.5, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 8),
+      if (branches.length < 2 && !needsBranch)
+        _SettingChip(
+          key: const Key('si-target'),
+          icon: Icons.storefront_rounded,
+          label: _t('si3TargetLabel'),
+          value: BranchScope.branchName ?? _t('si3TargetCurrent'),
+          showArrow: false,
+        )
+      else
+        for (final b in branches)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _BranchCard(
+              key: Key('si-target-${b['id']}'),
+              name: '${b['name'] ?? ''}',
+              on: !BranchScope.allMode && '${b['id']}' == BranchScope.branchId,
+              onTap: _busy ? null : () => _selectTarget(b),
+            ),
+          ),
+      const SizedBox(height: 12),
       _primary(
         key: const Key('si-pick'),
         label: _t('siPick'),
@@ -928,13 +894,16 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
             ],
           ]),
           const SizedBox(height: 12),
-          _saraCard(),
-          const SizedBox(height: 12),
           _SettingChip(
             key: const Key('si-currency'),
             icon: Icons.payments_rounded,
-            label: _t('si3Currency'),
-            value: s.currency == null ? _t('si3CurrencyNone') : _curLabel(s.currency!),
+            label: _t('si4CurrencyOptional'),
+            value: s.currency == null
+                ? _t('si3CurrencyNone')
+                : _currencyChosen
+                    ? _curLabel(s.currency!)
+                    : _t('si4CurrencyAuto', {'c': _curLabel(s.currency!)}),
+            leading: s.currency == null ? null : bizCurrencyFlag(s.currency!, size: 26),
             warn: s.currency == null,
             onTap: _busy ? null : _pickCurrency,
           ),
@@ -959,6 +928,8 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
                 children: [for (final p in linked) if (p.link?.parent == a.table) p],
                 onRole: _busy ? null : _changeRole,
                 onColumns: _busy ? null : _editColumns,
+                bySara: s.saraBefore.containsKey(a),
+                onUndoSara: _busy ? null : () => _undoSara(a),
               ),
           ] else
             _Note(text: _t('si3NothingFound'), color: _yellow, icon: Icons.info_outline_rounded),
@@ -1030,25 +1001,27 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
     final keys = s.reviews.keys.toList();
     final cur = keys.contains(_current) ? _current! : keys.first;
     final total = s.readyCount;
-    final blocked = s.reviews.values.fold<int>(0, (a, r) => a + r.refusedCount);
+    final blocked = s.reviews.values.fold<int>(0, (a, r) => a + r.skippedCount);
+    // The sections side by side, each fully visible (no sideways scroll).
     return Column(children: [
-      SizedBox(
-        height: 54,
-        child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), children: [
-          for (final a in keys)
-            Padding(
-              padding: const EdgeInsetsDirectional.only(end: 8),
-              child: ChoiceChip(
+      Padding(
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
+        child: Row(children: [
+          for (final a in keys) ...[
+            Expanded(
+              child: _SectionTab(
                 key: Key('si-review-${a.table.name}'),
-                avatar: Icon(importRoleIcon(a.role), size: 18, color: a == cur ? Colors.white : AppColors.primary),
-                label: Text('${_t('si3Section_${_sectionOf(a.role)}')} · ${s.reviews[a]!.acceptedCount}',
-                    style: TextStyle(fontFamily: _font, fontSize: 12.5, fontWeight: FontWeight.w700, color: a == cur ? Colors.white : null)),
-                selected: a == cur,
-                selectedColor: AppColors.primary,
-                showCheckmark: false,
-                onSelected: (_) => setState(() => _current = a),
+                icon: importRoleIcon(a.role),
+                label: keys.where((k) => k.role == a.role).length > 1
+                    ? a.table.name.split(' · ').last
+                    : _t('si3Short_${_sectionOf(a.role)}'),
+                n: s.reviews[a]!.acceptedCount,
+                on: a == cur,
+                onTap: () => setState(() => _current = a),
               ),
             ),
+            if (a != keys.last) const SizedBox(width: 6),
+          ],
         ]),
       ),
       Expanded(
@@ -1129,7 +1102,9 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
             if (bySection[section] case final reviews?)
               Builder(builder: (_) {
                 final ok = reviews.fold<int>(0, (a, r) => a + r.acceptedCount);
-                final no = reviews.fold<int>(0, (a, r) => a + r.refusedCount);
+                final no = reviews.fold<int>(0, (a, r) => a + r.skippedCount);
+                final present = reviews.fold<int>(0, (a, r) => a + r.countOf(RowStatus.present));
+                final elsewhere = reviews.fold<int>(0, (a, r) => a + r.countOf(RowStatus.elsewhere));
                 final totals = <String, int>{};
                 for (final r in reviews) {
                   final p = r.toPreview();
@@ -1166,12 +1141,14 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
                       ),
                       Text('$ok', style: const TextStyle(fontFamily: _font, fontSize: 18, fontWeight: FontWeight.w800, color: _green)),
                     ]),
-                    if (no > 0)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(_t('si3NotAdded', {'n': '$no'}),
-                            style: const TextStyle(fontFamily: _font, fontSize: 12, color: _red, fontWeight: FontWeight.w700)),
-                      ),
+                    if (present > 0)
+                      _StatusLine(icon: Icons.verified_rounded, color: _blue, text: _t('si4PresentN', {'n': '$present'})),
+                    if (elsewhere > 0)
+                      _StatusLine(
+                          icon: Icons.call_split_rounded,
+                          color: AppColors.textSecondary,
+                          text: _t('si4ElsewhereN', {'n': '$elsewhere'})),
+                    if (no > 0) _StatusLine(icon: Icons.error_outline_rounded, color: _red, text: _t('si3NotAdded', {'n': '$no'})),
                     for (final e in totals.entries)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
@@ -1182,6 +1159,13 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
                   ]),
                 );
               }),
+          if (s.reviews.values.any((r) => r.countOf(RowStatus.elsewhere) > 0) && s.sourceBranch != null) ...[
+            _Note(
+                text: _t('si4ElsewhereHow', {'b': s.sourceBranch!}),
+                color: AppColors.textSecondary,
+                icon: Icons.call_split_rounded),
+            const SizedBox(height: 8),
+          ],
           _Note(text: _t('si3OnlyFour'), color: AppColors.textSecondary, icon: Icons.info_outline_rounded),
         ]),
       ),
@@ -1200,10 +1184,13 @@ class _SmartImportPageState extends ConsumerState<SmartImportPage> {
 // ── pieces ──────────────────────────────────────────────────────────────
 
 class _Header extends StatelessWidget {
-  const _Header({required this.step, required this.onClose, this.onStep});
+  const _Header({required this.step, required this.onClose, this.onStep, this.trailing});
   final int step;
   final VoidCallback onClose;
   final void Function(int)? onStep;
+
+  /// «تحليل سارة» (on the end side of the title).
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -1223,8 +1210,11 @@ class _Header extends StatelessWidget {
                     icon: const Icon(Icons.close_rounded, color: Colors.white)),
                 Expanded(
                   child: Text(_t('siTitle'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontFamily: _font, fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)),
                 ),
+                if (trailing != null) trailing!,
               ]),
               const SizedBox(height: 4),
               _Steps(step: step, onTap: onStep),
@@ -1306,8 +1296,18 @@ class _Count extends StatelessWidget {
 
 class _SettingChip extends StatelessWidget {
   const _SettingChip(
-      {super.key, required this.icon, required this.label, required this.value, this.onTap, this.warn = false, this.showArrow = true});
+      {super.key,
+      required this.icon,
+      required this.label,
+      required this.value,
+      this.onTap,
+      this.warn = false,
+      this.showArrow = true,
+      this.leading});
   final IconData icon;
+
+  /// Shown instead of the icon (a currency's flag).
+  final Widget? leading;
   final String label, value;
   final VoidCallback? onTap;
 
@@ -1326,7 +1326,7 @@ class _SettingChip extends StatelessWidget {
             decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16), border: Border.all(color: warn ? _yellow : AppColors.border)),
             child: Row(children: [
-              Icon(icon, size: 20, color: warn ? _yellow : AppColors.primary),
+              leading ?? Icon(icon, size: 20, color: warn ? _yellow : AppColors.primary),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1338,6 +1338,63 @@ class _SettingChip extends StatelessWidget {
                 ]),
               ),
               if (showArrow && onTap != null) Icon(Icons.expand_more_rounded, color: AppColors.textSecondary),
+            ]),
+          ),
+        ),
+      );
+}
+
+/// One line of a section's summary (already there, other branches…).
+class _StatusLine extends StatelessWidget {
+  const _StatusLine({required this.icon, required this.color, required this.text});
+  final IconData icon;
+  final Color color;
+  final String text;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Row(children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(text, style: TextStyle(fontFamily: _font, fontSize: 12, color: color, fontWeight: FontWeight.w700)),
+          ),
+        ]),
+      );
+}
+
+/// A section of the review (icon, short name, how many will be added).
+class _SectionTab extends StatelessWidget {
+  const _SectionTab({super.key, required this.icon, required this.label, required this.n, required this.on, this.onTap});
+  final IconData icon;
+  final String label;
+  final int n;
+  final bool on;
+  final VoidCallback? onTap;
+  @override
+  Widget build(BuildContext context) => Material(
+        color: on ? AppColors.primary : AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: on ? AppColors.primary : AppColors.border),
+            ),
+            child: Column(children: [
+              Icon(icon, size: 19, color: on ? Colors.white : AppColors.primary),
+              const SizedBox(height: 2),
+              Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontFamily: _font, fontSize: 11.5, fontWeight: FontWeight.w800, color: on ? Colors.white : null)),
+              Text('$n',
+                  style: TextStyle(
+                      fontFamily: _font, fontSize: 12, fontWeight: FontWeight.w800, color: on ? Colors.white : _green)),
             ]),
           ),
         ),
@@ -1381,7 +1438,18 @@ class _Note extends StatelessWidget {
 /// else), its rows, its columns, and the tables joined into it.
 class _TableCard extends StatelessWidget {
   const _TableCard(
-      {super.key, required this.analysis, this.rows, this.children = const [], this.onRole, this.onColumns});
+      {super.key,
+      required this.analysis,
+      this.rows,
+      this.children = const [],
+      this.onRole,
+      this.onColumns,
+      this.bySara = false,
+      this.onUndoSara});
+
+  /// Sara changed this table: marked, with one tap back to the system's.
+  final bool bySara;
+  final VoidCallback? onUndoSara;
   final TableAnalysis analysis;
   final int? rows;
   final List<TableAnalysis> children;
@@ -1422,7 +1490,6 @@ class _TableCard extends StatelessWidget {
                   [
                     if (rows != null) _t('si2RowsN', {'n': '$rows'}),
                     _t('siColumnsCount', {'n': '${a.table.columns.length}'}),
-                    if (a.by == 'sara') _t('siBySara'),
                   ].join(' · '),
                   style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary),
                 ),
@@ -1431,6 +1498,33 @@ class _TableCard extends StatelessWidget {
             const SizedBox(width: 6),
             _RoleChip(key: Key('si-dest-${a.table.name}'), role: a.role, onTap: onRole == null ? null : () => onRole!(a)),
           ]),
+          if (bySara) ...[
+            const SizedBox(height: 8),
+            Container(
+              key: Key('si-bysara-${a.table.name}'),
+              padding: const EdgeInsetsDirectional.fromSTEB(4, 4, 4, 4),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: .06),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(children: [
+                const SaraAvatar(size: 24),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(_t('si4BySara'),
+                      style: const TextStyle(
+                          fontFamily: _font, fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.primary)),
+                ),
+                TextButton.icon(
+                  key: Key('si-sara-undo-${a.table.name}'),
+                  style: TextButton.styleFrom(minimumSize: const Size(0, 32), padding: const EdgeInsets.symmetric(horizontal: 10)),
+                  onPressed: onUndoSara,
+                  icon: const Icon(Icons.undo_rounded, size: 17),
+                  label: Text(_t('si4UndoSara'), style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800)),
+                ),
+              ]),
+            ),
+          ],
           if (skipped) ...[
             const SizedBox(height: 8),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1487,6 +1581,49 @@ class _TableCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One FYONA branch the import can go to (a tap switches to it).
+class _BranchCard extends StatelessWidget {
+  const _BranchCard({super.key, required this.name, required this.on, this.onTap});
+  final String name;
+  final bool on;
+  final VoidCallback? onTap;
+  @override
+  Widget build(BuildContext context) => Material(
+        color: on ? AppColors.primary.withValues(alpha: .07) : AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: on ? null : onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: on ? AppColors.primary : AppColors.border, width: on ? 1.6 : 1),
+            ),
+            child: Row(children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                    color: on ? AppColors.primary : AppColors.primary.withValues(alpha: .09), shape: BoxShape.circle),
+                child: Icon(Icons.storefront_rounded, size: 19, color: on ? Colors.white : AppColors.primary),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(name,
+                    maxLines: 2,
+                    style: TextStyle(
+                        fontFamily: _font, fontSize: 14, fontWeight: on ? FontWeight.w800 : FontWeight.w600, height: 1.3)),
+              ),
+              Icon(on ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                  color: on ? AppColors.primary : AppColors.textSecondary),
+            ]),
+          ),
+        ),
+      );
 }
 
 class _RoleChip extends StatelessWidget {
@@ -1635,55 +1772,52 @@ class _CurrencyPicker extends StatelessWidget {
   const _CurrencyPicker({required this.current, this.enabled = const []});
   final String? current;
 
-  /// The business's own currencies (shown first).
+  /// The currencies of the branch the data goes to (only these are
+  /// offered: a record is saved only in one of them).
   final List<String> enabled;
   @override
-  Widget build(BuildContext context) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const _Grip(),
-          _SheetTitle(icon: Icons.payments_rounded, title: _t('si2CurrencyTitle'), hint: _t('si3CurrencyHint')),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-            child: GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-              childAspectRatio: 1.7,
-              children: [
-                // A record is saved only in one of the business's currencies.
-                for (final c in enabled.isNotEmpty ? enabled : importCurrencies)
-                  Material(
-                    color: c == current ? AppColors.primary : AppColors.surface,
-                    borderRadius: BorderRadius.circular(14),
-                    child: InkWell(
-                      key: Key('si-cur-$c'),
-                      borderRadius: BorderRadius.circular(14),
-                      onTap: () => Navigator.pop(context, c),
-                      child: Container(
-                        decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: c == current ? AppColors.primary : AppColors.border)),
-                        alignment: Alignment.center,
-                        child: Column(mainAxisSize: MainAxisSize.min, children: [
-                          Text(c,
-                              style: TextStyle(
-                                  fontFamily: _font, fontSize: 15, fontWeight: FontWeight.w800, color: c == current ? Colors.white : null)),
-                          Text(_curName(c),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontFamily: _font, fontSize: 11, color: c == current ? Colors.white70 : AppColors.textSecondary)),
-                        ]),
+  Widget build(BuildContext context) {
+    final codes = enabled.isNotEmpty ? enabled : importCurrencies;
+    return SafeArea(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const _Grip(),
+        _SheetTitle(icon: Icons.payments_rounded, title: _t('si2CurrencyTitle'), hint: _t('si3CurrencyHint')),
+        Flexible(
+          child: ListView(shrinkWrap: true, padding: const EdgeInsets.fromLTRB(14, 2, 14, 16), children: [
+            for (final c in codes)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Material(
+                  color: c == current ? AppColors.primary.withValues(alpha: .07) : AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    key: Key('si-cur-$c'),
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => Navigator.pop(context, c),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: c == current ? AppColors.primary : AppColors.border, width: c == current ? 1.6 : 1),
                       ),
+                      child: Row(children: [
+                        bizCurrencyFlag(c, size: 38),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(_curLabel(c),
+                              style: const TextStyle(fontFamily: _font, fontSize: 15, fontWeight: FontWeight.w800)),
+                        ),
+                        if (c == current) const Icon(Icons.check_circle_rounded, color: AppColors.primary),
+                      ]),
                     ),
                   ),
-              ],
-            ),
-          ),
-        ]),
-      );
+                ),
+              ),
+          ]),
+        ),
+      ]),
+    );
+  }
 }
 
 /// Which column is which field, for one table: drag a column onto a field
@@ -1875,47 +2009,28 @@ class ImportReviewView extends StatefulWidget {
   State<ImportReviewView> createState() => _ImportReviewViewState();
 }
 
+/// The review as FYONA shows records: one card per row (picture first,
+/// then the name and what matters), four clear groups — will be added,
+/// already in FYONA, other branches of the file, not added — search,
+/// sort, edit in a sheet, choose several. Built lazily (tens of
+/// thousands of rows), never scrolled sideways.
 class _ImportReviewViewState extends State<ImportReviewView> {
-  bool _refused = false;
+  RowStatus _status = RowStatus.add;
   String _query = '';
   String? _reason;
   final _selected = <int>{};
   late List<ReviewRow> _shown;
-  final _h = ScrollController();
   Timer? _typing;
   String? _sortBy;
   bool _sortUp = true;
 
   ImportReview get r => widget.review;
 
-  // What FYONA saves for this section (the file's branch column only
-  // chooses rows; it is never saved).
-  late List<String> _fields = _fieldsOf();
-
-  List<String> _fieldsOf() => [
-    for (final f in importFields[r.target]!)
-      if (f.key != 'branch' &&
-          (r.mapping.containsKey(f.key) ||
-              (f.key == 'image' && r.rows.any((x) => x['image'] != null)) ||
-              (f.key == 'currency') ||
-              (const {'sale_price', 'cost_price', 'stock', 'unit', 'balance', 'category'}.contains(f.key) &&
-                  r.rows.take(500).any((x) => x[f.key] != null))))
-        f.key,
-    if (r.rows.any((x) => x.units.isNotEmpty || x.prices.isNotEmpty)) '_units',
-    if (r.rows.any((x) => x.barcodes.isNotEmpty)) '_codes',
-  ];
-
   @override
   void didUpdateWidget(ImportReviewView old) {
     super.didUpdateWidget(old);
-    // The review was rebuilt (columns, currency or Sara changed it).
-    if (old.review != widget.review) {
-      _fields = _fieldsOf();
-      _selected.clear();
-      _filter();
-    } else {
-      _filter();
-    }
+    if (old.review != widget.review) _selected.clear();
+    _filter();
   }
 
   @override
@@ -1927,7 +2042,6 @@ class _ImportReviewViewState extends State<ImportReviewView> {
   @override
   void dispose() {
     _typing?.cancel();
-    _h.dispose();
     super.dispose();
   }
 
@@ -1935,7 +2049,7 @@ class _ImportReviewViewState extends State<ImportReviewView> {
     final q = importFold(_query);
     _shown = [
       for (final row in r.rows)
-        if (row.accepted != _refused &&
+        if (row.status == _status &&
             (_reason == null || (row.reasons.isNotEmpty ? row.reasons.first : 'rejected_by_user') == _reason) &&
             (q.isEmpty || row.values.values.any((v) => v != null && importFold(v).contains(q))))
           row,
@@ -1952,6 +2066,13 @@ class _ImportReviewViewState extends State<ImportReviewView> {
 
       _shown.sort(cmp);
     }
+  }
+
+  void _show(RowStatus st) {
+    _status = st;
+    _reason = null;
+    _selected.clear();
+    setState(_filter);
   }
 
   void _sort(String field) => setState(() {
@@ -1979,7 +2100,7 @@ class _ImportReviewViewState extends State<ImportReviewView> {
   }
 
   void _changed() {
-    setState(_filter);
+    if (mounted) setState(_filter);
     widget.onChanged();
   }
 
@@ -1996,12 +2117,15 @@ class _ImportReviewViewState extends State<ImportReviewView> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('${_t('siField_$field')} — ${_t('siRowN', {'n': '${row.row}'})}',
-            style: const TextStyle(fontFamily: _font, fontSize: 15, fontWeight: FontWeight.w800)),
+        title: Text(_t('siField_$field'), style: const TextStyle(fontFamily: _font, fontSize: 15, fontWeight: FontWeight.w800)),
         content: TextField(key: const Key('si-edit-field'), controller: ctrl, autofocus: true),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text(_t('cancel'))),
-          FilledButton(key: const Key('si-edit-save'), onPressed: () => Navigator.pop(ctx, ctrl.text), child: Text(_t('save'))),
+          FilledButton(
+              key: const Key('si-edit-save'),
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: Text(_t('save'))),
         ],
       ),
     );
@@ -2010,102 +2134,143 @@ class _ImportReviewViewState extends State<ImportReviewView> {
     _changed();
   }
 
-  double _width(String f) => switch (f) {
-        '_units' || '_codes' => 84,
-        'name' => 190,
-        'image' => 60,
-        'phone' || 'barcode' || 'category' || 'bank' || 'number' || 'iban' => 130,
-        'currency' => 92,
-        _ => 96,
-      };
+  /// The fields of this section shown in a row's sheet (branch only
+  /// chooses rows: never saved, never shown).
+  List<String> get _fields => [
+        for (final f in importFields[r.target]!)
+          if (f.key != 'branch' &&
+              (r.mapping.containsKey(f.key) || f.key == 'currency' || (f.key == 'image' && r.blobImages)))
+            f.key,
+      ];
+
+  static const _statusColor = {
+    RowStatus.add: _green,
+    RowStatus.present: _blue,
+    RowStatus.elsewhere: Color(0xFF6B7280),
+    RowStatus.skipped: _red,
+  };
+  static const _statusIcon = {
+    RowStatus.add: Icons.check_circle_rounded,
+    RowStatus.present: Icons.verified_rounded,
+    RowStatus.elsewhere: Icons.call_split_rounded,
+    RowStatus.skipped: Icons.error_outline_rounded,
+  };
+  static const _statusKey = {
+    RowStatus.add: 'si-tab-add',
+    RowStatus.present: 'si-tab-present',
+    RowStatus.elsewhere: 'si-tab-elsewhere',
+    RowStatus.skipped: 'si-tab-refused',
+  };
 
   @override
   Widget build(BuildContext context) {
-    final fields = _fields;
-    const check = 44.0, rowNo = 48.0, reasonW = 220.0;
-    final width = check + rowNo + fields.fold<double>(0, (a, f) => a + _width(f)) + reasonW + 3;
-    final reasons = r.refusedByReason;
+    final counts = {for (final st in RowStatus.values) st: r.countOf(st)};
+    final tabs = [for (final st in RowStatus.values) if (st == RowStatus.add || counts[st]! > 0) st];
+    final reasons = _status == RowStatus.skipped ? r.refusedByReason : const <String, int>{};
     return Column(children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(10, 2, 10, 0),
+        padding: const EdgeInsets.fromLTRB(10, 4, 10, 0),
         child: Row(children: [
-          Expanded(
-            child: _tab(key: 'si-tab-add', label: _t('siTabAdd', {'n': '${r.acceptedCount}'}), color: _green, on: !_refused,
-                icon: Icons.check_circle_rounded, () {
-              _refused = false;
-              _reason = null;
-              _selected.clear();
-              setState(_filter);
-            }),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _tab(key: 'si-tab-refused', label: _t('siTabRefused', {'n': '${r.refusedCount}'}), color: _red, on: _refused,
-                icon: Icons.block_rounded, () {
-              _refused = true;
-              _selected.clear();
-              setState(_filter);
-            }),
-          ),
+          for (final st in tabs) ...[
+            Expanded(child: _tab(st, counts[st]!)),
+            if (st != tabs.last) const SizedBox(width: 6),
+          ],
         ]),
       ),
-      if (_refused) ...[
-        if (widget.skipped.isNotEmpty || r.unusedColumns.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
-            child: _yellowNote([
-              for (final t in widget.skipped) t,
-              if (r.unusedColumns.isNotEmpty) _t('siSkippedColumns', {'c': r.unusedColumns.join('، ')}),
-            ].join('\n')),
+      if (_status != RowStatus.add)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+          child: _hint(switch (_status) {
+            RowStatus.present => _t('si4PresentHint'),
+            RowStatus.elsewhere => _t('si4ElsewhereHint'),
+            _ => [
+                for (final t in widget.skipped) t,
+                if (r.unusedColumns.isNotEmpty) _t('siSkippedColumns', {'c': r.unusedColumns.join('، ')}),
+                if (widget.skipped.isEmpty && r.unusedColumns.isEmpty) _t('si4SkippedHint'),
+              ].join('\n'),
+          }, _statusColor[_status]!),
+        ),
+      if (reasons.length > 1)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+          child: Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final e in reasons.entries)
+              FilterChip(
+                key: Key('si-reason-${e.key}'),
+                visualDensity: VisualDensity.compact,
+                label: Text('${_t('siIssue_${e.key}')} (${e.value})', style: const TextStyle(fontFamily: _font, fontSize: 12)),
+                selected: _reason == e.key,
+                onSelected: (v) => setState(() {
+                  _reason = v ? e.key : null;
+                  _filter();
+                }),
+              ),
+          ]),
+        )
+      else if (reasons.length == 1)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+          child: Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Text('${_t('siIssue_${reasons.keys.first}')} (${reasons.values.first})',
+                key: Key('si-reason-${reasons.keys.first}'),
+                style: const TextStyle(fontFamily: _font, fontSize: 12.5, color: _red, fontWeight: FontWeight.w800)),
           ),
-        if (reasons.isNotEmpty)
-          SizedBox(
-            height: 46,
-            child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 8), children: [
-              for (final e in reasons.entries)
-                Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: FilterChip(
-                    key: Key('si-reason-${e.key}'),
-                    avatar: const Icon(Icons.warning_amber_rounded, color: _yellow, size: 16),
-                    label: Text('${_t('siIssue_${e.key}')} (${e.value})', style: const TextStyle(fontFamily: _font, fontSize: 12)),
-                    selected: _reason == e.key,
-                    onSelected: (v) => setState(() {
-                      _reason = v ? e.key : null;
-                      _filter();
-                    }),
-                  ),
-                ),
-            ]),
-          ),
-      ],
+        ),
       Padding(
-        padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+        padding: const EdgeInsets.fromLTRB(10, 8, 6, 2),
         child: Row(children: [
           Expanded(
-            child: TextField(
-              key: const Key('si-search'),
-              decoration: InputDecoration(
-                isDense: true,
-                filled: true,
-                fillColor: AppColors.surface,
-                prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                hintText: _t('siSearch'),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.border)),
-              ),
-              onChanged: (v) {
-                _typing?.cancel();
-                _typing = Timer(const Duration(milliseconds: 250), () {
-                  if (!mounted) return;
-                  setState(() {
-                    _query = v;
-                    _filter();
+            child: SizedBox(
+              height: 44,
+              child: TextField(
+                key: const Key('si-search'),
+                style: const TextStyle(fontFamily: _font, fontSize: 13.5),
+                decoration: InputDecoration(
+                  isDense: true,
+                  filled: true,
+                  fillColor: AppColors.surface,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  hintText: _t('siSearch'),
+                  hintStyle: TextStyle(fontFamily: _font, fontSize: 13, color: AppColors.textSecondary),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.border)),
+                  enabledBorder:
+                      OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.border)),
+                ),
+                onChanged: (v) {
+                  _typing?.cancel();
+                  _typing = Timer(const Duration(milliseconds: 250), () {
+                    if (!mounted) return;
+                    setState(() {
+                      _query = v;
+                      _filter();
+                    });
                   });
-                });
-              },
+                },
+              ),
             ),
           ),
-          const SizedBox(width: 6),
+          PopupMenuButton<String>(
+            key: const Key('si-sort'),
+            tooltip: _t('si4Sort'),
+            icon: Icon(Icons.sort_rounded, color: _sortBy == null ? AppColors.textSecondary : AppColors.primary),
+            onSelected: _sort,
+            itemBuilder: (_) => [
+              for (final f in _fields)
+                if (f != 'image')
+                  PopupMenuItem(
+                    key: Key('si-sort-$f'),
+                    value: f,
+                    child: Row(children: [
+                      Expanded(child: Text(_t('siField_$f'), style: const TextStyle(fontFamily: _font))),
+                      if (_sortBy == f)
+                        Icon(_sortUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+                            size: 16, color: AppColors.primary),
+                    ]),
+                  ),
+            ],
+          ),
           if (widget.onColumns != null)
             IconButton(
               key: const Key('si-swap-columns'),
@@ -2113,11 +2278,20 @@ class _ImportReviewViewState extends State<ImportReviewView> {
               onPressed: widget.onColumns,
               icon: const Icon(Icons.swap_horiz_rounded, color: AppColors.primary),
             ),
+        ]),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 6, 0),
+        child: Row(children: [
+          Expanded(
+            child: Text(_t('siShowing', {'n': '${_shown.length}'}),
+                style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary)),
+          ),
           TextButton(
             key: const Key('si-select-all'),
-            style: TextButton.styleFrom(minimumSize: const Size(0, 40)),
+            style: TextButton.styleFrom(minimumSize: const Size(0, 34), padding: const EdgeInsets.symmetric(horizontal: 8)),
             onPressed: () => setState(() {
-              if (_selected.length == _shown.length) {
+              if (_selected.length == _shown.length && _shown.isNotEmpty) {
                 _selected.clear();
               } else {
                 _selected
@@ -2125,256 +2299,386 @@ class _ImportReviewViewState extends State<ImportReviewView> {
                   ..addAll(_shown.map((e) => e.row));
               }
             }),
-            child: Text(_t('siSelectAll'), style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
+            child: Text(_selected.isNotEmpty && _selected.length == _shown.length ? _t('si4SelectNone') : _t('siSelectAll'),
+                style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700, fontSize: 12.5)),
           ),
         ]),
       ),
       if (_selected.isNotEmpty)
-        SizedBox(
-          height: 46,
-          child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.fromLTRB(10, 2, 10, 4), children: [
-            _bulk('si-bulk', _refused ? Icons.undo_rounded : Icons.remove_circle_outline_rounded,
-                _refused ? _t('siApproveSel', {'n': '${_selected.length}'}) : _t('siRejectSel', {'n': '${_selected.length}'}), () {
-              final rows = r.rows.where((e) => _selected.contains(e.row));
-              r.setRejected(rows, !_refused);
-              _selected.clear();
-              _changed();
-            }),
-            if (widget.chooseCurrency != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+          child: Wrap(spacing: 6, runSpacing: 6, children: [
+            if (_status == RowStatus.add || (_status == RowStatus.skipped))
+              _bulk(
+                  'si-bulk',
+                  _status == RowStatus.skipped ? Icons.undo_rounded : Icons.remove_circle_outline_rounded,
+                  _status == RowStatus.skipped
+                      ? _t('siApproveSel', {'n': '${_selected.length}'})
+                      : _t('siRejectSel', {'n': '${_selected.length}'}), () {
+                final rows = r.rows.where((e) => _selected.contains(e.row));
+                r.setRejected(rows, _status != RowStatus.skipped);
+                _selected.clear();
+                _changed();
+              }),
+            if (widget.chooseCurrency != null && _status != RowStatus.elsewhere)
               _bulk('si-bulk-currency', Icons.payments_rounded, _t('si3SetCurrency', {'n': '${_selected.length}'}), _bulkCurrency),
             if (r.target != ImportTarget.accounts &&
                 r.rows.any((e) => _selected.contains(e.row) && e.reasons.contains('exists')))
               _bulk('si-bulk-rename', Icons.drive_file_rename_outline_rounded, _t('si3RenameNew'), _bulkRename),
           ]),
         ),
-      Text(_t('siShowing', {'n': '${_shown.length}'}), style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary)),
       Expanded(
-        child: Scrollbar(
-          controller: _h,
-          thumbVisibility: true,
-          child: SingleChildScrollView(
-            controller: _h,
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(
-              width: width,
-              child: Column(children: [
-                Container(
-                  height: 40,
-                  color: AppColors.surface,
-                  child: Row(children: [
-                    const SizedBox(width: check),
-                    _head('#', rowNo),
-                    for (final f in fields) _head(_t('siField_$f'), _width(f), sort: f.startsWith('_') ? null : f),
-                    _head(_refused ? _t('siWhyNot') : _t('siNotes'), reasonW),
-                  ]),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    key: const Key('si-rows'),
-                    itemExtent: 46,
-                    itemCount: _shown.length,
-                    itemBuilder: (context, i) => _row(_shown[i], fields, check, rowNo, reasonW),
-                  ),
-                ),
-              ]),
-            ),
-          ),
-        ),
+        child: _shown.isEmpty
+            ? Center(
+                child: Text(_t('si4Empty'),
+                    style: TextStyle(fontFamily: _font, fontSize: 13, color: AppColors.textSecondary)),
+              )
+            : ListView.builder(
+                key: const Key('si-rows'),
+                padding: const EdgeInsets.fromLTRB(10, 2, 10, 16),
+                itemExtent: 92,
+                itemCount: _shown.length,
+                itemBuilder: (context, i) => _card(_shown[i]),
+              ),
       ),
     ]);
   }
 
-  Widget _tab(VoidCallback onTap, {required String key, required String label, required Color color, required bool on, required IconData icon}) =>
-      InkWell(
-        key: Key(key),
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          padding: const EdgeInsets.symmetric(vertical: 11),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: on ? color : AppColors.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: on ? color : AppColors.border),
-          ),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(icon, size: 18, color: on ? Colors.white : color),
-            const SizedBox(width: 6),
-            Text(label, style: TextStyle(fontFamily: _font, fontWeight: FontWeight.w800, color: on ? Colors.white : color)),
-          ]),
-        ),
-      );
-
-  Widget _yellowNote(String text) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(10),
+  Widget _tab(RowStatus st, int n) {
+    final on = _status == st;
+    final c = _statusColor[st]!;
+    return InkWell(
+      key: Key(_statusKey[st]!),
+      onTap: () => _show(st),
+      borderRadius: BorderRadius.circular(14),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
         decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border),
+          color: on ? c : AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: on ? c : AppColors.border),
         ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(_statusIcon[st], size: 15, color: on ? Colors.white : c),
+            const SizedBox(width: 4),
+            Text('$n', style: TextStyle(fontFamily: _font, fontWeight: FontWeight.w800, fontSize: 13.5, color: on ? Colors.white : c)),
+          ]),
+          Text(_t('si4Tab_${st.name}'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontFamily: _font, fontSize: 11, fontWeight: FontWeight.w700, color: on ? Colors.white : c)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _hint(String text, Color c) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(color: c.withValues(alpha: .08), borderRadius: BorderRadius.circular(12)),
         child: Text(text,
             maxLines: 4,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary, height: 1.5)),
+            style: TextStyle(fontFamily: _font, fontSize: 12, color: c, height: 1.45, fontWeight: FontWeight.w600)),
       );
 
-  Widget _bulk(String key, IconData icon, String label, VoidCallback onTap) => Padding(
-        padding: const EdgeInsetsDirectional.only(end: 6),
-        child: ActionChip(
-          key: Key(key),
-          avatar: Icon(icon, size: 17, color: AppColors.primary),
-          label: Text(label, style: const TextStyle(fontFamily: _font, fontSize: 12.5, fontWeight: FontWeight.w700)),
-          onPressed: onTap,
-        ),
+  Widget _bulk(String key, IconData icon, String label, VoidCallback onTap) => ActionChip(
+        key: Key(key),
+        avatar: Icon(icon, size: 17, color: AppColors.primary),
+        label: Text(label, style: const TextStyle(fontFamily: _font, fontSize: 12.5, fontWeight: FontWeight.w700)),
+        onPressed: onTap,
       );
 
-  Widget _head(String text, double w, {String? sort}) => SizedBox(
-        width: w,
+  String _cur(ReviewRow row) => _curLabel(row['currency'] ?? r.defaultCurrency ?? '—');
+
+  /// What matters of a row, in one line (the rest is in its sheet).
+  String _facts(ReviewRow row) {
+    String? money(String? v) => v == null ? null : '$v ${_cur(row)}';
+    final parts = switch (r.target) {
+      ImportTarget.products => [
+          row['barcode'],
+          money(row['sale_price']),
+          if (row['stock'] != null) '${_t('siField_stock')}: ${row['stock']}',
+          if (row.units.isNotEmpty) _t('si4UnitsN', {'n': '${row.units.length}'}),
+        ],
+      ImportTarget.parties => [
+          row['phone'],
+          money(row['balance'] ?? row['debit'] ?? row['credit']),
+          for (final (c, minor) in row.more) '+ ${(minor / 100).toStringAsFixed(2)} ${_curLabel(c ?? r.defaultCurrency ?? '—')}',
+        ],
+      ImportTarget.accounts => [row['bank'], money(row['balance'])],
+    };
+    return parts.whereType<String>().where((x) => x.trim().isNotEmpty).join('  ·  ');
+  }
+
+  String _note(ReviewRow row) => row.accepted
+      ? [for (final w in row.warnings) if (w != 'multi_currency') _t('siIssue_$w')].join(' · ')
+      : [for (final x in row.reasons.isEmpty ? ['rejected_by_user'] : row.reasons) _t('siIssue_$x')].join(' · ');
+
+  IconData get _sectionIcon => switch (r.target) {
+        ImportTarget.products => Icons.inventory_2_rounded,
+        ImportTarget.accounts => Icons.account_balance_rounded,
+        ImportTarget.parties => r.defaultKind == 'supplier' ? Icons.local_shipping_rounded : Icons.person_rounded,
+      };
+
+  Widget _card(ReviewRow row) {
+    final st = row.status;
+    final c = _statusColor[st]!;
+    final picked = _selected.contains(row.row);
+    final note = _note(row);
+    final facts = _facts(row);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: picked ? AppColors.primary.withValues(alpha: .07) : AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
-          key: sort == null ? null : Key('si-sort-$sort'),
-          onTap: sort == null ? null : () => _sort(sort),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
+          key: Key('si-row-${row.row}'),
+          borderRadius: BorderRadius.circular(16),
+          onTap: _selected.isNotEmpty ? () => _toggle(row) : () => _openRow(row),
+          onLongPress: () => _toggle(row),
+          child: Container(
+            padding: const EdgeInsetsDirectional.fromSTEB(0, 8, 10, 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              // One colour all round (rounded corners need it); the row's
+              // state is the strip at its start.
+              border: Border.all(color: picked ? AppColors.primary : AppColors.border),
+            ),
             child: Row(children: [
-              Flexible(
-                child: Text(text,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontFamily: _font, fontSize: 12, fontWeight: FontWeight.w800)),
+              Container(
+                width: 4,
+                margin: const EdgeInsetsDirectional.only(end: 6),
+                decoration: BoxDecoration(
+                  color: st == RowStatus.add ? Colors.transparent : c,
+                  borderRadius: const BorderRadiusDirectional.horizontal(end: Radius.circular(4)),
+                ),
               ),
-              if (sort != null && _sortBy == sort)
-                Icon(_sortUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 14, color: AppColors.primary),
-            ]),
-          ),
-        ),
-      );
-
-  Widget _row(ReviewRow row, List<String> fields, double check, double rowNo, double reasonW) {
-    final refused = !row.accepted;
-    final more = [
-      for (final (c, minor) in row.more)
-        '+ ${(minor / 100).toStringAsFixed(2)} ${c ?? r.defaultCurrency ?? '?'}',
-    ].join('  ');
-    final note = refused
-        ? [for (final x in row.reasons.isEmpty ? ['rejected_by_user'] : row.reasons) _t('siIssue_$x')].join(' · ')
-        : [if (more.isNotEmpty) more, for (final w in row.warnings) if (w != 'multi_currency') _t('siIssue_$w')].join(' · ');
-    return Container(
-      key: Key('si-row-${row.row}'),
-      decoration: BoxDecoration(
-        color: refused ? _red.withValues(alpha: 0.07) : null,
-        border: Border(
-          bottom: BorderSide(color: AppColors.border.withValues(alpha: 0.6)),
-          left: BorderSide(color: refused ? _red : Colors.transparent, width: 3),
-        ),
-      ),
-      child: Row(children: [
-        SizedBox(
-          width: check,
-          child: Checkbox(
-            value: _selected.contains(row.row),
-            onChanged: (v) => setState(() => v == true ? _selected.add(row.row) : _selected.remove(row.row)),
-          ),
-        ),
-        SizedBox(width: rowNo, child: Text('${row.row}', style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary))),
-        for (final f in fields)
-          SizedBox(
-            width: _width(f),
-            child: InkWell(
-              key: Key('si-cell-${row.row}-$f'),
-              onTap: f.startsWith('_') ? () => _showParts(row) : () => _editCell(row, f),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: f == 'image'
-                    ? _picture(row[f])
-                    : f.startsWith('_')
-                        ? Text('${f == '_units' ? row.units.length + row.prices.length : row.barcodes.length}',
-                            style: const TextStyle(fontFamily: _font, fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.primary))
-                        : Text(f == 'currency' ? (row[f] ?? r.defaultCurrency ?? '—') : (row[f] ?? '—'),
+              if (_selected.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(end: 6),
+                  child: Icon(picked ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                      color: picked ? AppColors.primary : AppColors.textSecondary),
+                ),
+              _thumb(row),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(row['name'] ?? '—',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontFamily: _font,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: row['name'] == null ? AppColors.textSecondary : null)),
+                  if (facts.isNotEmpty)
+                    Text(facts,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontFamily: _font, fontSize: 12, color: AppColors.textSecondary)),
+                  if (note.isNotEmpty)
+                    Row(children: [
+                      Icon(st == RowStatus.add ? Icons.info_outline_rounded : _statusIcon[st], size: 13, color: st == RowStatus.add ? _yellow : c),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(note,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                                 fontFamily: _font,
-                                fontSize: 12.5,
-                                color: f == 'currency' && row[f] == null && r.defaultCurrency == null
-                                    ? _yellow
-                                    : row[f] == null
-                                        ? AppColors.textSecondary
-                                        : null)),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: st == RowStatus.add ? _yellow : c)),
+                      ),
+                    ]),
+                ]),
               ),
-            ),
+              Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary, size: 20),
+            ]),
           ),
-        SizedBox(
-          width: reasonW,
-          child: Row(children: [
-            if (note.isNotEmpty) Icon(refused ? Icons.block_rounded : Icons.info_outline_rounded, size: 15, color: refused ? _red : _yellow),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Text(note,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontFamily: _font,
-                      fontSize: 11.5,
-                      color: refused ? _yellow : AppColors.textSecondary,
-                      fontWeight: refused ? FontWeight.w800 : FontWeight.w500)),
-            ),
-          ]),
         ),
-      ]),
+      ),
     );
   }
 
-  Future<void> _showParts(ReviewRow row) => showModalBottomSheet<void>(
+  void _toggle(ReviewRow row) => setState(() => _selected.contains(row.row) ? _selected.remove(row.row) : _selected.add(row.row));
+
+  Widget _thumb(ReviewRow row, {double size = 50}) {
+    final img = row['image'];
+    final pic = img == null ? null : _picture(img, size);
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: .07),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: pic ?? Icon(_sectionIcon, color: AppColors.primary, size: size * .46),
+    );
+  }
+
+  /// One row in full: every field (tap to edit), its units / codes /
+  /// prices, and what can be done with it.
+  Future<void> _openRow(ReviewRow row) => showModalBottomSheet<void>(
         context: context,
+        isScrollControlled: true,
         backgroundColor: AppColors.background,
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-        builder: (_) => SafeArea(
-          child: ListView(padding: const EdgeInsets.all(16), shrinkWrap: true, children: [
-            Text(row['name'] ?? '', style: const TextStyle(fontFamily: _font, fontSize: 16, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 8),
-            for (final u in row.units)
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.straighten_rounded),
-                title: Text('${u['name'] ?? '—'} × ${u['factor'] ?? '1'}', style: const TextStyle(fontFamily: _font)),
-                subtitle: Text([u['barcode'], u['sale_price'], u['cost_price']].whereType<String>().join(' · ')),
-              ),
-            for (final b in row.barcodes)
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.qr_code_2_rounded),
-                title: Text(b),
-                trailing: row.droppedCodes.contains(b) ? const Icon(Icons.block_rounded, color: _yellow, size: 18) : null,
-              ),
-            for (final p in row.prices)
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.sell_rounded),
-                title: Text('${p['price'] ?? '—'} ${p['currency']}', style: const TextStyle(fontFamily: _font)),
-              ),
-          ]),
-        ),
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+        builder: (ctx) => StatefulBuilder(builder: (ctx, refresh) {
+          Future<void> edit(String f) async {
+            await _editCell(row, f);
+            refresh(() {});
+          }
+
+          final st = row.status;
+          final note = _note(row);
+          return FractionallySizedBox(
+            heightFactor: .86,
+            child: SafeArea(
+              child: Column(children: [
+                const _Grip(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: Row(children: [
+                    _thumb(row, size: 58),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(row['name'] ?? '—',
+                            style: const TextStyle(fontFamily: _font, fontSize: 16, fontWeight: FontWeight.w800, height: 1.35)),
+                        Container(
+                          margin: const EdgeInsets.only(top: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                              color: _statusColor[st]!.withValues(alpha: .1), borderRadius: BorderRadius.circular(10)),
+                          child: Text(_t('si4Tab_${st.name}'),
+                              style: TextStyle(
+                                  fontFamily: _font, fontSize: 11.5, fontWeight: FontWeight.w800, color: _statusColor[st])),
+                        ),
+                      ]),
+                    ),
+                  ]),
+                ),
+                if (note.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _hint(note, st == RowStatus.add ? _yellow : _statusColor[st]!),
+                  ),
+                Expanded(
+                  child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 12), children: [
+                    for (final f in _fields)
+                      if (f != 'image')
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: ListTile(
+                            tileColor: AppColors.surface,
+                            key: Key('si-cell-${row.row}-$f'),
+                            dense: true,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14), side: BorderSide(color: AppColors.border)),
+                            title: Text(_t('siField_$f'),
+                                style: TextStyle(fontFamily: _font, fontSize: 11.5, color: AppColors.textSecondary)),
+                            subtitle: Row(children: [
+                              if (f == 'currency' && (row[f] ?? r.defaultCurrency) != null)
+                                Padding(
+                                  padding: const EdgeInsetsDirectional.only(end: 6),
+                                  child: bizCurrencyFlag((row[f] ?? r.defaultCurrency)!, size: 20),
+                                ),
+                              Expanded(
+                                child: Text(f == 'currency' ? _cur(row) : (row[f] ?? '—'),
+                                    style: TextStyle(
+                                        fontFamily: _font,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                        color: row[f] == null && f != 'currency' ? AppColors.textSecondary : AppColors.textPrimary)),
+                              ),
+                            ]),
+                            trailing: const Icon(Icons.edit_rounded, size: 18, color: AppColors.primary),
+                            onTap: st == RowStatus.elsewhere ? null : () => edit(f),
+                          ),
+                        ),
+                    for (final u in row.units)
+                      ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.straighten_rounded, color: AppColors.primary),
+                        title: Text('${u['name'] ?? '—'} × ${u['factor'] ?? '1'}',
+                            style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
+                        subtitle: Text([u['barcode'], u['sale_price'], u['cost_price']].whereType<String>().join(' · ')),
+                      ),
+                    for (final b in row.barcodes)
+                      ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.qr_code_2_rounded, color: AppColors.primary),
+                        title: Text(b),
+                        trailing: row.droppedCodes.contains(b) ? const Icon(Icons.block_rounded, color: _yellow, size: 18) : null,
+                      ),
+                    for (final p in row.prices)
+                      ListTile(
+                        dense: true,
+                        leading: bizCurrencyFlag('${p['currency']}', size: 26),
+                        title: Text('${p['price'] ?? '—'} ${_curLabel('${p['currency']}')}',
+                            style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w700)),
+                      ),
+                  ]),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                  child: Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
+                    if (st == RowStatus.add || (st == RowStatus.skipped && row.rejectedByUser))
+                      OutlinedButton.icon(
+                        key: const Key('si-row-toggle'),
+                        style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
+                        onPressed: () {
+                          r.setRejected([row], st == RowStatus.add);
+                          _changed();
+                          refresh(() {});
+                        },
+                        icon: Icon(st == RowStatus.add ? Icons.remove_circle_outline_rounded : Icons.undo_rounded, size: 18),
+                        label: Text(st == RowStatus.add ? _t('si4Exclude') : _t('si4Include'),
+                            style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800)),
+                      ),
+                    if (r.target != ImportTarget.accounts && row.reasons.contains('exists'))
+                      OutlinedButton.icon(
+                        key: const Key('si-row-rename'),
+                        style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
+                        onPressed: () {
+                          r.renameExisting([row]);
+                          _changed();
+                          refresh(() {});
+                        },
+                        icon: const Icon(Icons.drive_file_rename_outline_rounded, size: 18),
+                        label: Text(_t('si3RenameNew'), style: const TextStyle(fontFamily: _font, fontWeight: FontWeight.w800)),
+                      ),
+                  ]),
+                ),
+              ]),
+            ),
+          );
+        }),
       );
 
   final _thumbs = <String, Uint8List?>{};
   final _loading = <String>{};
-  Widget _picture(String? name) {
-    if (name == null) return const Text('—');
+  Widget? _picture(String name, double size) {
     if (ImportImages.isBlob(name) && !_thumbs.containsKey(name)) {
       if (_loading.add(name)) {
         widget.images?.load(name).then((p) {
           if (mounted) setState(() => _thumbs[name] = p?.$1);
         });
       }
-      return const SizedBox(width: 36, height: 36, child: Icon(Icons.image_outlined, size: 18));
+      return null;
     }
     final b = _thumbs.putIfAbsent(name, () => widget.images?.read(name)?.$1);
-    if (b == null) return const Icon(Icons.image_not_supported_outlined, size: 18, color: _yellow);
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: Image.memory(b, width: 36, height: 36, cacheWidth: 72, fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined, size: 18)),
-    );
+    if (b == null) return null;
+    return Image.memory(b,
+        width: size,
+        height: size,
+        cacheWidth: (size * 2.5).round(),
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => Icon(_sectionIcon, color: AppColors.primary, size: size * .46));
   }
 }

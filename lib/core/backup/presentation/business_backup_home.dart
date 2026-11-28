@@ -158,7 +158,7 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
       error = _failure(e);
     }
     if (!mounted) return;
-    final items = [for (final s in sets) BackupListItem(s.id, s.startedAt?.toLocal() ?? DateTime.now(), s.bytes, cloud: s)]
+    final items = [for (final s in sets) BackupListItem(s.id, s.updated ?? s.startedAt?.toLocal() ?? DateTime.now(), s.bytes, cloud: s)]
       ..sort((a, b) => a.when.compareTo(b.when));
     final pick = await BackupListSheet.show(context,
         title: _t('bkhFromCloud'),
@@ -335,18 +335,27 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
           ),
         ),
         const SizedBox(height: 14),
-        _Group(children: [
-          _Tile(
-            key: const Key('bkh-device'),
-            icon: Icons.phone_android_rounded,
-            title: _t('bkhFromDevice'),
-            onTap: _busy ? null : _restoreFromDevice,
+        // The two ways to restore, side by side as squares, each in its
+        // own colour (as the screen was before; owner, 28-11).
+        Row(children: [
+          Expanded(
+            child: _Square(
+              key: const Key('bkh-device'),
+              icon: Icons.phone_android_rounded,
+              title: _t('bkhFromDevice'),
+              color: const Color(0xFF9E1B32),
+              onTap: _busy ? null : _restoreFromDevice,
+            ),
           ),
-          _Tile(
-            key: const Key('bkh-cloud'),
-            icon: Icons.cloud_download_rounded,
-            title: _t('bkhFromCloud'),
-            onTap: _busy ? null : _restoreFromCloud,
+          const SizedBox(width: 12),
+          Expanded(
+            child: _Square(
+              key: const Key('bkh-cloud'),
+              icon: Icons.cloud_download_rounded,
+              title: _t('bkhFromCloud'),
+              color: const Color(0xFF1E5AA8),
+              onTap: _busy ? null : _restoreFromCloud,
+            ),
           ),
         ]),
         const SizedBox(height: 12),
@@ -371,19 +380,26 @@ class _BusinessBackupHomeState extends ConsumerState<BusinessBackupHome> {
             child: Text(_t('bkhMoveData'),
                 style: TextStyle(fontFamily: _font, fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textSecondary)),
           ),
-          _Group(children: [
-            _Tile(
-              key: const Key('bkh-export'),
-              icon: Icons.ios_share_rounded,
-              title: _t('bkhExportBtn'),
-              onTap: _busy ? null : _openExport,
+          // Small squares, each with a moving icon that says what it does.
+          Row(children: [
+            Expanded(
+              child: _MoveSquare(
+                key: const Key('bkh-export'),
+                title: _t('bkhExportBtn'),
+                color: const Color(0xFF0F766E),
+                export: true,
+                onTap: _busy ? null : _openExport,
+              ),
             ),
-            _Tile(
-              key: const Key('bkh-import'),
-              icon: Icons.move_to_inbox_rounded,
-              title: _t('siTitle'),
-              trailing: const SaraAvatar(size: 26),
-              onTap: _busy ? null : _openImport,
+            const SizedBox(width: 12),
+            Expanded(
+              child: _MoveSquare(
+                key: const Key('bkh-import'),
+                title: _t('siTitle'),
+                color: const Color(0xFF9E1B32),
+                export: false,
+                onTap: _busy ? null : _openImport,
+              ),
             ),
           ]),
         ],
@@ -437,60 +453,216 @@ class _Hero extends StatelessWidget {
       );
 }
 
-/// Rows in one card (restore, export / import): calm and compact.
-class _Group extends StatelessWidget {
-  const _Group({required this.children});
-  final List<Widget> children;
-  @override
-  Widget build(BuildContext context) => Container(
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.border),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(children: [
-          for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) Divider(height: 1, indent: 64, color: AppColors.border),
-            children[i],
-          ],
-        ]),
-      );
-}
-
-class _Tile extends StatelessWidget {
-  const _Tile({super.key, required this.icon, required this.title, this.onTap, this.trailing});
+/// A way to restore: a square in its own colour.
+class _Square extends StatelessWidget {
+  const _Square({super.key, required this.icon, required this.title, required this.color, this.onTap});
   final IconData icon;
   final String title;
+  final Color color;
   final VoidCallback? onTap;
-  final Widget? trailing;
   @override
-  Widget build(BuildContext context) => Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          child: Opacity(
-            opacity: onTap == null ? .5 : 1,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(children: [
+  Widget build(BuildContext context) => Opacity(
+        opacity: onTap == null ? .55 : 1,
+        child: Material(
+          color: color.withValues(alpha: .07),
+          borderRadius: BorderRadius.circular(20),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: onTap,
+            child: Container(
+              height: 122,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: color.withValues(alpha: .28)),
+              ),
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                 Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: .09), shape: BoxShape.circle),
-                  child: Icon(icon, color: AppColors.primary, size: 20),
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [color, Color.lerp(color, Colors.black, .25)!]),
+                    shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: color.withValues(alpha: .3), blurRadius: 12, offset: const Offset(0, 5))],
+                  ),
+                  child: Icon(icon, color: Colors.white, size: 25),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(title, style: const TextStyle(fontFamily: _font, fontSize: 14, fontWeight: FontWeight.w700)),
-                ),
-                if (trailing != null) ...[trailing!, const SizedBox(width: 8)],
-                Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
+                const SizedBox(height: 10),
+                Text(title,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    style: TextStyle(fontFamily: _font, fontSize: 13.5, fontWeight: FontWeight.w800, color: color, height: 1.3)),
               ]),
             ),
           ),
         ),
       );
+}
+
+/// Export / smart import: a small square whose icon moves — a sheet of
+/// data leaving its box (export), rows of data dropping into the tray
+/// (import). No Sara here: she has her own place inside the import.
+class _MoveSquare extends StatefulWidget {
+  const _MoveSquare({super.key, required this.title, required this.color, required this.export, this.onTap});
+  final String title;
+  final Color color;
+  final bool export;
+  final VoidCallback? onTap;
+  @override
+  State<_MoveSquare> createState() => _MoveSquareState();
+}
+
+class _MoveSquareState extends State<_MoveSquare> with SingleTickerProviderStateMixin {
+  late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 2200));
+
+  @override
+  void initState() {
+    super.initState();
+    // Widget tests wait for the screen to settle: the icon moves in the
+    // app only.
+    if (!_inTest) _c.repeat();
+  }
+
+  static bool get _inTest => WidgetsBinding.instance.runtimeType.toString().contains('TestWidgetsFlutterBinding');
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.color;
+    return Opacity(
+      opacity: widget.onTap == null ? .55 : 1,
+      child: Material(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: widget.onTap,
+          child: Container(
+            height: 104,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: c.withValues(alpha: .25)),
+            ),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              SizedBox(
+                width: 54,
+                height: 46,
+                child: AnimatedBuilder(
+                  animation: _c,
+                  builder: (_, _) => CustomPaint(painter: _MovePainter(t: _c.value, color: c, export: widget.export)),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(widget.title,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontFamily: _font, fontSize: 12.5, fontWeight: FontWeight.w800, color: c, height: 1.25)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Export: a data sheet rises out of an open box and flies off with an
+/// arrow. Import: three rows of data drop one after another into a tray.
+class _MovePainter extends CustomPainter {
+  _MovePainter({required this.t, required this.color, required this.export});
+  final double t;
+  final Color color;
+  final bool export;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.6
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final soft = Paint()..color = color.withValues(alpha: .14);
+    // The tray / box at the bottom.
+    final tray = Path()
+      ..moveTo(w * .12, h * .58)
+      ..lineTo(w * .12, h * .92)
+      ..lineTo(w * .88, h * .92)
+      ..lineTo(w * .88, h * .58);
+    canvas.drawRRect(RRect.fromLTRBR(w * .12, h * .58, w * .88, h * .92, const Radius.circular(4)), soft);
+    canvas.drawPath(tray, stroke);
+    if (export) {
+      // The sheet rises, then lifts away with the arrow, then a new one.
+      final p = Curves.easeInOut.transform((t * 1.25).clamp(0.0, 1.0));
+      final y = h * .62 - p * h * .55;
+      final x = w * .5 + (p > .6 ? (p - .6) * w * .5 : 0);
+      final fade = p > .75 ? 1 - (p - .75) / .25 : 1.0;
+      final sheet = RRect.fromLTRBR(x - w * .17, y - h * .2, x + w * .17, y + h * .22, const Radius.circular(3));
+      canvas.save();
+      canvas.clipRect(Rect.fromLTRB(0, 0, w, h * .9));
+      canvas.drawRRect(sheet, Paint()..color = Colors.white.withValues(alpha: fade));
+      canvas.drawRRect(sheet, Paint()
+        ..color = color.withValues(alpha: fade)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2);
+      for (var i = 0; i < 3; i++) {
+        final ly = y - h * .1 + i * h * .1;
+        canvas.drawLine(Offset(x - w * .1, ly), Offset(x + w * (i == 2 ? .03 : .1), ly),
+            Paint()
+              ..color = color.withValues(alpha: .6 * fade)
+              ..strokeWidth = 1.8
+              ..strokeCap = StrokeCap.round);
+      }
+      canvas.restore();
+      // The arrow: up and out.
+      final a = Curves.easeOut.transform(((t - .35) * 2).clamp(0.0, 1.0));
+      if (a > 0 && a < 1) {
+        final o = Offset(w * .78, h * .42 - a * h * .3);
+        final arrow = Paint()
+          ..color = color.withValues(alpha: 1 - a * .8)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.6
+          ..strokeCap = StrokeCap.round;
+        canvas.drawLine(o.translate(0, h * .2), o, arrow);
+        canvas.drawLine(o, o.translate(-w * .07, h * .08), arrow);
+        canvas.drawLine(o, o.translate(w * .07, h * .08), arrow);
+      }
+    } else {
+      // Rows of data fall into the tray, one after another.
+      for (var i = 0; i < 3; i++) {
+        final k = ((t - i * .18) * 1.6).clamp(0.0, 1.0);
+        if (k <= 0) continue;
+        final p = Curves.easeIn.transform(k);
+        final target = h * (.84 - i * .09);
+        final y = -h * .1 + p * (target + h * .1);
+        final fade = t > .9 ? (1 - (t - .9) / .1) : 1.0;
+        final rw = w * (.5 - i * .06);
+        canvas.drawRRect(
+            RRect.fromLTRBR(w * .5 - rw / 2, y - h * .035, w * .5 + rw / 2, y + h * .035, const Radius.circular(3)),
+            Paint()..color = color.withValues(alpha: (.55 + i * .15) * fade));
+      }
+      // The arrow pointing in.
+      final bob = (t * 2 % 1) < .5 ? (t * 2 % 1) * 2 : 2 - (t * 2 % 1) * 2;
+      final lip = h * .58 + bob * h * .02;
+      final arrow = Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.6
+        ..strokeCap = StrokeCap.round;
+      canvas.drawLine(Offset(w * .12, lip), Offset(w * .3, lip), arrow);
+      canvas.drawLine(Offset(w * .7, lip), Offset(w * .88, lip), arrow);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_MovePainter o) => o.t != t || o.color != color;
 }
 
 class _LegacyCodeDialog extends StatefulWidget {

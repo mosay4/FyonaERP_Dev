@@ -761,9 +761,13 @@ Future<PartyParts> joinPartyParts(List<TableAnalysis> all, ImportTable parties,
 /// Applies Sara's suggestion to the tables the rules left unclear or were
 /// not sure of. Each answer is checked again here (columns exist, the
 /// required field is mapped, a part really links) before it is used.
-Future<int> applySaraSchema(List<TableAnalysis> all, List<Map<String, dynamic>> answers, {ImportContext? context}) async {
+/// [everything]: the user pressed «تحليل سارة» — her reading is applied to
+/// every table the user did not place by hand (each change can be undone
+/// back to the system's arrangement). Otherwise only unclear tables.
+Future<int> applySaraSchema(List<TableAnalysis> all, List<Map<String, dynamic>> answers,
+    {ImportContext? context, bool everything = false}) async {
   var applied = 0;
-  for (final a in all.where((a) => a.by != 'user' && (a.role == TableRole.unknown || a.confidence < .9))) {
+  for (final a in all.where((a) => a.by != 'user' && (everything || a.role == TableRole.unknown || a.confidence < .9))) {
     final ans = answers.where((x) => x['name'] == a.table.name).firstOrNull;
     if (ans == null) continue;
     final role = TableRole.values.where((r) => r.name == ans['role']).firstOrNull;

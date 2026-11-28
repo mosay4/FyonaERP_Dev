@@ -586,7 +586,9 @@ class _TxTile extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       color: AppColors.textPrimary,
                     ),
-                    maxLines: 1,
+                    // Whole, not cut (owner, 28-11): a long party name
+                    // takes a second line.
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   if (meta.isNotEmpty)
@@ -599,7 +601,7 @@ class _TxTile extends StatelessWidget {
                           fontSize: R.fontSize(context, 10.5),
                           color: AppColors.textSecondary,
                         ),
-                        maxLines: 1,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),

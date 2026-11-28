@@ -15,6 +15,7 @@ import datetime as _dt
 import hashlib
 import hmac
 import os
+import html
 import re
 from dataclasses import dataclass
 from typing import Mapping, Optional
@@ -187,12 +188,34 @@ async def delete(cfg: R2Config, key: str) -> None:
         r.raise_for_status()
 
 
-async def list_prefix(cfg: R2Config, prefix: str, limit: int = 1000) -> list[tuple[str, int]]:
-    """(key, size) under [prefix] (first [limit])."""
+async def list_prefix(cfg: R2Config, prefix: str, limit: int = 1_000_000) -> list[tuple[str, int]]:
+    """(key, size) of every object under [prefix] (all pages, up to [limit]).
+
+    One listing page holds at most 1000 keys: a backup with thousands of
+    parts (product pictures) used to be counted from the first page only,
+    so its size was short and newer sets were missing."""
+    return [(k, size) for k, size, _ in await list_objects(cfg, prefix, limit)]
+
+
+async def list_objects(cfg: R2Config, prefix: str, limit: int = 1_000_000) -> list[tuple[str, int, str]]:
+    """(key, size, last_modified ISO) under [prefix], following every page."""
     check_key(prefix)
-    r = await _request(cfg, "GET", "", {"list-type": "2", "prefix": prefix,
-                                        "max-keys": str(min(limit, 1000))})
-    r.raise_for_status()
-    keys = re.findall(r"<Key>([^<]+)</Key>", r.text)
-    sizes = re.findall(r"<Size>(\d+)</Size>", r.text)
-    return [(k, int(s)) for k, s in zip(keys, sizes)]
+    out: list[tuple[str, int, str]] = []
+    token: Optional[str] = None
+    while len(out) < limit:
+        q = {"list-type": "2", "prefix": prefix, "max-keys": "1000"}
+        if token:
+            q["continuation-token"] = token
+        r = await _request(cfg, "GET", "", q)
+        r.raise_for_status()
+        for block in re.findall(r"<Contents>(.*?)</Contents>", r.text, re.S):
+            key = re.search(r"<Key>([^<]+)</Key>", block)
+            size = re.search(r"<Size>(\d+)</Size>", block)
+            when = re.search(r"<LastModified>([^<]+)</LastModified>", block)
+            if key and size:
+                out.append((html.unescape(key.group(1)), int(size.group(1)), when.group(1) if when else ""))
+        nxt = re.search(r"<NextContinuationToken>([^<]+)</NextContinuationToken>", r.text)
+        if "<IsTruncated>true</IsTruncated>" not in r.text or not nxt:
+            break
+        token = html.unescape(nxt.group(1))
+    return out[:limit]

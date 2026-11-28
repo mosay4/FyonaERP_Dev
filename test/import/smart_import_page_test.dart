@@ -117,7 +117,7 @@ void main() {
     expect(find.byType(SaraAvatar), findsWidgets);
   });
 
-  testWidgets('review of 5 000 rows: two parts, red refused rows with the reason, edit and bulk choices', (tester) async {
+  testWidgets('review of 5 000 rows: cards in clear groups, the reason on each, edit in a sheet and bulk choices', (tester) async {
     final dir = Directory.systemTemp.createTempSync('fyona-si-review-');
     addTearDown(() => dir.deleteSync(recursive: true));
     final b = StringBuffer('name,phone,balance\n');
@@ -146,15 +146,19 @@ void main() {
     await tester.tap(find.byKey(const Key('si-tab-refused')));
     await tester.pump();
     expect(find.byKey(const Key('si-row-1')), findsOneWidget);
-    expect(find.text('رقم غير مفهوم'), findsWidgets); // the reason, in yellow
+    expect(find.textContaining('رقم غير مفهوم'), findsWidgets); // the reason on the card
     expect(find.byKey(const Key('si-reason-bad_number')), findsOneWidget);
-    // Fix row 1's balance by hand: it moves to "will be added".
+    // Fix row 1's balance by hand (its sheet): it moves to "will be added".
+    await tester.tap(find.byKey(const Key('si-row-1')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('si-cell-1-balance')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('si-edit-field')), '10');
     await tester.tap(find.byKey(const Key('si-edit-save')));
     await tester.pumpAndSettle();
     expect(review.refusedCount, 714);
+    await tester.tapAt(const Offset(20, 20)); // close the sheet
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('si-row-1')), findsNothing);
     // Search, select all shown, leave them out.
     await tester.tap(find.byKey(const Key('si-tab-add')));
