@@ -14,5 +14,6 @@ mkdir -p "$cut/socket"
 export PYTHONPATH="$PWD/backend" JWT_SECRET_KEY=ci-only-not-a-secret-key-32-chars \
   DATABASE_URL="postgresql+asyncpg://root@/fyona_cutover_fixture?host=$cut/socket" \
   REDIS_URL="unix://$cut/socket/none.sock" CELERY_BROKER_URL=memory:// \
-  CELERY_RESULT_BACKEND=cache+memory:// FYONA_TEST_CUTOVER_SOCKET="$cut/socket"
+  CELERY_RESULT_BACKEND=cache+memory:// FYONA_TEST_CUTOVER_SOCKET="$cut/socket" \
+  ALLOWED_HOSTS='["127.0.0.1","testserver","test","localhost"]'
 python -m pytest -c backend/pytest.ini -q -p no:cacheprovider "$@"

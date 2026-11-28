@@ -221,9 +221,11 @@ void main() {
   if (!DirectoryPilotBuild.signupEnabled) return;
 
   // Windows CI disks write each row slowly: there it checks a small file.
-  final shopCount = Platform.isWindows ? 200 : 5500;
+  // The full 5 500 run (FYONA_BIG_IMPORT=1) was measured on the server; CI
+  // keeps 1 500 so its shared disk is not filled next to the other big tests.
+  final shopCount = Platform.isWindows ? 200 : Platform.environment['FYONA_BIG_IMPORT'] == '1' ? 5500 : 1500;
   test('shop file ($shopCount products) imported exactly into a real branch', () async {
-    final e = await buildShopDb('${dir.path}/shop.db', products: shopCount, customers: Platform.isWindows ? 100 : 800);
+    final e = await buildShopDb('${dir.path}/shop.db', products: shopCount, customers: shopCount > 1500 ? 800 : 300);
     final file = File('${dir.path}/shop.db');
     final led = await _Ledger.open(dir);
     final sw = Stopwatch()..start();
