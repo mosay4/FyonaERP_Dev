@@ -217,7 +217,12 @@ jobs:
         shell: bash
         env:
           FYONA_OS_KILL_TEST: '1' # real SIGKILL test (runs on Linux only)
-        run: flutter test --no-pub $QA_DEFINES -r expanded test/backup test/media test/export test/import | tee backup-results.txt
+        # The import tests write thousands of rows: on the slow Windows disk
+        # they run after the timing-sensitive backup/media tests, not beside them.
+        run: |
+          set -o pipefail
+          flutter test --no-pub $QA_DEFINES -r expanded test/backup test/media test/export | tee backup-results.txt
+          flutter test --no-pub $QA_DEFINES -r expanded --concurrency=1 test/import | tee -a backup-results.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
